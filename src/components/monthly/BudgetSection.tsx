@@ -50,7 +50,7 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
       </div>
 
       {/* Column headers */}
-      <div className="grid grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+      <div className="grid grid-cols-[1fr_4.5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
         <span>פריט</span>
         <span className="text-center text-gold/80">תכנון ₪</span>
         <span className="text-center text-green-400/80">ביצוע ₪</span>
@@ -60,7 +60,7 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
       {/* Rows */}
       <div className="space-y-1">
         {rows.map(row => (
-          <div key={row.id} className="grid grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 items-center group">
+          <div key={row.id} className="grid grid-cols-[1fr_4.5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 items-center group">
             <input
               value={row.name}
               onChange={e => onUpdate(row.id, 'name', e.target.value)}

@@ -67,7 +67,7 @@ export default function AnnualPage() {
             {fmt(total)}<span className="text-xs font-normal text-muted-txt">/שנה</span>
           </span>
         </div>
-        <div className="grid grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+        <div className="grid grid-cols-[1fr_5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
           <span>פריט</span>
           <span className="text-left">שנתי ₪</span>
           <span className="text-center">÷12/חודש</span>
@@ -75,7 +75,7 @@ export default function AnnualPage() {
         </div>
         <div className="space-y-1">
           {rows.map(row => (
-            <div key={row.id} className="grid grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 items-center group">
+            <div key={row.id} className="grid grid-cols-[1fr_5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 items-center group">
               <input
                 value={row.name}
                 onChange={e => store.updateRow(section, row.id, 'name', e.target.value)}

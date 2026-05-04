@@ -81,12 +81,12 @@ export function VariablePanel({
         </button>
       </div>
 
-      {/* Column headers — widths match row layout exactly */}
+      {/* Column headers */}
       <div className="flex items-center gap-2 px-1 text-xs text-muted-txt font-medium">
         <span className="flex-1">קטגוריה</span>
-        <span className="w-24 shrink-0 text-right">פירוט</span>
-        <span className="w-24 shrink-0 text-left">סכום לתקופה ₪</span>
-        <span className="w-28 shrink-0 text-center">ממוצע/חודש</span>
+        <span className="hidden sm:block w-24 shrink-0 text-right">פירוט</span>
+        <span className="w-20 sm:w-24 shrink-0 text-left">סכום ₪</span>
+        <span className="hidden sm:block w-28 shrink-0 text-center">ממוצע/חודש</span>
         <span className="w-5 shrink-0" />
       </div>
 
@@ -108,8 +108,8 @@ export function VariablePanel({
                   placeholder="הוצאה"
                   className={`flex-1 min-w-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm placeholder:text-muted-txt focus:outline-none focus:border-gold/60 ${row.fromCredit ? 'text-gold/90' : 'text-txt'}`}
                 />
-                {/* Detail button — fixed width slot so all rows align */}
-                <div className="w-24 shrink-0">
+                {/* Detail button — hidden on mobile */}
+                <div className="hidden sm:block w-24 shrink-0">
                   {row.fromCredit && txs.length > 0 && (
                     <button
                       onClick={() => setOpenDetail(isOpen ? null : row.id)}
@@ -119,6 +119,15 @@ export function VariablePanel({
                     </button>
                   )}
                 </div>
+                {/* Mobile detail button — compact */}
+                {row.fromCredit && txs.length > 0 && (
+                  <button
+                    onClick={() => setOpenDetail(isOpen ? null : row.id)}
+                    className="sm:hidden text-xs px-1.5 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold transition-colors shrink-0"
+                  >
+                    {isOpen ? '▲' : '▶'}
+                  </button>
+                )}
                 {/* Amount input */}
                 <input
                   type="number"
@@ -126,11 +135,11 @@ export function VariablePanel({
                   onChange={e => onUpdate(row.id, 'amount', parseFloat(e.target.value) || 0)}
                   placeholder="₪"
                   min={0}
-                  className="w-24 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                  className="w-20 sm:w-24 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
                   style={{ direction: 'ltr' }}
                 />
-                {/* Monthly tag */}
-                <span className="w-28 shrink-0 text-xs text-center px-1 py-1 rounded border border-line bg-surface text-muted-txt tabular-nums whitespace-nowrap">
+                {/* Monthly tag — hidden on mobile */}
+                <span className="hidden sm:block w-28 shrink-0 text-xs text-center px-1 py-1 rounded border border-line bg-surface text-muted-txt tabular-nums whitespace-nowrap">
                   {varMonths === 1 ? fmt(row.amount) : `÷${varMonths} = ${fmt(monthly)}`}
                 </span>
                 {/* Delete */}
