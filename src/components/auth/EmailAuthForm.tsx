@@ -5,6 +5,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
@@ -29,7 +30,11 @@ export function EmailAuthForm() {
       if (mode === 'signin') {
         await signInWithEmailAndPassword(auth, email.trim(), password)
       } else if (mode === 'signup') {
-        await createUserWithEmailAndPassword(auth, email.trim(), password)
+        const cred = await createUserWithEmailAndPassword(auth, email.trim(), password)
+        await sendEmailVerification(cred.user)
+        setSuccess('חשבון נוצר! שלחנו מייל אימות — בדוק את תיבת הדואר שלך לפני הכניסה')
+        setLoading(false)
+        return
       } else {
         await sendPasswordResetEmail(auth, email.trim())
         setSuccess('קישור לאיפוס סיסמה נשלח למייל שלך')

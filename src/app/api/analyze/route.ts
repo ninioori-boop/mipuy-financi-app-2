@@ -1,26 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 
-const rateLimitMap = new Map<string, { count: number; start: number }>()
-const RATE_LIMIT = 10
-const WINDOW_MS  = 60_000
+// Per-user rate limit: 20 analyses per hour
+const userLimitMap = new Map<string, { count: number; start: number }>()
+const USER_LIMIT  = 20
+const WINDOW_MS   = 3_600_000 // 1 hour
 
-function isRateLimited(ip: string): boolean {
+function isUserLimited(uid: string): boolean {
   const now   = Date.now()
-  const entry = rateLimitMap.get(ip) ?? { count: 0, start: now }
+  const entry = userLimitMap.get(uid) ?? { count: 0, start: now }
   if (now - entry.start > WINDOW_MS) {
-    rateLimitMap.set(ip, { count: 1, start: now })
+    userLimitMap.set(uid, { count: 1, start: now })
     return false
   }
-  if (entry.count >= RATE_LIMIT) return true
+  if (entry.count >= USER_LIMIT) return true
   entry.count++
-  rateLimitMap.set(ip, entry)
+  userLimitMap.set(uid, entry)
   return false
 }
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown'
-  if (isRateLimited(ip)) {
-    return NextResponse.json({ error: 'יותר מדי בקשות — נסו שוב עוד דקה' }, { status: 429 })
+  // Verify Firebase auth token
+  const auth = req.headers.get('authorization') ?? ''
+  if (!auth.startsWith('Bearer ')) {
+    return NextResponse.json({ error: 'נדרשת התחברות' }, { status: 401 })
+  }
+  let uid: string
+  try {
+    const result = await verifyFirebaseToken(auth.slice(7))
+    uid = result.uid
+  } catch {
+    return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
+  }
+
+  if (isUserLimited(uid)) {
+    return NextResponse.json(
+      { error: 'הגעת למגבלת הניתוחים לשעה זו (20) — נסה שוב מאוחר יותר' },
+      { status: 429 },
+    )
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -28,9 +45,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY לא מוגדר' }, { status: 500 })
   }
 
-  const body = await req.json()
-  const { system, message } = body
-
+  const { system, message } = await req.json()
   if (!message) {
     return NextResponse.json({ error: 'חסר message' }, { status: 400 })
   }

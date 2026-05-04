@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { Transaction } from '@/types/transaction'
 import { CATEGORY_ICONS } from '@/lib/constants'
+import { getAuthHeader } from '@/lib/getAuthToken'
 
 interface Props {
   transactions: Transaction[]
@@ -73,7 +74,7 @@ ${lines.join('\n')}
     try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
         body: JSON.stringify({ system: SYSTEM_PROMPT, message }),
       })
 
