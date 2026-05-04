@@ -17,9 +17,8 @@ export function GoogleSignInButton() {
       await signInWithPopup(auth, provider)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
-      console.error('Firebase auth error:', code, err)
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
-        setError(`${hebrewAuthError(code)} (${code ?? 'unknown'})`)
+        setError(hebrewAuthError(code))
       }
     } finally {
       setLoading(false)

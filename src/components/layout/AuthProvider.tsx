@@ -12,10 +12,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   useEffect(() => {
-    // Process Google redirect result first, then listen for auth state
-    getRedirectResult(auth)
-      .then(result => console.log('getRedirectResult:', result?.user?.email ?? 'null'))
-      .catch(err => console.error('getRedirectResult error:', err))
+    // Process any pending Google redirect result
+    getRedirectResult(auth).catch(() => {})
 
     return onAuthStateChanged(auth, (user) => {
       setUser(user)
