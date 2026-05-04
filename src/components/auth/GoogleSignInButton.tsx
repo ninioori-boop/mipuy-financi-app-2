@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { signInWithRedirect, GoogleAuthProvider } from 'firebase/auth'
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 
@@ -14,10 +14,14 @@ export function GoogleSignInButton() {
     setError(null)
     try {
       const provider = new GoogleAuthProvider()
-      await signInWithRedirect(auth, provider)
+      await signInWithPopup(auth, provider)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
-      setError(hebrewAuthError(code))
+      console.error('Firebase auth error:', code, err)
+      if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
+        setError(`${hebrewAuthError(code)} (${code ?? 'unknown'})`)
+      }
+    } finally {
       setLoading(false)
     }
   }
