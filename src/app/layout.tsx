@@ -3,6 +3,7 @@ import { Rubik } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/components/layout/AuthProvider'
 import { DataSync } from '@/components/layout/DataSync'
+import { CookieBanner } from '@/components/layout/CookieBanner'
 import { Toaster } from '@/components/ui/sonner'
 
 const rubik = Rubik({
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </DataSync>
         </AuthProvider>
+        <CookieBanner />
         <Toaster position="bottom-center" />
       </body>
     </html>
