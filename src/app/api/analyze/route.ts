@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { system, message, model, max_tokens } = body
+  const { system, message } = body
 
   if (!message) {
     return NextResponse.json({ error: 'חסר message' }, { status: 400 })
@@ -48,8 +48,8 @@ export async function POST(req: NextRequest) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model:      (model as string)      ?? 'claude-sonnet-4-6',
-      max_tokens: (max_tokens as number) ?? 4096,
+      model:      'claude-sonnet-4-6',
+      max_tokens: 4096,
       system:     system ?? undefined,
       messages:   [{ role: 'user', content: message }],
     }),

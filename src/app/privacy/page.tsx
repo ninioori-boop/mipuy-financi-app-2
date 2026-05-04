@@ -38,12 +38,13 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
-        <Section title="4. אחסון ואבטחה">
+        <Section title="4. אחסון, אבטחה ותקופת שמירה">
           <ul>
             <li>הנתונים מאוחסנים ב-<strong>Google Firebase Firestore</strong> (אזור אירופה)</li>
             <li>כל משתמש ניגש אך ורק לנתונים שלו — מוגן על ידי כללי Firestore Security Rules</li>
             <li>התקשורת מוצפנת ב-HTTPS בכל שלב</li>
             <li>מפתח ה-API של Claude מאוחסן אך ורק בשרת (Vercel Env Variables) ולא נחשף ללקוח</li>
+            <li><strong>תקופת שמירה:</strong> הנתונים נשמרים כל עוד החשבון פעיל. עם מחיקת חשבון — כל הנתונים נמחקים תוך 30 ימים</li>
           </ul>
         </Section>
 
@@ -72,14 +73,23 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
-        <Section title="7. עוגיות (Cookies)">
+        <Section title="7. עוגיות ואחסון מקומי (Cookies & localStorage)">
           <p>
-            האפליקציה משתמשת ב-Session Cookies של Firebase לצורך ניהול ההתחברות בלבד.
-            אין שימוש בעוגיות פרסומיות או מעקב.
+            האפליקציה משתמשת ב-Session Cookies של Firebase ו-localStorage לצורך ניהול ההתחברות בלבד.
+            אין שימוש בעוגיות פרסומיות, מעקב, או ניתוח התנהגות.
+            ניתן לדחות את השימוש בעוגיות — אך הדבר ימנע התחברות לשירות.
           </p>
         </Section>
 
-        <Section title="8. שינויים במדיניות">
+        <Section title="8. רשם מאגרי מידע">
+          <p>
+            בהתאם לחוק הגנת הפרטיות, מאגרי מידע מסוימים חייבים ברישום אצל רשם מאגרי המידע.
+            אנו בוחנים את חובת הרישום ונפעל בהתאם לדרישות החוק. לפרטים נוספים פנו אלינו בכתובת{' '}
+            <a href="mailto:ninioori@gmail.com" className="text-gold hover:underline">ninioori@gmail.com</a>.
+          </p>
+        </Section>
+
+        <Section title="9. שינויים במדיניות">
           <p>
             במקרה של שינויים מהותיים, המשתמשים יקבלו הודעה בכניסה הבאה לאפליקציה.
             המשך השימוש לאחר פרסום השינויים מהווה הסכמה להם.
