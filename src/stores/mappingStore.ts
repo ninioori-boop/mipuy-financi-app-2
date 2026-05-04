@@ -1,0 +1,288 @@
+'use client'
+
+import { create } from 'zustand'
+import type { Transaction } from '@/types/transaction'
+import {
+  VAR_CATEGORIES, ANNUAL_CATEGORIES, FIXED_CATEGORIES,
+  INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
+} from '@/lib/constants'
+
+export interface MappingRow {
+  id: string
+  name: string
+  amount: number       // monthly for income/fixed/sub/ins; period-total for variable
+  fromCredit?: boolean
+}
+
+export interface AnnualRow {
+  id: string
+  name: string
+  annualAmount: number // yearly; monthly = annualAmount / 12
+  fromCredit?: boolean
+}
+
+export interface DebtRow {
+  id: string
+  name: string
+  originalBalance: number
+  remainingBalance: number
+  interestRate: number
+  remainingMonths: number
+  monthlyPayment: number
+}
+
+export interface InstallmentRow {
+  id: string
+  name: string
+  totalAmount: number
+  monthlyPayment: number
+  paidCount: number
+  totalCount: number
+}
+
+export interface SavingRow {
+  id: string
+  name: string
+  monthlyContribution: number
+  accumulated: number
+}
+
+export type SimpleSection = 'income' | 'fixed' | 'sub' | 'ins'
+
+let _seq = 0
+function uid(): string { return `r${++_seq}` }
+
+function makeRows(names: string[]): MappingRow[] {
+  return names.map(name => ({ id: uid(), name, amount: 0 }))
+}
+
+const DEFAULT_INCOME = makeRows([
+  'בעל עבודה 1', 'בעל עבודה 2', 'אישה עבודה 1', 'אישה עבודה 2',
+  'קצבת ילדים', 'קצבאות נוספות', 'הכנסה מנכס', 'הכנסות מהעסק',
+])
+
+const DEFAULT_FIXED = makeRows([
+  'שכר דירה / משכנתא', 'ועד בית', 'ארנונה', 'חשמל', 'גז', 'מים וביוב',
+])
+
+const DEFAULT_SUB = makeRows([
+  'Netflix', 'Spotify / Apple Music', 'כבלים / Hot / Yes', 'ספק אינטרנט', 'טלפון נייד',
+])
+
+const DEFAULT_INS = makeRows([
+  'ביטוח חיים', 'ביטוח בריאות / מכבי', 'ביטוח רכב חובה', 'ביטוח רכב מקיף', 'ביטוח דירה',
+])
+
+// Variable rows store period totals (not monthly) — monthly = amount / varMonths
+const DEFAULT_VARIABLE = makeRows([
+  'מזון לבית', 'אוכל בחוץ ובילויים', 'פארם', 'דלק וחניה',
+  'ביגוד והנעלה', 'תחב"צ', 'תספורת וקוסמטיקה', 'תחביבים',
+  'תיקוני רכב', 'בריאות', 'בעלי חיים', 'חינוך / דמי כיס', 'שונות',
+])
+
+const DEFAULT_ANNUAL: AnnualRow[] = [
+  'חינוך, חוגים וקייטנות', 'ביטוחי בריאות וחיים', 'ביטוחי רכב',
+  'חופשות', 'מתנות לאירועים', 'מנויים שנתיים',
+].map(name => ({ id: uid(), name, annualAmount: 0 }))
+
+const DEFAULT_DEBTS: DebtRow[] = [
+  { id: uid(), name: 'משכנתא', originalBalance: 0, remainingBalance: 0, interestRate: 0, remainingMonths: 0, monthlyPayment: 0 },
+]
+
+const DEFAULT_INSTALLMENTS: InstallmentRow[] = []
+
+const DEFAULT_SAVINGS: SavingRow[] = [
+  'קרן חירום', 'חיסכון בבנק', 'קרן השתלמות', 'פנסיה', 'קופת גמל להשקעה', 'חסכונות ילדים',
+].map(name => ({ id: uid(), name, monthlyContribution: 0, accumulated: 0 }))
+
+interface MappingState {
+  income: MappingRow[]
+  fixed: MappingRow[]
+  sub: MappingRow[]
+  ins: MappingRow[]
+  variable: MappingRow[]
+  annual: AnnualRow[]
+  debts: DebtRow[]
+  installments: InstallmentRow[]
+  savings: SavingRow[]
+  varMonths: number
+  creditImported: boolean
+
+  // Simple sections (income / fixed / sub / ins)
+  addRow: (section: SimpleSection, name?: string) => void
+  updateRow: (section: SimpleSection, id: string, field: 'name' | 'amount', value: string | number) => void
+  deleteRow: (section: SimpleSection, id: string) => void
+
+  // Variable
+  addVarRow: (name?: string) => void
+  updateVarRow: (id: string, field: 'name' | 'amount', value: string | number) => void
+  deleteVarRow: (id: string) => void
+  setVarMonths: (months: number) => void
+  importFromCredit: (transactions: Transaction[], months: number) => void
+
+  // Annual
+  addAnnualRow: () => void
+  updateAnnualRow: (id: string, field: 'name' | 'annualAmount', value: string | number) => void
+  deleteAnnualRow: (id: string) => void
+
+  // Debts
+  addDebtRow: () => void
+  updateDebtRow: (id: string, field: keyof Omit<DebtRow, 'id'>, value: string | number) => void
+  deleteDebtRow: (id: string) => void
+
+  // Installments
+  addInstallmentRow: () => void
+  updateInstallmentRow: (id: string, field: keyof Omit<InstallmentRow, 'id'>, value: string | number) => void
+  deleteInstallmentRow: (id: string) => void
+
+  // Savings
+  addSavingRow: () => void
+  updateSavingRow: (id: string, field: keyof Omit<SavingRow, 'id'>, value: string | number) => void
+  deleteSavingRow: (id: string) => void
+
+  // Bank import
+  importFromBank: (rows: { name: string; amount: number; section: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' }[]) => void
+}
+
+export const useMappingStore = create<MappingState>((set, get) => ({
+  income: DEFAULT_INCOME,
+  fixed: DEFAULT_FIXED,
+  sub: DEFAULT_SUB,
+  ins: DEFAULT_INS,
+  variable: DEFAULT_VARIABLE,
+  annual: DEFAULT_ANNUAL,
+  debts: DEFAULT_DEBTS,
+  installments: DEFAULT_INSTALLMENTS,
+  savings: DEFAULT_SAVINGS,
+  varMonths: 3,
+  creditImported: false,
+
+  addRow: (section, name = '') => {
+    const prev = get()[section] as MappingRow[]
+    set({ [section]: [...prev, { id: uid(), name, amount: 0 }] })
+  },
+  updateRow: (section, id, field, value) => {
+    const prev = get()[section] as MappingRow[]
+    set({ [section]: prev.map(r => r.id === id ? { ...r, [field]: value } : r) })
+  },
+  deleteRow: (section, id) => {
+    const prev = get()[section] as MappingRow[]
+    set({ [section]: prev.filter(r => r.id !== id) })
+  },
+
+  addVarRow: (name = '') =>
+    set(s => ({ variable: [...s.variable, { id: uid(), name, amount: 0 }] })),
+  updateVarRow: (id, field, value) =>
+    set(s => ({ variable: s.variable.map(r => r.id === id ? { ...r, [field]: value } : r) })),
+  deleteVarRow: (id) =>
+    set(s => ({ variable: s.variable.filter(r => r.id !== id) })),
+
+  setVarMonths: (months) => set({ varMonths: Math.max(1, Math.min(24, months)) }),
+
+  importFromCredit: (transactions, months) => {
+    const m = Math.max(1, months)
+
+    // Sum amounts by category (exclude refunds)
+    const totals: Record<string, number> = {}
+    transactions.forEach(t => {
+      if (t.isRefund) return
+      totals[t.category] = (totals[t.category] ?? 0) + t.amount
+    })
+
+    const newVar: MappingRow[]    = []
+    const newFixed: MappingRow[]  = []
+    const newSub: MappingRow[]    = []
+    const newIns: MappingRow[]    = []
+    const newAnnual: AnnualRow[]  = []
+
+    Object.entries(totals).forEach(([cat, totalAmt]) => {
+      if (totalAmt <= 0) return
+      if (SKIP_CATEGORIES.has(cat)) return // הכנסות / חסכונות / השקעות
+
+      if (VAR_CATEGORIES.has(cat)) {
+        // משתנות: שומר period-total; monthly = amount / varMonths בתצוגה
+        newVar.push({ id: uid(), name: cat, amount: Math.round(totalAmt), fromCredit: true })
+      } else if (ANNUAL_CATEGORIES.has(cat)) {
+        // שנתיות: מחלק ב-months ומכפיל ב-12 לשנתי מנורמל
+        const annualAmount = Math.round(totalAmt / m * 12)
+        newAnnual.push({ id: uid(), name: cat, annualAmount, fromCredit: true })
+      } else if (FIXED_CATEGORIES.has(cat)) {
+        // קבועות ÷1: חלקי months → חודשי
+        newFixed.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+      } else if (INSURANCE_CATEGORIES.has(cat)) {
+        // ביטוחים ÷1: חלקי months → חודשי
+        newIns.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+      } else if (SUB_CATEGORIES.has(cat)) {
+        // מנויים ÷1: חלקי months → חודשי
+        newSub.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+      }
+      // קטגוריה לא מוכרת — מתעלמים (כמו v1)
+    })
+
+    const sortMR = (rows: MappingRow[]) => [...rows].sort((a, b) => b.amount - a.amount)
+    const sortAR = (rows: AnnualRow[])  => [...rows].sort((a, b) => b.annualAmount - a.annualAmount)
+
+    const s = get()
+    set({
+      variable: [...sortMR(newVar),   ...s.variable.filter(r => !r.fromCredit)],
+      fixed:    [...sortMR(newFixed),  ...s.fixed.filter(r => !r.fromCredit)],
+      sub:      [...sortMR(newSub),    ...s.sub.filter(r => !r.fromCredit)],
+      ins:      [...sortMR(newIns),    ...s.ins.filter(r => !r.fromCredit)],
+      annual:   [...sortAR(newAnnual), ...s.annual.filter(r => !r.fromCredit)],
+      varMonths: months,
+      creditImported: true,
+    })
+  },
+
+  addAnnualRow: () =>
+    set(s => ({ annual: [...s.annual, { id: uid(), name: '', annualAmount: 0 }] })),
+  updateAnnualRow: (id, field, value) =>
+    set(s => ({ annual: s.annual.map(r => r.id === id ? { ...r, [field]: value } : r) })),
+  deleteAnnualRow: (id) =>
+    set(s => ({ annual: s.annual.filter(r => r.id !== id) })),
+
+  addDebtRow: () =>
+    set(s => ({ debts: [...s.debts, { id: uid(), name: '', originalBalance: 0, remainingBalance: 0, interestRate: 0, remainingMonths: 0, monthlyPayment: 0 }] })),
+  updateDebtRow: (id, field, value) =>
+    set(s => ({ debts: s.debts.map(r => r.id === id ? { ...r, [field]: value } : r) })),
+  deleteDebtRow: (id) =>
+    set(s => ({ debts: s.debts.filter(r => r.id !== id) })),
+
+  addInstallmentRow: () =>
+    set(s => ({ installments: [...s.installments, { id: uid(), name: '', totalAmount: 0, monthlyPayment: 0, paidCount: 0, totalCount: 0 }] })),
+  updateInstallmentRow: (id, field, value) =>
+    set(s => ({ installments: s.installments.map(r => r.id === id ? { ...r, [field]: value } : r) })),
+  deleteInstallmentRow: (id) =>
+    set(s => ({ installments: s.installments.filter(r => r.id !== id) })),
+
+  addSavingRow: () =>
+    set(s => ({ savings: [...s.savings, { id: uid(), name: '', monthlyContribution: 0, accumulated: 0 }] })),
+  updateSavingRow: (id, field, value) =>
+    set(s => ({ savings: s.savings.map(r => r.id === id ? { ...r, [field]: value } : r) })),
+  deleteSavingRow: (id) =>
+    set(s => ({ savings: s.savings.filter(r => r.id !== id) })),
+
+  importFromBank: (rows) => {
+    const newFixed:    MappingRow[] = []
+    const newVariable: MappingRow[] = []
+    const newSub:      MappingRow[] = []
+    const newIns:      MappingRow[] = []
+    const newAnnual:   AnnualRow[]  = []
+
+    rows.forEach(r => {
+      if (r.section === 'fixed')    newFixed.push(   { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
+      else if (r.section === 'variable') newVariable.push({ id: uid(), name: r.name, amount: r.amount, fromCredit: true })
+      else if (r.section === 'sub')     newSub.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
+      else if (r.section === 'ins')     newIns.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
+      else if (r.section === 'annual')  newAnnual.push( { id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true })
+    })
+
+    set(s => ({
+      fixed:    [...newFixed,    ...s.fixed],
+      variable: [...newVariable, ...s.variable],
+      sub:      [...newSub,      ...s.sub],
+      ins:      [...newIns,      ...s.ins],
+      annual:   [...newAnnual,   ...s.annual],
+    }))
+  },
+}))

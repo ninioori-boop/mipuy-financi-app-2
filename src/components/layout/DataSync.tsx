@@ -1,0 +1,137 @@
+'use client'
+
+/**
+ * DataSync — wires Firestore persistence to all data stores.
+ *
+ * Lifecycle:
+ *   - User logs in   → load from Firestore, applySnapshot, mark hydrated
+ *   - User logs out  → resetAllStores, clear hydrated flag
+ *   - Any data store changes (post-hydration) → debounced save (2s) to Firestore
+ *   - Network goes offline/online → status reflects this
+ *
+ * Defensive guards:
+ *   - Never saves before initial load completes (hydrated flag)
+ *   - Skips save when serialized snapshot is identical to last-saved
+ *   - Refuses to save snapshots over a size cap (Firestore doc limit ≈ 1MB)
+ */
+
+import { useEffect, useRef } from 'react'
+import { useAuthStore }    from '@/stores/authStore'
+import { useSyncStore }    from '@/stores/syncStore'
+import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useAnnualStore }  from '@/stores/annualStore'
+import { useMappingStore } from '@/stores/mappingStore'
+import { useGoalsStore }   from '@/stores/goalsStore'
+import { useCreditStore }  from '@/stores/creditStore'
+import { saveUserData, loadUserData } from '@/lib/firestoreService'
+import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
+
+const DEBOUNCE_MS = 2000
+const MAX_BYTES   = 900_000  // ≈900KB; Firestore doc hard cap is ~1MB
+
+export function DataSync({ children }: { children: React.ReactNode }) {
+  const user            = useAuthStore(s => s.user)
+  const authLoading     = useAuthStore(s => s.loading)
+  const hydrated        = useSyncStore(s => s.hydrated)
+  const setStatus       = useSyncStore(s => s.setStatus)
+  const setHydrated     = useSyncStore(s => s.setHydrated)
+  const markSaved       = useSyncStore(s => s.markSaved)
+
+  const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSavedJson   = useRef<string>('')
+
+  // ── 1. Load on auth ready / user change ──
+  useEffect(() => {
+    if (authLoading) return
+
+    if (!user) {
+      // Logged out: clear in-memory data, mark un-hydrated
+      resetAllStores()
+      setHydrated(false)
+      setStatus('idle')
+      lastSavedJson.current = ''
+      return
+    }
+
+    let cancelled = false
+    setStatus('loading')
+
+    loadUserData(user.uid)
+      .then(data => {
+        if (cancelled) return
+        if (data) applySnapshot(data)
+        // baseline snapshot prevents an immediate auto-save right after load
+        lastSavedJson.current = JSON.stringify(collectSnapshot())
+        setHydrated(true)
+        setStatus('idle')
+      })
+      .catch(err => {
+        if (cancelled) return
+        setStatus('error', (err as Error)?.message ?? 'שגיאה בטעינת נתונים')
+        setHydrated(true)  // allow user to keep working even if load failed
+      })
+
+    return () => { cancelled = true }
+  }, [user, authLoading, setStatus, setHydrated])
+
+  // ── 2. Subscribe to data stores → debounced save ──
+  useEffect(() => {
+    if (!user || !hydrated) return
+
+    const triggerSave = () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(async () => {
+        const snap = collectSnapshot()
+        const json = JSON.stringify(snap)
+        if (json === lastSavedJson.current) return  // no real change
+
+        const size = snapshotSize(snap)
+        if (size > MAX_BYTES) {
+          setStatus('error', `נתונים גדולים מדי לשמירה (${Math.round(size / 1024)}KB)`)
+          return
+        }
+
+        if (!navigator.onLine) {
+          setStatus('offline')
+          return
+        }
+
+        setStatus('saving')
+        try {
+          await saveUserData(user.uid, snap)
+          lastSavedJson.current = json
+          markSaved()
+        } catch (err) {
+          setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
+        }
+      }, DEBOUNCE_MS)
+    }
+
+    const unsubs = [
+      useMonthlyStore.subscribe(triggerSave),
+      useAnnualStore.subscribe(triggerSave),
+      useMappingStore.subscribe(triggerSave),
+      useGoalsStore.subscribe(triggerSave),
+      useCreditStore.subscribe(triggerSave),
+    ]
+
+    return () => {
+      unsubs.forEach(unsub => unsub())
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    }
+  }, [user, hydrated, setStatus, markSaved])
+
+  // ── 3. Online/offline awareness ──
+  useEffect(() => {
+    const onOffline = () => useSyncStore.getState().setStatus('offline')
+    const onOnline  = () => useSyncStore.getState().setStatus('idle')
+    window.addEventListener('offline', onOffline)
+    window.addEventListener('online',  onOnline)
+    return () => {
+      window.removeEventListener('offline', onOffline)
+      window.removeEventListener('online',  onOnline)
+    }
+  }, [])
+
+  return <>{children}</>
+}

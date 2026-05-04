@@ -1,26 +1,127 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* shadcn tokens */
+  --color-background:            var(--background);
+  --color-foreground:            var(--foreground);
+  --font-sans:                   var(--font-rubik);
+  --font-mono:                   var(--font-geist-mono);
+  --color-card:                  var(--card);
+  --color-card-foreground:       var(--card-foreground);
+  --color-popover:               var(--popover);
+  --color-popover-foreground:    var(--popover-foreground);
+  --color-primary:               var(--primary);
+  --color-primary-foreground:    var(--primary-foreground);
+  --color-secondary:             var(--secondary);
+  --color-secondary-foreground:  var(--secondary-foreground);
+  --color-muted:                 var(--muted);
+  --color-muted-foreground:      var(--muted-foreground);
+  --color-accent:                var(--accent);
+  --color-accent-foreground:     var(--accent-foreground);
+  --color-destructive:           var(--destructive);
+  --color-border:                var(--border);
+  --color-input:                 var(--input);
+  --color-ring:                  var(--ring);
+  --radius-sm:  calc(var(--radius) * 0.6);
+  --radius-md:  calc(var(--radius) * 0.8);
+  --radius-lg:  var(--radius);
+  --radius-xl:  calc(var(--radius) * 1.4);
+
+  /* Brand colors — The Home Economist */
+  --color-gold:        var(--gold);
+  --color-gold-light:  var(--gold-light);
+  --color-gold-dark:   var(--gold-dark);
+  --color-surface:     var(--surface);
+  --color-surface2:    var(--surface2);
+  --color-surface3:    var(--surface3);
+  --color-line:        var(--line);
+  --color-txt:         var(--txt);
+  --color-muted-txt:   var(--muted-txt);
+  --color-income:      var(--income);
+  --color-expense:     var(--expense);
+  --color-neutral:     var(--neutral);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ─── Light root (minimal — app is dark-first) ─── */
+:root {
+  --background:            oklch(0.98 0 0);
+  --foreground:            oklch(0.1 0 0);
+  --card:                  oklch(1 0 0);
+  --card-foreground:       oklch(0.1 0 0);
+  --popover:               oklch(1 0 0);
+  --popover-foreground:    oklch(0.1 0 0);
+  --primary:               #C9A86C;
+  --primary-foreground:    #0F0F0F;
+  --secondary:             oklch(0.96 0 0);
+  --secondary-foreground:  oklch(0.15 0 0);
+  --muted:                 oklch(0.96 0 0);
+  --muted-foreground:      oklch(0.5 0 0);
+  --accent:                #C9A86C;
+  --accent-foreground:     #0F0F0F;
+  --destructive:           oklch(0.577 0.245 27.325);
+  --border:                oklch(0.9 0 0);
+  --input:                 oklch(0.9 0 0);
+  --ring:                  #C9A86C;
+  --radius:                0.625rem;
+
+  --gold:        #C9A86C;
+  --gold-light:  #E0C896;
+  --gold-dark:   #A88844;
+  --surface:     #F5F3EF;
+  --surface2:    #EDEBE6;
+  --surface3:    #E3E0D8;
+  --line:        #D8D4C8;
+  --txt:         #1A1A1A;
+  --muted-txt:   #6B6560;
+  --income:      #2E7D32;
+  --expense:     #C62828;
+  --neutral:     #78716C;
+}
+
+/* ─── Dark theme — The Home Economist ─── */
+.dark {
+  --background:            #0F0F0F;
+  --foreground:            #F0EDEA;
+  --card:                  #1A1A1A;
+  --card-foreground:       #F0EDEA;
+  --popover:               #1A1A1A;
+  --popover-foreground:    #F0EDEA;
+  --primary:               #C9A86C;
+  --primary-foreground:    #0F0F0F;
+  --secondary:             #242424;
+  --secondary-foreground:  #F0EDEA;
+  --muted:                 #242424;
+  --muted-foreground:      #8A8178;
+  --accent:                #C9A86C;
+  --accent-foreground:     #0F0F0F;
+  --destructive:           oklch(0.704 0.191 22.216);
+  --border:                #2A2A2A;
+  --input:                 #2A2A2A;
+  --ring:                  #C9A86C;
+
+  --gold:        #C9A86C;
+  --gold-light:  #E0C896;
+  --gold-dark:   #A88844;
+  --surface:     #0F0F0F;
+  --surface2:    #1A1A1A;
+  --surface3:    #242424;
+  --line:        #2A2A2A;
+  --txt:         #F0EDEA;
+  --muted-txt:   #8A8178;
+  --income:      #4ADE80;
+  --expense:     #F87171;
+  --neutral:     #A8A29E;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+  }
 }
