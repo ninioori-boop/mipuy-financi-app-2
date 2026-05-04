@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
+import { useState, useEffect } from 'react'
+import { signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 
@@ -9,19 +9,32 @@ export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    setLoading(true)
+    getRedirectResult(auth)
+      .then(result => {
+        if (result) {
+          // signed in via redirect — AuthProvider will handle the redirect
+        }
+      })
+      .catch(err => {
+        const code = (err as { code?: string }).code
+        console.error('Firebase redirect result error:', code, err)
+        setError(hebrewAuthError(code))
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
   async function handleSignIn() {
     setLoading(true)
     setError(null)
     try {
       const provider = new GoogleAuthProvider()
-      await signInWithPopup(auth, provider)
+      await signInWithRedirect(auth, provider)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
       console.error('Firebase auth error:', code, err)
-      if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
-        setError(`${hebrewAuthError(code)} (${code ?? 'unknown'})`)
-      }
-    } finally {
+      setError(hebrewAuthError(code))
       setLoading(false)
     }
   }
@@ -62,6 +75,7 @@ function hebrewAuthError(code?: string): string {
     case 'auth/network-request-failed': return 'שגיאת רשת — בדקו חיבור לאינטרנט'
     case 'auth/too-many-requests':      return 'יותר מדי ניסיונות — נסו שוב בעוד כמה דקות'
     case 'auth/user-disabled':          return 'החשבון הושבת'
+    case 'auth/unauthorized-domain':    return 'דומיין לא מורשה — פנו למנהל המערכת'
     default:                            return 'שגיאה בכניסה — נסו שוב'
   }
 }
