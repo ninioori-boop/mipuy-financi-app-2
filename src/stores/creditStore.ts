@@ -2,6 +2,7 @@
 
 import { create } from 'zustand'
 import type { Transaction } from '@/types/transaction'
+import { normalizeForLookup } from '@/lib/categorize'
 
 interface CreditState {
   transactions: Transaction[]
@@ -35,11 +36,11 @@ export const useCreditStore = create<CreditState>((set, get) => ({
   updateCategory: (idx, category) => {
     const txns = [...get().transactions]
     if (!txns[idx]) return
-    const desc = txns[idx].desc.toLowerCase()
+    const key = normalizeForLookup(txns[idx].desc)
     txns[idx] = { ...txns[idx], category }
     set({
       transactions: txns,
-      learnedDB: { ...get().learnedDB, [desc]: category },
+      learnedDB: { ...get().learnedDB, [key]: category },
     })
   },
 
