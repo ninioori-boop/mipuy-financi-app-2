@@ -1,4 +1,5 @@
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { EmailAuthForm } from '@/components/auth/EmailAuthForm'
 
 export default function AuthPage() {
   return (
@@ -15,11 +16,24 @@ export default function AuthPage() {
         </div>
 
         {/* Login card */}
-        <div className="rounded-2xl border border-line bg-surface2 p-6 shadow-xl">
-          <h2 className="text-lg font-semibold text-txt mb-1">כניסה למערכת</h2>
-          <p className="text-muted-txt text-sm mb-6">כנסו עם חשבון Google שלכם</p>
+        <div className="rounded-2xl border border-line bg-surface2 p-6 shadow-xl space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold text-txt mb-1">כניסה למערכת</h2>
+            <p className="text-muted-txt text-sm">כנסו עם מייל או חשבון Google</p>
+          </div>
+
+          <EmailAuthForm />
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-line" />
+            <span className="text-xs text-muted-txt">או</span>
+            <div className="flex-1 h-px bg-line" />
+          </div>
+
           <GoogleSignInButton />
-          <p className="text-muted-txt text-xs text-center mt-5 leading-relaxed">
+
+          <p className="text-muted-txt text-xs text-center leading-relaxed">
             בכניסה למערכת אתם מסכימים לתנאי השימוש
             <br />ומדיניות הפרטיות שלנו
           </p>
