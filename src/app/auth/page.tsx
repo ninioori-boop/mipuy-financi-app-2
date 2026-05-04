@@ -34,8 +34,10 @@ export default function AuthPage() {
           <GoogleSignInButton />
 
           <p className="text-muted-txt text-xs text-center leading-relaxed">
-            בכניסה למערכת אתם מסכימים לתנאי השימוש
-            <br />ומדיניות הפרטיות שלנו
+            בכניסה למערכת אתם מסכימים ל
+            <a href="/privacy" target="_blank" className="text-gold hover:underline mx-0.5">
+              תנאי השימוש ומדיניות הפרטיות
+            </a>
           </p>
         </div>
 

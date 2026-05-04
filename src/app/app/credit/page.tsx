@@ -10,6 +10,7 @@ import { ALL_CATEGORIES } from '@/lib/constants'
 import { FileDropzone } from '@/components/credit/FileDropzone'
 import { SmartPatterns } from '@/components/credit/SmartPatterns'
 import { CategoryBreakdown } from '@/components/credit/CategoryBreakdown'
+import { AiAnalysis } from '@/components/credit/AiAnalysis'
 
 const SYSTEM_PROMPT =
   'אתה מומחה לניתוח הוצאות פיננסיות בישראל.\n' +
@@ -233,6 +234,9 @@ export default function CreditPage() {
               onDelete={deleteTransaction}
             />
           </div>
+
+          {/* AI Full Analysis */}
+          <AiAnalysis transactions={transactions} reportMonths={reportMonths} />
 
           {/* Bottom actions */}
           <div className="flex items-center justify-between">
