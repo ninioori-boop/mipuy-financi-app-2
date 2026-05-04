@@ -45,12 +45,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY לא מוגדר' }, { status: 500 })
   }
 
-  const { system, message } = await req.json()
-  if (!message) {
+  const body = await req.json().catch(() => null)
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: 'גוף הבקשה לא תקין' }, { status: 400 })
+  }
+  const { system, message } = body as Record<string, unknown>
+  if (typeof message !== 'string' || !message.trim()) {
     return NextResponse.json({ error: 'חסר message' }, { status: 400 })
   }
+  if (system !== undefined && typeof system !== 'string') {
+    return NextResponse.json({ error: 'system לא תקין' }, { status: 400 })
+  }
 
-  const msgLen = ((system as string) ?? '').length + (message as string).length
+  const msgLen = (system ?? '').length + message.length
   if (msgLen > 60_000) {
     return NextResponse.json({ error: 'הבקשה גדולה מדי' }, { status: 400 })
   }

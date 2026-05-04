@@ -7,19 +7,18 @@ import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { setUser, setLoading } = useAuthStore()
+  const { setUser, setLoading, loading } = useAuthStore()
   const router   = useRouter()
   const pathname = usePathname()
 
   useEffect(() => {
-    // Process any pending Google redirect result
     getRedirectResult(auth).catch(() => {})
 
     return onAuthStateChanged(auth, (user) => {
       setUser(user)
       setLoading(false)
 
-      if (!user && !pathname.startsWith('/auth')) {
+      if (!user && !pathname.startsWith('/auth') && !pathname.startsWith('/privacy')) {
         router.replace('/auth')
       }
       if (user && pathname.startsWith('/auth')) {
@@ -27,6 +26,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
   }, [setUser, setLoading, router, pathname])
+
+  // Prevent content flash while auth state resolves
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <span className="size-8 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+      </div>
+    )
+  }
 
   return <>{children}</>
 }

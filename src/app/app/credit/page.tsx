@@ -3,6 +3,7 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { getAuthHeader } from '@/lib/getAuthToken'
+import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { parseExcelFile } from '@/lib/parseExcel'
@@ -33,7 +34,7 @@ function pushToMapping() {
 
 export default function CreditPage() {
   const {
-    transactions, uploadedFileNames, learnedDB, isLoading, loadingMessage,
+    transactions, uploadedFileNames, isLoading, loadingMessage,
     reportMonths, setReportMonths,
     setTransactions, updateCategory, updateDesc, updateAmount, deleteTransaction, setLoading,
   } = useCreditStore()
@@ -84,7 +85,7 @@ export default function CreditPage() {
 
         const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
 
-        const res = await fetch('/api/categorize', {
+        const res = await fetchWithRetry('/api/categorize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
           body: JSON.stringify({ system: SYSTEM_PROMPT, message: `סווג את העסקאות הבאות:\n${lines}` }),
