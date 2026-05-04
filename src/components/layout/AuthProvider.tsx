@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -12,6 +12,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   useEffect(() => {
+    // Process Google redirect result first, then listen for auth state
+    getRedirectResult(auth).catch(() => {
+      // redirect result errors are non-fatal — onAuthStateChanged handles routing
+    })
+
     return onAuthStateChanged(auth, (user) => {
       setUser(user)
       setLoading(false)

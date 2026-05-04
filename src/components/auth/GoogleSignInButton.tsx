@@ -1,29 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth'
+import { useState } from 'react'
+import { signInWithRedirect, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 
 export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    getRedirectResult(auth)
-      .then(result => {
-        if (result) {
-          // signed in via redirect — AuthProvider will handle the redirect
-        }
-      })
-      .catch(err => {
-        const code = (err as { code?: string }).code
-        console.error('Firebase redirect result error:', code, err)
-        setError(hebrewAuthError(code))
-      })
-      .finally(() => setLoading(false))
-  }, [])
+  const [error, setError]     = useState<string | null>(null)
 
   async function handleSignIn() {
     setLoading(true)
@@ -33,7 +17,6 @@ export function GoogleSignInButton() {
       await signInWithRedirect(auth, provider)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
-      console.error('Firebase auth error:', code, err)
       setError(hebrewAuthError(code))
       setLoading(false)
     }
@@ -75,7 +58,6 @@ function hebrewAuthError(code?: string): string {
     case 'auth/network-request-failed': return 'שגיאת רשת — בדקו חיבור לאינטרנט'
     case 'auth/too-many-requests':      return 'יותר מדי ניסיונות — נסו שוב בעוד כמה דקות'
     case 'auth/user-disabled':          return 'החשבון הושבת'
-    case 'auth/unauthorized-domain':    return 'דומיין לא מורשה — פנו למנהל המערכת'
     default:                            return 'שגיאה בכניסה — נסו שוב'
   }
 }
