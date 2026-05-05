@@ -76,12 +76,12 @@ export default function CreditPage() {
     const BATCH = 80
     let updated = 0
 
-    setLoading(true, `Claude מנתח ${unmatchedCount} עסקאות לא מזוהות...`)
+    setLoading(true, `מנתח ${unmatchedCount} עסקאות לא מזוהות...`)
 
     try {
       for (let b = 0; b < unmatched.length; b += BATCH) {
         const batch = unmatched.slice(b, b + BATCH)
-        setLoading(true, `Claude מנתח... (${Math.min(b + BATCH, unmatched.length)}/${unmatched.length})`)
+        setLoading(true, `מנתח... (${Math.min(b + BATCH, unmatched.length)}/${unmatched.length})`)
 
         const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
 
@@ -114,7 +114,7 @@ export default function CreditPage() {
       }
 
       setLoading(false)
-      if (updated > 0) toast.success(`🤖 Claude סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
+      if (updated > 0) toast.success(`🤖 סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
       else toast.info('לא נמצאו עסקאות חדשות לסיווג')
 
       // ייבוא מחדש למיפוי עם הקטגוריות המעודכנות מה-AI

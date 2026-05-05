@@ -99,11 +99,11 @@ export default function ImportPage() {
     const BATCH = 80
     let updated = 0
     setIsLoading(true)
-    setLoadingMessage(`Claude מנתח ${unmatchedCount} עסקאות לא מזוהות...`)
+    setLoadingMessage(`מנתח ${unmatchedCount} עסקאות לא מזוהות...`)
     try {
       for (let b = 0; b < unmatched.length; b += BATCH) {
         const batch = unmatched.slice(b, b + BATCH)
-        setLoadingMessage(`Claude מנתח... (${Math.min(b + BATCH, unmatched.length)}/${unmatched.length})`)
+        setLoadingMessage(`מנתח... (${Math.min(b + BATCH, unmatched.length)}/${unmatched.length})`)
         const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
         const res = await fetch('/api/categorize', {
           method: 'POST',
@@ -130,7 +130,7 @@ export default function ImportPage() {
         })
       }
       setIsLoading(false)
-      if (updated > 0) toast.success(`🤖 Claude סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
+      if (updated > 0) toast.success(`🤖 סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
       else toast.info('לא נמצאו עסקאות חדשות לסיווג')
     } catch (e) {
       setIsLoading(false)

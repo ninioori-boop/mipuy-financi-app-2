@@ -99,7 +99,7 @@ ${lines.join('\n')}
         <div>
           <h2 className="font-semibold text-txt">🤖 ניתוח AI מלא</h2>
           <p className="text-xs text-muted-txt mt-0.5">
-            Claude מנתח את כל הדוח ומייצר תובנות פיננסיות מקצועיות
+            מנתח את כל הדוח ומייצר תובנות פיננסיות מקצועיות
           </p>
         </div>
         <button
