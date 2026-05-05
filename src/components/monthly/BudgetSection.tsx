@@ -24,7 +24,7 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
   const diffOk      = diff >= 0
 
   return (
-    <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
+    <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="font-semibold text-txt">{icon} {title}</h2>

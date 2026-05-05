@@ -22,7 +22,7 @@ function PlanSection({ section, title, icon, isIncome = false }: {
   const rows  = store[section]
   const total = rows.reduce((s, r) => s + r.annual, 0)
   return (
-    <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
+    <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-txt">{icon} {title}</h2>
         <span className={`text-sm font-bold ${isIncome ? 'text-green-400' : 'text-gold'}`}>
@@ -155,7 +155,7 @@ export default function AnnualPage() {
         <PlanSection section="savings"  title="חיסכון"          icon="🏦" />
 
         {/* Debt section */}
-        <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
+        <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-txt">💳 הלוואות וחובות</h2>
             <span className="text-sm font-bold text-expense">
