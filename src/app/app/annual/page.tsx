@@ -162,16 +162,16 @@ export default function AnnualPage() {
               {fmt(pDebt)}<span className="text-xs font-normal text-muted-txt">/שנה</span>
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_6rem_6rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+          <div className="grid grid-cols-[1fr_5rem_4rem_1.5rem] sm:grid-cols-[1fr_6rem_6rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
             <span>שם הלוואה</span>
             <span className="text-left">תשלום שנתי ₪</span>
             <span className="text-center">÷12/חודש</span>
-            <span className="text-left">יתרה לסגירה ₪</span>
+            <span className="hidden sm:block text-left">יתרה לסגירה ₪</span>
             <span />
           </div>
           <div className="space-y-1">
             {store.debt.map(row => (
-              <div key={row.id} className="grid grid-cols-[1fr_6rem_6rem_6rem_1.5rem] gap-2 items-center group">
+              <div key={row.id} className="grid grid-cols-[1fr_5rem_4rem_1.5rem] sm:grid-cols-[1fr_6rem_6rem_6rem_1.5rem] gap-2 items-center group">
                 <input value={row.name} onChange={e => store.updateDebtRow(row.id, 'name', e.target.value)}
                   placeholder="שם הלוואה"
                   className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
@@ -183,7 +183,7 @@ export default function AnnualPage() {
                 </span>
                 <input type="number" value={row.balance || ''} onChange={e => store.updateDebtRow(row.id, 'balance', parseFloat(e.target.value) || 0)}
                   placeholder="₪" min={0} style={{ direction: 'ltr' }}
-                  className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                  className="hidden sm:block rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                 <button onClick={() => store.deleteDebtRow(row.id)}
                   className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
               </div>

@@ -73,13 +73,13 @@ export function SectionPanel({
                   placeholder={colName ?? 'שם'}
                   className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
                 />
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {row.fromCredit && txs.length > 0 && (
                     <button
                       onClick={() => setOpenDetail(isOpen ? null : row.id)}
-                      className="text-xs px-2 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors whitespace-nowrap"
+                      className="text-xs px-1.5 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors whitespace-nowrap"
                     >
-                      {isOpen ? '▲' : '▶'} {txs.length} פריטים
+                      {isOpen ? '▲' : '▶'} <span className="hidden sm:inline">{txs.length} פריטים</span><span className="sm:hidden">{txs.length}</span>
                     </button>
                   )}
                   <input
@@ -89,7 +89,7 @@ export function SectionPanel({
                     placeholder="₪"
                     min={0}
                     style={{ direction: 'ltr' }}
-                    className="w-28 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                    className="w-20 sm:w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
                   />
                 </div>
                 <button
