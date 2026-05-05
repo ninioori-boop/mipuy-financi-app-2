@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 
-// Per-user rate limit: 20 analyses per hour
+// Per-user rate limit: 2 analyses per day
 const userLimitMap = new Map<string, { count: number; start: number }>()
-const USER_LIMIT  = 20
-const WINDOW_MS   = 3_600_000 // 1 hour
+const USER_LIMIT  = 2
+const WINDOW_MS   = 86_400_000 // 24 hours
 
 function isUserLimited(uid: string): boolean {
   const now   = Date.now()
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   if (isUserLimited(uid)) {
     return NextResponse.json(
-      { error: 'הגעת למגבלת הניתוחים לשעה זו (20) — נסה שוב מאוחר יותר' },
+      { error: 'הגעת למגבלת הניתוחים היומית (2) — נסה שוב מחר' },
       { status: 429 },
     )
   }
