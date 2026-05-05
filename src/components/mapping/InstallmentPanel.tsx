@@ -21,8 +21,8 @@ export function InstallmentPanel({ installments, onAdd, onUpdate, onDelete }: Pr
   }, 0)
 
   return (
-    <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3 overflow-hidden">
+      <div className="flex items-center justify-between flex-wrap gap-1">
         <h2 className="font-semibold text-txt">📅 עסקאות בתשלומים</h2>
         <span className="text-xs text-muted-txt">
           חודשי: <span className="font-bold text-gold">{fmt(totalMonthly)}</span>

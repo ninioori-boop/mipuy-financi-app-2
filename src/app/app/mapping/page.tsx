@@ -80,7 +80,7 @@ export default function MappingPage() {
               לחודש: <span className="font-bold text-gold">{fmt(totalAnnualMo)}</span>
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+          <div className="grid grid-cols-[1fr_5rem_3.5rem_1.5rem] sm:grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
             <span>סוג הוצאה</span>
             <span className="text-left">סכום שנתי ₪</span>
             <span className="text-center">לחודש</span>
@@ -88,7 +88,7 @@ export default function MappingPage() {
           </div>
           <div className="space-y-1.5">
             {store.annual.map(row => (
-              <div key={row.id} className="grid grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 items-center group">
+              <div key={row.id} className="grid grid-cols-[1fr_5rem_3.5rem_1.5rem] sm:grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 items-center group">
                 <input
                   value={row.name}
                   onChange={e => store.updateAnnualRow(row.id, 'name', e.target.value)}
