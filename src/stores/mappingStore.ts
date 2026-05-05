@@ -181,6 +181,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
   importFromCredit: (transactions, months) => {
     const m = Math.max(1, months)
+    const s = get()
 
     // Sum amounts by category (exclude refunds)
     const totals: Record<string, number> = {}
@@ -189,46 +190,59 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       totals[t.category] = (totals[t.category] ?? 0) + t.amount
     })
 
-    const newVar: MappingRow[]    = []
-    const newFixed: MappingRow[]  = []
-    const newSub: MappingRow[]    = []
-    const newIns: MappingRow[]    = []
-    const newAnnual: AnnualRow[]  = []
+    // Helper: merge new amount into existing fromCredit rows, or add new row
+    function mergeRows(existing: MappingRow[], cat: string, addAmt: number): MappingRow[] {
+      const idx = existing.findIndex(r => r.fromCredit && r.name === cat)
+      if (idx >= 0) {
+        const updated = [...existing]
+        updated[idx] = { ...updated[idx], amount: updated[idx].amount + addAmt }
+        return updated
+      }
+      return [...existing, { id: uid(), name: cat, amount: addAmt, fromCredit: true }]
+    }
+
+    function mergeAnnual(existing: AnnualRow[], cat: string, addAmt: number): AnnualRow[] {
+      const idx = existing.findIndex(r => r.fromCredit && r.name === cat)
+      if (idx >= 0) {
+        const updated = [...existing]
+        updated[idx] = { ...updated[idx], annualAmount: updated[idx].annualAmount + addAmt }
+        return updated
+      }
+      return [...existing, { id: uid(), name: cat, annualAmount: addAmt, fromCredit: true }]
+    }
+
+    let variable = [...s.variable]
+    let fixed    = [...s.fixed]
+    let sub      = [...s.sub]
+    let ins      = [...s.ins]
+    let annual   = [...s.annual]
 
     Object.entries(totals).forEach(([cat, totalAmt]) => {
       if (totalAmt <= 0) return
-      if (SKIP_CATEGORIES.has(cat)) return // הכנסות / חסכונות / השקעות
+      if (SKIP_CATEGORIES.has(cat)) return
 
       if (VAR_CATEGORIES.has(cat)) {
-        // משתנות: שומר period-total; monthly = amount / varMonths בתצוגה
-        newVar.push({ id: uid(), name: cat, amount: Math.round(totalAmt), fromCredit: true })
+        variable = mergeRows(variable, cat, Math.round(totalAmt))
       } else if (ANNUAL_CATEGORIES.has(cat)) {
-        // שנתיות: מחלק ב-months ומכפיל ב-12 לשנתי מנורמל
-        const annualAmount = Math.round(totalAmt / m * 12)
-        newAnnual.push({ id: uid(), name: cat, annualAmount, fromCredit: true })
+        annual = mergeAnnual(annual, cat, Math.round(totalAmt / m * 12))
       } else if (FIXED_CATEGORIES.has(cat)) {
-        // קבועות ÷1: חלקי months → חודשי
-        newFixed.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+        fixed = mergeRows(fixed, cat, Math.round(totalAmt / m))
       } else if (INSURANCE_CATEGORIES.has(cat)) {
-        // ביטוחים ÷1: חלקי months → חודשי
-        newIns.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+        ins = mergeRows(ins, cat, Math.round(totalAmt / m))
       } else if (SUB_CATEGORIES.has(cat)) {
-        // מנויים ÷1: חלקי months → חודשי
-        newSub.push({ id: uid(), name: cat, amount: Math.round(totalAmt / m), fromCredit: true })
+        sub = mergeRows(sub, cat, Math.round(totalAmt / m))
       }
-      // קטגוריה לא מוכרת — מתעלמים (כמו v1)
     })
 
     const sortMR = (rows: MappingRow[]) => [...rows].sort((a, b) => b.amount - a.amount)
     const sortAR = (rows: AnnualRow[])  => [...rows].sort((a, b) => b.annualAmount - a.annualAmount)
 
-    const s = get()
     set({
-      variable: [...sortMR(newVar),   ...s.variable.filter(r => !r.fromCredit)],
-      fixed:    [...sortMR(newFixed),  ...s.fixed.filter(r => !r.fromCredit)],
-      sub:      [...sortMR(newSub),    ...s.sub.filter(r => !r.fromCredit)],
-      ins:      [...sortMR(newIns),    ...s.ins.filter(r => !r.fromCredit)],
-      annual:   [...sortAR(newAnnual), ...s.annual.filter(r => !r.fromCredit)],
+      variable: sortMR(variable),
+      fixed:    sortMR(fixed),
+      sub:      sortMR(sub),
+      ins:      sortMR(ins),
+      annual:   sortAR(annual),
       varMonths: months,
       creditImported: true,
     })
