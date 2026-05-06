@@ -85,7 +85,6 @@ export default function MonthlyPage() {
   }
 
   const displayBalance = aBalance ?? bBalance
-  const balancePositive = displayBalance >= 0
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -137,27 +136,6 @@ export default function MonthlyPage() {
         <BudgetSection title="הוצאות משתנות" icon="🛒" rows={data.variable} {...bind('variable')} />
         <BudgetSection title="מנויים" icon="🔄" rows={data.sub} {...bind('sub')} />
         <BudgetSection title="ביטוחים" icon="🛡️" rows={data.ins} {...bind('ins')} />
-
-        {/* KPI summary card */}
-        <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
-          <h2 className="font-semibold text-txt">📊 סיכום חודשי</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'הכנסות',          val: bIncome,  actual: hasActual ? aIncome : null,  color: 'text-green-400' },
-              { label: 'הוצאות',          val: bExp,     actual: hasActual ? aExp : null,      color: 'text-expense' },
-              { label: 'חיסכון',          val: tSav,     actual: null,                          color: 'text-gold' },
-              { label: 'תזרים נטו',       val: bBalance, actual: aBalance,                      color: balancePositive ? 'text-green-400' : 'text-expense' },
-            ].map(({ label, val, actual, color }) => (
-              <div key={label} className="bg-surface border border-line rounded-xl p-3">
-                <div className="text-xs text-muted-txt font-medium mb-1">{label}</div>
-                <div className={`text-lg font-black ${color}`}>{fmt(val)}</div>
-                {actual !== null && (
-                  <div className="text-xs text-muted-txt mt-0.5">ביצוע: {fmt(actual)}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Full-width: Installments */}
@@ -307,48 +285,24 @@ export default function MonthlyPage() {
         <button onClick={() => addSavingRow(monthId)} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף חיסכון</button>
       </div>
 
-      {/* Cashflow summary card */}
-      <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-4">
-        <h2 className="font-semibold text-txt">📊 תזרים {monthName}</h2>
-
-        {/* Table: label | תכנון | ביצוע */}
-        <div className="grid grid-cols-[1fr_6rem_6rem] sm:grid-cols-[1fr_8rem_8rem] gap-x-3 gap-y-2">
-          {/* Header */}
-          <span />
-          <span className="text-xs font-semibold text-muted-txt text-left">תכנון</span>
-          <span className="text-xs font-semibold text-muted-txt text-left">ביצוע</span>
-
-          {/* Divider */}
-          <div className="col-span-3 border-t border-line" />
-
-          {/* Income row */}
-          <span className="text-sm text-muted-txt">הכנסות</span>
-          <span className="text-sm font-bold text-green-400 tabular-nums text-left">{fmt(bIncome)}</span>
-          <span className={`text-sm font-bold tabular-nums text-left ${aIncome > 0 ? 'text-green-400' : 'text-muted-txt'}`}>
-            {aIncome > 0 ? fmt(aIncome) : '—'}
-          </span>
-
-          {/* Expenses row */}
-          <span className="text-sm text-muted-txt">הוצאות</span>
-          <span className="text-sm font-bold text-expense tabular-nums text-left">{fmt(bExp + tSav)}</span>
-          <span className={`text-sm font-bold tabular-nums text-left ${aExp > 0 ? 'text-expense' : 'text-muted-txt'}`}>
-            {aExp > 0 ? fmt(aExp + tSav) : '—'}
-          </span>
-
-          {/* Divider */}
-          <div className="col-span-3 border-t border-line" />
-
-          {/* Cashflow row */}
-          <span className="text-sm font-semibold text-txt">תזרים נטו</span>
-          <span className={`text-base font-black tabular-nums text-left ${bBalance >= 0 ? 'text-green-400' : 'text-expense'}`}>
-            {bBalance >= 0 ? '+' : ''}{fmt(bBalance)}
-          </span>
-          <span className={`text-base font-black tabular-nums text-left ${
-            aBalance === null ? 'text-muted-txt' :
-            aBalance >= 0 ? 'text-green-400' : 'text-expense'
-          }`}>
-            {aBalance === null ? '—' : `${aBalance >= 0 ? '+' : ''}${fmt(aBalance)}`}
-          </span>
+      {/* Summary — bottom */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
+        <h2 className="font-semibold text-txt">📊 סיכום {monthName}</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'הכנסות',    val: bIncome,  actual: hasActual ? aIncome : null, color: 'text-green-400' },
+            { label: 'הוצאות',    val: bExp,     actual: hasActual ? aExp : null,    color: 'text-expense' },
+            { label: 'חיסכון',    val: tSav,     actual: null,                        color: 'text-gold' },
+            { label: 'תזרים נטו', val: bBalance, actual: aBalance,                    color: bBalance >= 0 ? 'text-green-400' : 'text-expense' },
+          ].map(({ label, val, actual, color }) => (
+            <div key={label} className="bg-surface border border-line rounded-xl p-3">
+              <div className="text-xs text-muted-txt font-medium mb-1">{label}</div>
+              <div className={`text-lg font-black ${color}`}>{fmt(val)}</div>
+              {actual !== null && (
+                <div className="text-xs text-muted-txt mt-0.5">ביצוע: {fmt(actual)}</div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
