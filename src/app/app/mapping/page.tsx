@@ -69,48 +69,60 @@ export default function MappingPage() {
         />
 
         {/* 3. Annual */}
-        <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-txt">📅 הוצאות שנתיות</h2>
-            </div>
+        <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-1">
+            <h2 className="font-semibold text-txt">📅 הוצאות שנתיות</h2>
             <span className="text-xs text-muted-txt">
               שנתי: <span className="font-bold text-expense">{fmt(store.annual.reduce((s,r) => s+r.annualAmount, 0))}</span>
-              <span className="mx-2">|</span>
+              <span className="mx-1.5">|</span>
               לחודש: <span className="font-bold text-gold">{fmt(totalAnnualMo)}</span>
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_5rem_3.5rem_1.5rem] sm:grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+          {/* Desktop headers */}
+          <div className="hidden sm:grid grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
             <span>סוג הוצאה</span>
             <span className="text-left">סכום שנתי ₪</span>
             <span className="text-center">לחודש</span>
             <span />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {store.annual.map(row => (
-              <div key={row.id} className="grid grid-cols-[1fr_5rem_3.5rem_1.5rem] sm:grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 items-center group">
-                <input
-                  value={row.name}
-                  onChange={e => store.updateAnnualRow(row.id, 'name', e.target.value)}
-                  placeholder="שם ההוצאה"
-                  className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
-                />
-                <input
-                  type="number"
-                  value={row.annualAmount || ''}
-                  onChange={e => store.updateAnnualRow(row.id, 'annualAmount', parseFloat(e.target.value) || 0)}
-                  placeholder="₪"
-                  min={0}
-                  style={{ direction: 'ltr' }}
-                  className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
-                />
-                <span className="text-xs text-center px-1 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
-                  {fmt(Math.round(row.annualAmount / 12))}
-                </span>
-                <button
-                  onClick={() => store.deleteAnnualRow(row.id)}
-                  className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm"
-                >×</button>
+              <div key={row.id} className="group">
+                {/* Desktop row */}
+                <div className="hidden sm:grid grid-cols-[1fr_6rem_5rem_1.5rem] gap-2 items-center">
+                  <input value={row.name} onChange={e => store.updateAnnualRow(row.id, 'name', e.target.value)} placeholder="שם ההוצאה"
+                    className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+                  <input type="number" value={row.annualAmount || ''} onChange={e => store.updateAnnualRow(row.id, 'annualAmount', parseFloat(e.target.value) || 0)}
+                    placeholder="₪" min={0} style={{ direction: 'ltr' }}
+                    className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                  <span className="text-xs text-center px-1 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
+                    {fmt(Math.round(row.annualAmount / 12))}
+                  </span>
+                  <button onClick={() => store.deleteAnnualRow(row.id)}
+                    className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm">×</button>
+                </div>
+                {/* Mobile card */}
+                <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <input value={row.name} onChange={e => store.updateAnnualRow(row.id, 'name', e.target.value)} placeholder="שם ההוצאה"
+                      className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+                    <button onClick={() => store.deleteAnnualRow(row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 space-y-0.5">
+                      <div className="text-[10px] text-muted-txt px-1">סכום שנתי ₪</div>
+                      <input type="number" value={row.annualAmount || ''} onChange={e => store.updateAnnualRow(row.id, 'annualAmount', parseFloat(e.target.value) || 0)}
+                        placeholder="₪" min={0} style={{ direction: 'ltr' }}
+                        className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                    </div>
+                    <div className="shrink-0 text-center space-y-0.5">
+                      <div className="text-[10px] text-muted-txt px-1">לחודש</div>
+                      <span className="block text-xs px-3 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
+                        {fmt(Math.round(row.annualAmount / 12))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
