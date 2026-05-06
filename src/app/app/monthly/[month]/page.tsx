@@ -84,7 +84,6 @@ export default function MonthlyPage() {
     }
   }
 
-  const displayBalance = aBalance ?? bBalance
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -135,7 +134,9 @@ export default function MonthlyPage() {
         <BudgetSection title="הוצאות קבועות" icon="📌" rows={data.fixed} {...bind('fixed')} />
         <BudgetSection title="הוצאות משתנות" icon="🛒" rows={data.variable} {...bind('variable')} />
         <BudgetSection title="מנויים" icon="🔄" rows={data.sub} {...bind('sub')} />
-        <BudgetSection title="ביטוחים" icon="🛡️" rows={data.ins} {...bind('ins')} />
+        <div className="md:col-span-2">
+          <BudgetSection title="ביטוחים" icon="🛡️" rows={data.ins} {...bind('ins')} />
+        </div>
       </div>
 
       {/* Full-width: Installments */}
