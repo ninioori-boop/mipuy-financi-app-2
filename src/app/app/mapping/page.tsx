@@ -38,10 +38,9 @@ export default function MappingPage() {
         <p className="text-muted-txt text-sm">הגדר הכנסות והוצאות חודשיות — הבסיס לתכנון התקציב</p>
       </div>
 
-      {/* 2-column grid for the first 6 sections */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* 1. Income */}
+        {/* שורה 1: הכנסות | קבועות */}
         <SectionPanel
           title="הכנסות חודשיות"
           icon="💰"
@@ -53,8 +52,6 @@ export default function MappingPage() {
           onDelete={id => store.deleteRow('income', id)}
           colName="מקור הכנסה"
         />
-
-        {/* 2. Fixed */}
         <SectionPanel
           title="הוצאות קבועות"
           icon="📌"
@@ -68,7 +65,33 @@ export default function MappingPage() {
           creditTransactions={transactions}
         />
 
-        {/* 3. Annual */}
+        {/* שורה 2: מנויים | ביטוחים */}
+        <SectionPanel
+          title="מינויים ומנויים"
+          icon="🔄"
+          rows={store.sub}
+          totalLabel="סה&quot;כ מנויים"
+          onAdd={() => store.addRow('sub')}
+          onUpdate={(id, field, value) => store.updateRow('sub', id, field, value)}
+          onDelete={id => store.deleteRow('sub', id)}
+          colName="שם המנוי"
+          creditTransactions={transactions}
+        />
+        <SectionPanel
+          title="ביטוחים"
+          icon="🛡️"
+          rows={store.ins}
+          totalLabel="סה&quot;כ ביטוחים"
+          onAdd={() => store.addRow('ins')}
+          onUpdate={(id, field, value) => store.updateRow('ins', id, field, value)}
+          onDelete={id => store.deleteRow('ins', id)}
+          colName="סוג הביטוח"
+          colAmt="פרמיה חודשית ₪"
+          creditTransactions={transactions}
+        />
+
+        {/* שורה 3: שנתיות — רוחב מלא */}
+        <div className="md:col-span-2">
         <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-1">
             <h2 className="font-semibold text-txt">📅 הוצאות שנתיות</h2>
@@ -137,47 +160,23 @@ export default function MappingPage() {
             </span>
           </div>
         </div>
+        </div>{/* end md:col-span-2 annual */}
 
-        {/* 4. Subscriptions */}
-        <SectionPanel
-          title="מינויים ומנויים"
-          icon="🔄"
-          rows={store.sub}
-          totalLabel="סה&quot;כ מנויים"
-          onAdd={() => store.addRow('sub')}
-          onUpdate={(id, field, value) => store.updateRow('sub', id, field, value)}
-          onDelete={id => store.deleteRow('sub', id)}
-          colName="שם המנוי"
-          creditTransactions={transactions}
-        />
-
-        {/* 5. Insurance */}
-        <SectionPanel
-          title="ביטוחים"
-          icon="🛡️"
-          rows={store.ins}
-          totalLabel="סה&quot;כ ביטוחים"
-          onAdd={() => store.addRow('ins')}
-          onUpdate={(id, field, value) => store.updateRow('ins', id, field, value)}
-          onDelete={id => store.deleteRow('ins', id)}
-          colName="סוג הביטוח"
-          colAmt="פרמיה חודשית ₪"
-          creditTransactions={transactions}
-        />
-
-        {/* 6. Variable */}
-        <VariablePanel
-          rows={store.variable}
-          varMonths={store.varMonths}
-          creditImported={store.creditImported}
-          hasCredit={transactions.length > 0}
-          creditTransactions={transactions}
-          onAdd={() => store.addVarRow()}
-          onUpdate={(id, field, value) => store.updateVarRow(id, field, value)}
-          onDelete={id => store.deleteVarRow(id)}
-          onMonthsChange={store.setVarMonths}
-          onImport={handleImport}
-        />
+        {/* שורה 4: משתנות — רוחב מלא */}
+        <div className="md:col-span-2">
+          <VariablePanel
+            rows={store.variable}
+            varMonths={store.varMonths}
+            creditImported={store.creditImported}
+            hasCredit={transactions.length > 0}
+            creditTransactions={transactions}
+            onAdd={() => store.addVarRow()}
+            onUpdate={(id, field, value) => store.updateVarRow(id, field, value)}
+            onDelete={id => store.deleteVarRow(id)}
+            onMonthsChange={store.setVarMonths}
+            onImport={handleImport}
+          />
+        </div>
 
       </div>
 
