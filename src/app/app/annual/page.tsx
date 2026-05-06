@@ -29,32 +29,51 @@ function PlanSection({ section, title, icon, isIncome = false }: {
           {fmt(total)}<span className="text-xs font-normal text-muted-txt">/שנה</span>
         </span>
       </div>
-      <div className="grid grid-cols-[1fr_5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
+      {/* Desktop headers */}
+      <div className="hidden sm:grid grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
         <span>פריט</span>
         <span className="text-left">שנתי ₪</span>
         <span className="text-center">÷12/חודש</span>
         <span />
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {rows.map(row => (
-          <div key={row.id} className="grid grid-cols-[1fr_5rem_4.5rem_1.5rem] sm:grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 items-center group">
-            <input
-              value={row.name}
-              onChange={e => store.updateRow(section, row.id, 'name', e.target.value)}
-              placeholder="פריט"
-              className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
-            />
-            <input
-              type="number" value={row.annual || ''}
-              onChange={e => store.updateRow(section, row.id, 'annual', parseFloat(e.target.value) || 0)}
-              placeholder="₪" min={0} style={{ direction: 'ltr' }}
-              className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
-            />
-            <span className="text-xs text-center px-1 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
-              {row.annual > 0 ? fmt(Math.round(row.annual / 12)) : '—'}
-            </span>
-            <button onClick={() => store.deleteRow(section, row.id)}
-              className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
+          <div key={row.id} className="group">
+            {/* Desktop row */}
+            <div className="hidden sm:grid grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 items-center">
+              <input value={row.name} onChange={e => store.updateRow(section, row.id, 'name', e.target.value)} placeholder="פריט"
+                className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+              <input type="number" value={row.annual || ''} onChange={e => store.updateRow(section, row.id, 'annual', parseFloat(e.target.value) || 0)}
+                placeholder="₪" min={0} style={{ direction: 'ltr' }}
+                className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+              <span className="text-xs text-center px-1 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
+                {row.annual > 0 ? fmt(Math.round(row.annual / 12)) : '—'}
+              </span>
+              <button onClick={() => store.deleteRow(section, row.id)}
+                className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
+            </div>
+            {/* Mobile card */}
+            <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input value={row.name} onChange={e => store.updateRow(section, row.id, 'name', e.target.value)} placeholder="פריט"
+                  className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+                <button onClick={() => store.deleteRow(section, row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 space-y-0.5">
+                  <div className="text-[10px] text-muted-txt px-1">סכום שנתי ₪</div>
+                  <input type="number" value={row.annual || ''} onChange={e => store.updateRow(section, row.id, 'annual', parseFloat(e.target.value) || 0)}
+                    placeholder="₪" min={0} style={{ direction: 'ltr' }}
+                    className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                </div>
+                <div className="shrink-0 space-y-0.5 text-center">
+                  <div className="text-[10px] text-muted-txt px-1">÷12/חודש</div>
+                  <span className="block text-xs px-3 py-1.5 rounded border border-line bg-surface text-muted-txt tabular-nums">
+                    {row.annual > 0 ? fmt(Math.round(row.annual / 12)) : '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         ))}
       </div>
