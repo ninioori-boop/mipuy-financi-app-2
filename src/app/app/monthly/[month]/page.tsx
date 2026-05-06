@@ -128,14 +128,16 @@ export default function MonthlyPage() {
         </div>
       </div>
 
-      {/* 2-column grid: income + fixed, variable + sub, ins (full) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* שורה 1: הכנסות | קבועות */}
         <BudgetSection title="הכנסות" icon="💰" rows={data.income} isIncome {...bind('income')} />
         <BudgetSection title="הוצאות קבועות" icon="📌" rows={data.fixed} {...bind('fixed')} />
-        <BudgetSection title="הוצאות משתנות" icon="🛒" rows={data.variable} {...bind('variable')} />
+        {/* שורה 2: מנויים | ביטוחים */}
         <BudgetSection title="מנויים" icon="🔄" rows={data.sub} {...bind('sub')} />
+        <BudgetSection title="ביטוחים" icon="🛡️" rows={data.ins} {...bind('ins')} />
+        {/* שורה 3: משתנות — רוחב מלא */}
         <div className="md:col-span-2">
-          <BudgetSection title="ביטוחים" icon="🛡️" rows={data.ins} {...bind('ins')} />
+          <BudgetSection title="הוצאות משתנות" icon="🛒" rows={data.variable} {...bind('variable')} />
         </div>
       </div>
 
