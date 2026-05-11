@@ -122,8 +122,8 @@ export default function GoalsPage() {
                       >×</button>
                     </div>
 
-                    {/* Fields grid — 2 cols on mobile, 4 on desktop */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {/* Fields grid — 2 cols on mobile, 5 on desktop */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                       <div className="space-y-0.5">
                         <div className="text-xs text-muted-txt px-1">נדרש ₪</div>
                         {numInput(row.required, v => updateGoal(id, row.id, 'required', v), '₪')}
@@ -146,6 +146,30 @@ export default function GoalsPage() {
                           style={{ direction: 'ltr' }}
                           className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt focus:outline-none focus:border-gold/60 text-left"
                         />
+                      </div>
+                      <div className="space-y-0.5 col-span-2 sm:col-span-1">
+                        <div className="text-xs text-muted-txt px-1">מוצר השקעה</div>
+                        <select
+                          value={row.product || ''}
+                          onChange={e => updateGoal(id, row.id, 'product', e.target.value)}
+                          className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt focus:outline-none focus:border-gold/60"
+                        >
+                          <option value="">בחר…</option>
+                          <option value="קרן השתלמות">קרן השתלמות</option>
+                          <option value="קופת גמל להשקעה">קופת גמל להשקעה</option>
+                          <option value="פוליסת חיסכון">פוליסת חיסכון</option>
+                          <option value="תיק השקעות מנוהל">תיק השקעות מנוהל</option>
+                          <option value="קרן נאמנות">קרן נאמנות</option>
+                          <option value='תעודות סל / ETF'>תעודות סל / ETF</option>
+                          <option value="מניות">מניות</option>
+                          <option value='אג"ח'>אג&quot;ח</option>
+                          <option value='מק"ם'>מק&quot;ם</option>
+                          <option value="פיקדון בנקאי">פיקדון בנקאי</option>
+                          <option value="חיסכון בעו״ש">חיסכון בעו״ש</option>
+                          <option value="קריפטו">קריפטו</option>
+                          <option value="נדל״ן">נדל״ן</option>
+                          <option value="אחר">אחר</option>
+                        </select>
                       </div>
                     </div>
 

@@ -11,6 +11,7 @@ export interface GoalRow {
   current:    number
   monthly:    number
   targetDate: string   // 'YYYY-MM' format
+  product:    string   // מוצר השקעה
 }
 
 export type GoalHorizon = 'short' | 'medium' | 'long'
@@ -26,7 +27,7 @@ interface GoalsState {
 }
 
 function emptyRow(): GoalRow {
-  return { id: uid(), name: '', required: 0, current: 0, monthly: 0, targetDate: '' }
+  return { id: uid(), name: '', required: 0, current: 0, monthly: 0, targetDate: '', product: '' }
 }
 
 export const useGoalsStore = create<GoalsState>((set, get) => ({
