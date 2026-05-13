@@ -71,9 +71,9 @@ function Toggle({ options, value, onChange }: {
   )
 }
 
-function NumInput({ label, value, onChange, min = 0, step = 1, note }: {
-  label: string; value: number; onChange: (n: number) => void
-  min?: number; step?: number; note?: string
+function NumInput({ label, value, onChange, min = 0, step = 1, note, placeholder }: {
+  label: string; value: number | null; onChange: (n: number | null) => void
+  min?: number; step?: number; note?: string; placeholder?: string
 }) {
   return (
     <div className="space-y-1">
@@ -81,8 +81,17 @@ function NumInput({ label, value, onChange, min = 0, step = 1, note }: {
         {label}{note ? <span className="font-normal ms-1 text-muted-txt/70">{note}</span> : null}
       </label>
       <input
-        type="number" value={value} min={min} step={step}
-        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        type="number"
+        value={value ?? ''}
+        min={min}
+        step={step}
+        placeholder={placeholder ?? '—'}
+        onChange={e => {
+          const v = e.target.value
+          if (v === '') { onChange(null); return }
+          const n = parseFloat(v)
+          onChange(isNaN(n) ? null : n)
+        }}
         style={{ direction: 'ltr' }}
         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 tabular-nums text-left"
       />
@@ -100,24 +109,31 @@ type Tab = 'compound' | 'fees'
 
 export default function CompoundPage() {
   const [tab, setTab]             = useState<Tab>('compound')
-  const [principal, setPrincipal] = useState(50000)
-  const [monthly, setMonthly]     = useState(1000)
-  const [rate, setRate]           = useState(7)
-  const [years, setYears]         = useState(20)
-  const [feeBalance, setFeeBalance] = useState(0.5)   // % מהצבירה
-  const [feeDeposit, setFeeDeposit] = useState(1.0)   // % מההפקדה
+  const [principal, setPrincipal] = useState<number | null>(null)
+  const [monthly, setMonthly]     = useState<number | null>(null)
+  const [rate, setRate]           = useState<number | null>(null)
+  const [years, setYears]         = useState<number | null>(null)
+  const [feeBalance, setFeeBalance] = useState<number | null>(null)   // % מהצבירה
+  const [feeDeposit, setFeeDeposit] = useState<number | null>(null)   // % מההפקדה
+
+  const p = principal ?? 0
+  const m = monthly   ?? 0
+  const r = rate      ?? 0
+  const y = years     ?? 0
+  const fB = feeBalance ?? 0
+  const fD = feeDeposit ?? 0
 
   // ── 4 scenarios ──
-  const tNone  = useMemo(() => buildYearly(principal, monthly, rate, 0,          0,          years), [principal, monthly, rate, years])
-  const tBal   = useMemo(() => buildYearly(principal, monthly, rate, feeBalance, 0,          years), [principal, monthly, rate, feeBalance, years])
-  const tDep   = useMemo(() => buildYearly(principal, monthly, rate, 0,          feeDeposit, years), [principal, monthly, rate, feeDeposit, years])
-  const tBoth  = useMemo(() => buildYearly(principal, monthly, rate, feeBalance, feeDeposit, years), [principal, monthly, rate, feeBalance, feeDeposit, years])
+  const tNone  = useMemo(() => buildYearly(p, m, r, 0,  0,  y), [p, m, r, y])
+  const tBal   = useMemo(() => buildYearly(p, m, r, fB, 0,  y), [p, m, r, fB, y])
+  const tDep   = useMemo(() => buildYearly(p, m, r, 0,  fD, y), [p, m, r, fD, y])
+  const tBoth  = useMemo(() => buildYearly(p, m, r, fB, fD, y), [p, m, r, fB, fD, y])
 
-  const finalNone = tNone[years - 1]
-  const finalBal  = tBal[years  - 1]
-  const finalDep  = tDep[years  - 1]
-  const finalBoth = tBoth[years - 1]
-  const totalDeposits = principal + monthly * years * 12
+  const finalNone = y > 0 ? tNone[y - 1] : undefined
+  const finalBal  = y > 0 ? tBal[y  - 1] : undefined
+  const finalDep  = y > 0 ? tDep[y  - 1] : undefined
+  const finalBoth = y > 0 ? tBoth[y - 1] : undefined
+  const totalDeposits = p + m * y * 12
 
   // chart data — compound tab uses tNone; fees tab uses all 4
   const chartCompound = tNone.map((r, i) => ({
@@ -247,7 +263,7 @@ export default function CompoundPage() {
                       <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#111' : '#161616' }}>
                         <td style={{ padding: '6px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#8A8178', fontWeight: 600 }}>{i + 1}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#C9A86C', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(row.balance)}</td>
-                        <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>{fmt(monthly * 12)}</td>
+                        <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>{fmt(m * 12)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmt(row.gain - prev.gain)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>{fmt(row.deposits)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(row.gain)}</td>
@@ -268,8 +284,8 @@ export default function CompoundPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: 'ללא דמי ניהול',              val: finalNone?.balance, color: 'text-gold',       border: 'border-gold/30       bg-gold/5' },
-              { label: `מהצבירה ${feeBalance}% בלבד`, val: finalBal?.balance,  color: 'text-yellow-400', border: 'border-yellow-400/20  bg-yellow-400/5' },
-              { label: `מההפקדה ${feeDeposit}% בלבד`, val: finalDep?.balance,  color: 'text-orange-400', border: 'border-orange-400/20  bg-orange-400/5' },
+              { label: `מהצבירה ${fB}% בלבד`,        val: finalBal?.balance,  color: 'text-yellow-400', border: 'border-yellow-400/20  bg-yellow-400/5' },
+              { label: `מההפקדה ${fD}% בלבד`,        val: finalDep?.balance,  color: 'text-orange-400', border: 'border-orange-400/20  bg-orange-400/5' },
               { label: 'שני סוגי דמי ניהול',          val: finalBoth?.balance, color: 'text-expense',    border: 'border-expense/20    bg-expense/5' },
             ].map(({ label, val, color, border }) => (
               <div key={label} className={`rounded-xl border p-4 ${border}`}>
