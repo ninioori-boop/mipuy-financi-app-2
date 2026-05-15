@@ -8,10 +8,13 @@ import { MONTH_IDS } from '@/lib/constants'
 Font.register({
   family: 'Heebo',
   fonts: [
-    { src: '/fonts/Heebo-Regular.woff', fontWeight: 'normal' },
-    { src: '/fonts/Heebo-Bold.woff',    fontWeight: 'bold' },
+    { src: '/fonts/Heebo-Regular.ttf', fontWeight: 'normal' },
+    { src: '/fonts/Heebo-Bold.ttf',    fontWeight: 'bold' },
   ],
 })
+
+// react-pdf can't shape emoji glyphs with a Hebrew text font; strip them
+Font.registerHyphenationCallback(word => [word])
 
 const MONTH_SHORT = ['ינו','פבר','מרץ','אפר','מאי','יוני','יול','אוג','ספט','אוק','נוב','דצמ']
 
@@ -146,7 +149,7 @@ function DebtTable({ rows }: { rows: AnnualDebtRow[] }) {
   const visible = rows.filter(r => (r.annual || 0) > 0 || (r.balance || 0) > 0 || (r.name || '').trim().length > 0)
   return (
     <View wrap={false} style={{ marginBottom: 8 }}>
-      <Text style={s.sectionTitle}>💳 הלוואות וחובות</Text>
+      <Text style={s.sectionTitle}>הלוואות וחובות</Text>
       <View style={s.table}>
         <View style={s.tHeadRow}>
           <Text style={[s.th, { flex: 2 }]}>שם הלוואה</Text>
@@ -224,7 +227,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
             <Text style={s.brand}>The Home Economist</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
-          <Text style={s.title}>📆 תכנון שנתי {input.year}</Text>
+          <Text style={s.title}>תכנון שנתי {input.year}</Text>
           <Text style={s.subtitle}>תקציב שנתי מול ביצוע YTD</Text>
         </View>
 
@@ -259,23 +262,23 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         {/* Two-column section grid */}
         <View style={s.twoCol}>
           <View style={s.half}>
-            <SectionTable title="💰 הכנסות" rows={input.income} />
+            <SectionTable title="הכנסות" rows={input.income} />
           </View>
           <View style={s.half}>
-            <SectionTable title="📌 הוצאות קבועות" rows={input.fixed} />
-          </View>
-        </View>
-        <View style={s.twoCol}>
-          <View style={s.half}>
-            <SectionTable title="🛒 הוצאות משתנות" rows={input.variable} />
-          </View>
-          <View style={s.half}>
-            <SectionTable title="🔄 מנויים וביטוחים" rows={input.sub} />
+            <SectionTable title="הוצאות קבועות" rows={input.fixed} />
           </View>
         </View>
         <View style={s.twoCol}>
           <View style={s.half}>
-            <SectionTable title="🏦 חיסכון" rows={input.savings} />
+            <SectionTable title="הוצאות משתנות" rows={input.variable} />
+          </View>
+          <View style={s.half}>
+            <SectionTable title="מנויים וביטוחים" rows={input.sub} />
+          </View>
+        </View>
+        <View style={s.twoCol}>
+          <View style={s.half}>
+            <SectionTable title="חיסכון" rows={input.savings} />
           </View>
           <View style={s.half}>
             <DebtTable rows={input.debt} />
@@ -295,8 +298,8 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
             <Text style={s.brand}>The Home Economist</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
-          <Text style={s.title}>📊 פירוט חודשי {input.year}</Text>
-          <Text style={s.subtitle}>תכנון מול ביצוע · כל הקטגוריות לפי חודש</Text>
+          <Text style={s.title}>פירוט חודשי {input.year}</Text>
+          <Text style={s.subtitle}>תכנון מול ביצוע — כל הקטגוריות לפי חודש</Text>
         </View>
 
         <View style={s.table}>
@@ -310,12 +313,12 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
           </View>
 
           {([
-            { label: '💰 הכנסות',        plan: pIncome / 12,   key: 'income'   as const, total: pIncome,   totalAct: aIncome },
-            { label: '📌 קבועות',         plan: pFixed / 12,    key: 'fixed'    as const, total: pFixed,    totalAct: aFixed },
-            { label: '🛒 משתנות',         plan: pVariable / 12, key: 'variable' as const, total: pVariable, totalAct: aVariable },
-            { label: '🔄 מנויים+ביטוח',  plan: pSub / 12,      key: 'sub'      as const, total: pSub,      totalAct: aSub },
-            { label: '💳 הלוואות',        plan: pDebt / 12,     key: 'debt'     as const, total: pDebt,     totalAct: aDebt },
-            { label: '🏦 חיסכון',         plan: pSavings / 12,  key: 'savings'  as const, total: pSavings,  totalAct: aSavings },
+            { label: 'הכנסות',        plan: pIncome / 12,   key: 'income'   as const, total: pIncome,   totalAct: aIncome },
+            { label: 'קבועות',         plan: pFixed / 12,    key: 'fixed'    as const, total: pFixed,    totalAct: aFixed },
+            { label: 'משתנות',         plan: pVariable / 12, key: 'variable' as const, total: pVariable, totalAct: aVariable },
+            { label: 'מנויים+ביטוח',  plan: pSub / 12,      key: 'sub'      as const, total: pSub,      totalAct: aSub },
+            { label: 'הלוואות',        plan: pDebt / 12,     key: 'debt'     as const, total: pDebt,     totalAct: aDebt },
+            { label: 'חיסכון',         plan: pSavings / 12,  key: 'savings'  as const, total: pSavings,  totalAct: aSavings },
           ]).map((r, idx) => (
             <View key={r.label} style={idx % 2 === 0 ? s.tRow : s.tRowAlt}>
               <Text style={[s.td, { flex: 1.4, fontWeight: 'bold' }]}>{r.label}</Text>
@@ -337,7 +340,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
 
           {/* Cash flow row */}
           <View style={s.tFootRow}>
-            <Text style={[s.td, { flex: 1.4, fontWeight: 'bold' }]}>📊 תזרים נטו</Text>
+            <Text style={[s.td, { flex: 1.4, fontWeight: 'bold' }]}>תזרים נטו</Text>
             {acts.map((m, i) => {
               const planNet = (pIncome - pFixed - pVariable - pSub - pDebt - pSavings) / 12
               const actNet  = m ? m.income - m.fixed - m.variable - m.sub - m.debt - m.savings : null
@@ -356,8 +359,8 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         </View>
 
         <View style={{ marginTop: 8, flexDirection: 'row-reverse', justifyContent: 'flex-start', gap: 12 }}>
-          <Text style={{ fontSize: 7, color: C.gold }}>■ תכנון</Text>
-          <Text style={{ fontSize: 7, color: C.income }}>■ ביצוע</Text>
+          <Text style={{ fontSize: 7, color: C.gold }}>תכנון</Text>
+          <Text style={{ fontSize: 7, color: C.income }}>ביצוע</Text>
           {activeMonths > 0 && <Text style={{ fontSize: 7, color: C.muted }}>{activeMonths} חודשים עם נתוני ביצוע</Text>}
         </View>
 
