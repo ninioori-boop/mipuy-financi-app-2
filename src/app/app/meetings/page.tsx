@@ -206,13 +206,13 @@ export default function MeetingsPage() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">מה היה</label>
+                      <label className="text-xs font-semibold text-muted-txt">מה היה בפגישה</label>
                       <textarea
                         value={m.summary}
                         onChange={e => update(m.id, { summary: e.target.value })}
-                        rows={12}
+                        rows={10}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="כתבי כאן מה היה בפגישה…"
+                        placeholder="כתבו כאן מה היה בפגישה…"
                       />
                     </div>
 
@@ -221,9 +221,20 @@ export default function MeetingsPage() {
                       <textarea
                         value={m.actionItems}
                         onChange={e => update(m.id, { actionItems: e.target.value })}
-                        rows={8}
+                        rows={7}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="כתבי כאן את המסקנות מהפגישה…"
+                        placeholder="כתבו כאן את המסקנות מהפגישה…"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
+                      <textarea
+                        value={m.nextSteps ?? ''}
+                        onChange={e => update(m.id, { nextSteps: e.target.value })}
+                        rows={6}
+                        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
+                        placeholder="כתבו כאן את המשימות לפגישה הבאה…"
                       />
                     </div>
 
