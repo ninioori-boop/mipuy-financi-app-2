@@ -19,6 +19,7 @@ const tabs = [
   { href: '/app/goals',       emoji: '🎯', label: 'יעדים' },
   { href: '/app/loans',       emoji: '💰', label: 'הלוואות' },
   { href: '/app/compound',    emoji: '📈', label: 'ריבית' },
+  { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

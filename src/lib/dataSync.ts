@@ -16,6 +16,7 @@ import { useAnnualStore }  from '@/stores/annualStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore }   from '@/stores/goalsStore'
 import { useCreditStore }  from '@/stores/creditStore'
+import { useMeetingsStore } from '@/stores/meetingsStore'
 
 export const SCHEMA_VERSION = 1
 
@@ -53,6 +54,9 @@ export interface Snapshot {
     learnedDB:    Record<string, string>
     reportMonths: number
   }
+  meetings: {
+    meetings: ReturnType<typeof useMeetingsStore.getState>['meetings']
+  }
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -66,6 +70,7 @@ export function collectSnapshot(): Snapshot {
   const p = useMappingStore.getState()
   const g = useGoalsStore.getState()
   const c = useCreditStore.getState()
+  const mt = useMeetingsStore.getState()
 
   return {
     version: SCHEMA_VERSION,
@@ -82,6 +87,7 @@ export function collectSnapshot(): Snapshot {
     },
     goals: { short: g.short, medium: g.medium, long: g.long },
     credit: { learnedDB: c.learnedDB, reportMonths: c.reportMonths },
+    meetings: { meetings: mt.meetings },
   }
 }
 
@@ -144,6 +150,13 @@ export function applySnapshot(raw: unknown): void {
       ...(typeof c.reportMonths === 'number' ? { reportMonths: c.reportMonths }                     : {}),
     })
   }
+
+  // meetings
+  if (isObject(raw.meetings) && Array.isArray(raw.meetings.meetings)) {
+    useMeetingsStore.setState({
+      meetings: raw.meetings.meetings as ReturnType<typeof useMeetingsStore.getState>['meetings'],
+    })
+  }
 }
 
 /**
@@ -169,6 +182,7 @@ export function resetAllStores(): void {
     learnedDB: {}, reportMonths: 3,
     isLoading: false, loadingMessage: '',
   })
+  useMeetingsStore.setState({ meetings: [] })
 }
 
 /** Quick byte-size estimate to enforce a sanity cap before saving. */
