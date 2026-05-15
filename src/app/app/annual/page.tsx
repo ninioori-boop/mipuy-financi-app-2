@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useAnnualStore, type AnnualSection } from '@/stores/annualStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { MONTHS_LIST } from '@/lib/constants'
+import { exportAnnualXlsx } from '@/lib/exportAnnualXlsx'
+import { toast } from 'sonner'
 
 const MONTH_IDS = MONTHS_LIST.map(m => m.id)
 const MONTH_SHORT = ['ינו','פבר','מרץ','אפר','מאי','יוני','יול','אוג','ספט','אוק','נוב','דצמ']
@@ -92,6 +94,44 @@ export default function AnnualPage() {
   const store = useAnnualStore()
   const { months } = useMonthlyStore()
   const [view, setView] = useState<ViewMode>('plan')
+  const [exporting, setExporting] = useState<'pdf' | 'xlsx' | null>(null)
+
+  async function handleExportPdf() {
+    try {
+      setExporting('pdf')
+      const { exportAnnualPdf } = await import('@/lib/exportAnnualPdf')
+      await exportAnnualPdf({
+        year: store.year,
+        income: store.income, fixed: store.fixed, variable: store.variable,
+        sub: store.sub, savings: store.savings, debt: store.debt,
+        months,
+      })
+      toast.success('PDF הופק בהצלחה')
+    } catch (e) {
+      console.error(e)
+      toast.error('שגיאה בהפקת PDF')
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  function handleExportXlsx() {
+    try {
+      setExporting('xlsx')
+      exportAnnualXlsx({
+        year: store.year,
+        income: store.income, fixed: store.fixed, variable: store.variable,
+        sub: store.sub, savings: store.savings, debt: store.debt,
+        months,
+      })
+      toast.success('Excel הופק בהצלחה')
+    } catch (e) {
+      console.error(e)
+      toast.error('שגיאה בייצוא לאקסל')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   const moActuals = MONTH_IDS.map(mid => {
     const d = months[mid]
@@ -133,7 +173,21 @@ export default function AnnualPage() {
           <h1 className="text-2xl font-bold text-gold">📆 תכנון שנתי</h1>
           <p className="text-muted-txt text-sm mt-0.5">תקציב שנתי מול ביצוע YTD מהחודשים</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportPdf}
+            disabled={exporting !== null}
+            className="text-xs sm:text-sm bg-surface border border-line hover:border-gold/60 rounded-lg px-3 py-1.5 text-txt font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting === 'pdf' ? '⏳ מפיק…' : '📄 ייצוא PDF'}
+          </button>
+          <button
+            onClick={handleExportXlsx}
+            disabled={exporting !== null}
+            className="text-xs sm:text-sm bg-surface border border-line hover:border-gold/60 rounded-lg px-3 py-1.5 text-txt font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting === 'xlsx' ? '⏳ מפיק…' : '📊 ייצוא לאקסל'}
+          </button>
           <span className="text-xs text-muted-txt">שנה:</span>
           <select value={store.year} onChange={e => store.setYear(parseInt(e.target.value))}
             className="bg-bg border border-gold rounded-lg px-3 py-1.5 text-gold font-bold text-sm focus:outline-none">
