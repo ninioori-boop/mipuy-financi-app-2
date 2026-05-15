@@ -206,18 +206,18 @@ export default function MeetingsPage() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">סיכום הפגישה</label>
+                      <label className="text-xs font-semibold text-muted-txt">מה היה בפגישה</label>
                       <textarea
                         value={m.summary}
                         onChange={e => update(m.id, { summary: e.target.value })}
                         rows={14}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="כתבי כאן את סיכום הפגישה…"
+                        placeholder="כתבי כאן מה היה בפגישה…"
                       />
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">משימות להמשך</label>
+                      <label className="text-xs font-semibold text-muted-txt">משימות לקראת הפגישה הבאה</label>
                       <textarea
                         value={m.actionItems}
                         onChange={e => update(m.id, { actionItems: e.target.value })}
