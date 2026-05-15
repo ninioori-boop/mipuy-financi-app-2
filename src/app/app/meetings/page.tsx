@@ -238,9 +238,20 @@ export default function MeetingsPage() {
                       />
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-muted-txt pt-2 border-t border-line">
-                      <span>נוצר: {new Date(m.createdAt).toLocaleString('he-IL')}</span>
-                      <span>עודכן: {new Date(m.updatedAt).toLocaleString('he-IL')}</span>
+                    <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
+                      <div className="flex flex-col text-[11px] text-muted-txt leading-tight">
+                        <span>נוצר: {new Date(m.createdAt).toLocaleString('he-IL')}</span>
+                        <span>עודכן: {new Date(m.updatedAt).toLocaleString('he-IL')}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setOpenId(null)
+                          toast.success('סיכום הפגישה נשמר')
+                        }}
+                        className="text-sm bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 font-semibold transition-colors"
+                      >
+                        ✓ סיום
+                      </button>
                     </div>
                   </div>
                 )}
