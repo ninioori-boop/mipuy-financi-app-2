@@ -110,7 +110,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => setDrawerOpen(true)}
-            className="lg:hidden text-txt text-xl leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-surface3 transition-colors"
+            className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
             aria-label="פתח תפריט"
           >
             ☰
@@ -135,41 +135,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0">
+      {/* Drawer — opens on click, all screen sizes */}
+      {drawerOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 z-40"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <aside className="fixed top-0 bottom-0 right-0 w-72 max-w-[85vw] bg-surface2 border-l border-line z-50 overflow-y-auto flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between p-3 border-b border-line">
+              <span className="font-bold text-gold">תפריט</span>
+              <button
+                onClick={() => setDrawerOpen(false)}
+                className="text-txt text-lg leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-surface3 transition-colors"
+                aria-label="סגור תפריט"
+              >
+                ✕
+              </button>
+            </div>
+            {navList}
+          </aside>
+        </>
+      )}
 
-        {/* Sidebar — desktop only */}
-        <aside className="hidden lg:flex flex-col w-56 shrink-0 border-l border-line bg-surface2 overflow-y-auto">
-          {navList}
-        </aside>
-
-        {/* Drawer — mobile only */}
-        {drawerOpen && (
-          <>
-            <div
-              className="lg:hidden fixed inset-0 bg-black/60 z-40"
-              onClick={() => setDrawerOpen(false)}
-            />
-            <aside className="lg:hidden fixed top-0 bottom-0 right-0 w-72 max-w-[85vw] bg-surface2 border-l border-line z-50 overflow-y-auto flex flex-col">
-              <div className="flex items-center justify-between p-3 border-b border-line">
-                <span className="font-bold text-gold">תפריט</span>
-                <button
-                  onClick={() => setDrawerOpen(false)}
-                  className="text-txt text-lg leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-surface3 transition-colors"
-                  aria-label="סגור תפריט"
-                >
-                  ✕
-                </button>
-              </div>
-              {navList}
-            </aside>
-          </>
-        )}
-
-        {/* Main */}
-        <main className="flex-1 min-w-0 p-3 sm:p-6">
-          {children}
-        </main>
-      </div>
+      {/* Main */}
+      <main className="flex-1 min-w-0 p-3 sm:p-6">
+        {children}
+      </main>
 
     </div>
   )
