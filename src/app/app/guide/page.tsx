@@ -72,6 +72,13 @@ export default function GuidePage() {
               tip: 'מלא תאריך יעד וסכום נוכחי — ההפרשה החודשית תחושב אוטומטית',
               color: 'border-rose-400/30 bg-rose-400/5', num: 'bg-rose-400/20 text-rose-400',
             },
+            {
+              step: '9', icon: '📝', tab: 'פגישות',
+              title: 'תעד פגישות ליווי',
+              desc: 'תיעוד סיכומי הפגישות לאורך תהליך הליווי — 4 סוגי פגישות: מיפוי, תקציב, בקרה, תוכנית כלכלית. כל סיכום כולל: מה היה בפגישה, מסקנות, ומשימות לפגישה הבאה. ייצוא PDF ממותג לכל סיכום.',
+              tip: 'כפתור "סיום" סוגר את הסיכום — הכל נשמר אוטומטית בענן בכל הקלדה',
+              color: 'border-teal-400/30 bg-teal-400/5', num: 'bg-teal-400/20 text-teal-400',
+            },
           ] as const).map(({ step, icon, tab, title, desc, tip, color, num }) => (
             <div key={step} className={`rounded-xl border p-5 ${color}`}>
               <div className="flex items-start gap-4">
