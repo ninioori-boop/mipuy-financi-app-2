@@ -96,14 +96,14 @@ function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
           <Text style={s.title}>{meeting.title || `סיכום ${MEETING_LABELS[meeting.type]}`}</Text>
         </View>
 
-        <Text style={s.sectionTitle}>מה היה בפגישה</Text>
+        <Text style={s.sectionTitle}>מה היה</Text>
         <View style={s.blockBox}>
           <Text style={s.body}>{meeting.summary || '—'}</Text>
         </View>
 
         {meeting.actionItems.trim().length > 0 && (
           <>
-            <Text style={s.sectionTitle}>משימות לקראת הפגישה הבאה</Text>
+            <Text style={s.sectionTitle}>מסקנות מהפגישה</Text>
             <View style={s.blockBox}>
               <Text style={s.body}>{meeting.actionItems}</Text>
             </View>

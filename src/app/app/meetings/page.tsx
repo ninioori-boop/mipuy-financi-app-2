@@ -206,24 +206,24 @@ export default function MeetingsPage() {
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">מה היה בפגישה</label>
+                      <label className="text-xs font-semibold text-muted-txt">מה היה</label>
                       <textarea
                         value={m.summary}
                         onChange={e => update(m.id, { summary: e.target.value })}
-                        rows={14}
+                        rows={12}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
                         placeholder="כתבי כאן מה היה בפגישה…"
                       />
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">משימות לקראת הפגישה הבאה</label>
+                      <label className="text-xs font-semibold text-muted-txt">מסקנות מהפגישה</label>
                       <textarea
                         value={m.actionItems}
                         onChange={e => update(m.id, { actionItems: e.target.value })}
-                        rows={5}
+                        rows={8}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="- ..."
+                        placeholder="כתבי כאן את המסקנות מהפגישה…"
                       />
                     </div>
 
