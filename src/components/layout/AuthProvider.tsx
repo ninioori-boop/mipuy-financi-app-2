@@ -26,7 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace('/auth')
       }
       if (user && pathname.startsWith('/auth')) {
-        router.replace('/app/guide')
+        router.replace('/welcome')
       }
     })
   }, [setUser, setLoading, router, pathname])
