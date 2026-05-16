@@ -1,46 +1,61 @@
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { EmailAuthForm } from '@/components/auth/EmailAuthForm'
+import { ShaderAnimation } from '@/components/ui/shader-animation'
 
 export default function AuthPage() {
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <div className="relative min-h-screen w-full overflow-hidden bg-black">
 
-        {/* Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-surface2 border border-line mb-4">
-            <span className="text-2xl">🏠</span>
+      {/* Animated shader background */}
+      <div className="absolute inset-0 z-0">
+        <ShaderAnimation />
+      </div>
+
+      {/* Vignette overlay — darkens edges so the glass card pops */}
+      <div className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.55)_70%,rgba(0,0,0,0.85)_100%)]" />
+
+      {/* Foreground content */}
+      <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+
+          {/* Brand */}
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md mb-4 shadow-lg">
+              <span className="text-2xl">🏠</span>
+            </div>
+            <h1 className="text-2xl font-bold text-gold drop-shadow-[0_2px_12px_rgba(201,168,108,0.4)]">
+              The Home Economist
+            </h1>
+            <p className="text-white/70 text-sm mt-1">מיפוי פיננסי חכם</p>
           </div>
-          <h1 className="text-2xl font-bold text-gold">The Home Economist</h1>
-          <p className="text-muted-txt text-sm mt-1">מיפוי פיננסי חכם</p>
+
+          {/* Glass login card */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-6 shadow-2xl space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-txt mb-1">כניסה למערכת</h2>
+              <p className="text-white/60 text-sm">כנסו עם מייל או חשבון Google</p>
+            </div>
+
+            <EmailAuthForm />
+
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-xs text-white/50">או</span>
+              <div className="flex-1 h-px bg-white/10" />
+            </div>
+
+            <GoogleSignInButton />
+
+            <p className="text-white/50 text-xs text-center leading-relaxed">
+              בכניסה למערכת אתם מסכימים ל
+              <a href="/privacy" target="_blank" className="text-gold hover:underline mx-0.5">
+                תנאי השימוש ומדיניות הפרטיות
+              </a>
+            </p>
+          </div>
+
         </div>
-
-        {/* Login card */}
-        <div className="rounded-2xl border border-line bg-surface2 p-6 shadow-xl space-y-5">
-          <div>
-            <h2 className="text-lg font-semibold text-txt mb-1">כניסה למערכת</h2>
-            <p className="text-muted-txt text-sm">כנסו עם מייל או חשבון Google</p>
-          </div>
-
-          <EmailAuthForm />
-
-          {/* Divider */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-line" />
-            <span className="text-xs text-muted-txt">או</span>
-            <div className="flex-1 h-px bg-line" />
-          </div>
-
-          <GoogleSignInButton />
-
-          <p className="text-muted-txt text-xs text-center leading-relaxed">
-            בכניסה למערכת אתם מסכימים ל
-            <a href="/privacy" target="_blank" className="text-gold hover:underline mx-0.5">
-              תנאי השימוש ומדיניות הפרטיות
-            </a>
-          </p>
-        </div>
-
       </div>
     </div>
   )
