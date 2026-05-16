@@ -4,21 +4,22 @@ import { ShaderAnimation } from '@/components/ui/shader-animation'
 
 export default function AuthPage() {
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-surface">
+    <div className="relative min-h-screen w-full overflow-hidden bg-[#0A0A0A]">
 
-      {/* Static fallback gradient — shows on devices without WebGL */}
-      <div
-        aria-hidden
-        className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_20%_30%,rgba(201,168,108,0.18),transparent_55%),radial-gradient(circle_at_80%_70%,rgba(201,168,108,0.10),transparent_50%),linear-gradient(180deg,#0F0F0F_0%,#0A0A0A_100%)]"
-      />
+      {/* Animated CSS blob mesh — pure CSS, runs everywhere (no-WebGL fallback) */}
+      <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
+        <div className="absolute top-[15%] left-[10%] w-[55vw] h-[55vw] max-w-[700px] max-h-[700px] rounded-full bg-gold/25 blur-[120px] animate-blob-a will-change-transform" />
+        <div className="absolute top-[40%] right-[5%] w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] rounded-full bg-gold-dark/30 blur-[140px] animate-blob-b will-change-transform" />
+        <div className="absolute bottom-[5%] left-[30%] w-[45vw] h-[45vw] max-w-[600px] max-h-[600px] rounded-full bg-gold-light/15 blur-[110px] animate-blob-c will-change-transform" />
+      </div>
 
-      {/* Animated shader background (overlays the gradient when WebGL is available) */}
-      <div className="absolute inset-0 z-0">
+      {/* Animated shader background (overlays the CSS mesh when WebGL is available) */}
+      <div className="absolute inset-0 z-[1]">
         <ShaderAnimation />
       </div>
 
       {/* Vignette overlay — darkens edges so the glass card pops */}
-      <div className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.55)_70%,rgba(0,0,0,0.85)_100%)]" />
+      <div className="absolute inset-0 z-[2] bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.55)_70%,rgba(0,0,0,0.85)_100%)] pointer-events-none" />
 
       {/* Foreground content */}
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4">

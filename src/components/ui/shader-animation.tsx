@@ -130,7 +130,10 @@ export function ShaderAnimation() {
       ref={containerRef}
       className="w-full h-full"
       style={{
-        background: "#000",
+        // Intentionally transparent — when WebGL initializes, the renderer's
+        // canvas paints over this. When it doesn't, the parent's fallback
+        // background shows through instead of a black wall.
+        background: "transparent",
         overflow: "hidden",
       }}
     />

@@ -135,3 +135,22 @@
     display: none;
   }
 }
+
+/* Auth-page animated background blobs — used as a no-WebGL fallback */
+@keyframes blob-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(6%, -8%, 0) scale(1.12); }
+  66%      { transform: translate3d(-5%, 4%, 0) scale(0.94); }
+}
+@keyframes blob-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(-7%, 6%, 0) scale(1.18); }
+  66%      { transform: translate3d(8%, -4%, 0) scale(0.88); }
+}
+@keyframes blob-drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(4%, 7%, 0) scale(1.22); }
+}
+.animate-blob-a { animation: blob-drift-a 26s ease-in-out infinite; }
+.animate-blob-b { animation: blob-drift-b 32s ease-in-out infinite; }
+.animate-blob-c { animation: blob-drift-c 38s ease-in-out infinite; }
