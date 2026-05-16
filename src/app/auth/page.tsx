@@ -4,9 +4,15 @@ import { ShaderAnimation } from '@/components/ui/shader-animation'
 
 export default function AuthPage() {
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-black">
+    <div className="relative min-h-screen w-full overflow-hidden bg-surface">
 
-      {/* Animated shader background */}
+      {/* Static fallback gradient — shows on devices without WebGL */}
+      <div
+        aria-hidden
+        className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_20%_30%,rgba(201,168,108,0.18),transparent_55%),radial-gradient(circle_at_80%_70%,rgba(201,168,108,0.10),transparent_50%),linear-gradient(180deg,#0F0F0F_0%,#0A0A0A_100%)]"
+      />
+
+      {/* Animated shader background (overlays the gradient when WebGL is available) */}
       <div className="absolute inset-0 z-0">
         <ShaderAnimation />
       </div>
