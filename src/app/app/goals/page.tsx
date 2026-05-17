@@ -1,6 +1,9 @@
 'use client'
 
+import { useMemo } from 'react'
+import Link from 'next/link'
 import { useGoalsStore } from '@/stores/goalsStore'
+import { useMappingStore } from '@/stores/mappingStore'
 import type { GoalHorizon, GoalRow } from '@/stores/goalsStore'
 
 function fmt(n: number) {
@@ -46,6 +49,7 @@ function numInput(
 
 export default function GoalsPage() {
   const { short, medium, long, addGoal, updateGoal, deleteGoal } = useGoalsStore()
+  const mapping = useMappingStore()
   const sections = { short, medium, long }
 
   const allGoals    = [...short, ...medium, ...long]
@@ -53,6 +57,30 @@ export default function GoalsPage() {
   const totalMo     = allGoals.reduce((s, r) => s + autoMonthly(r), 0)
   const doneCount   = allGoals.filter(r => r.required > 0 && r.current >= r.required).length
   const activeGoals = allGoals.filter(r => r.name || r.required > 0)
+
+  // ── Savings budget from /checking (effective income − expenses, then × (1−bufferPct)) ──
+  const savingsBudget = useMemo(() => {
+    const rawIncome = mapping.income.reduce((s, r) => s + (r.amount || 0), 0)
+    const fixed     = mapping.fixed.reduce((s, r) => s + (r.amount || 0), 0)
+    const sub       = mapping.sub.reduce((s, r) => s + (r.amount || 0), 0)
+    const ins       = mapping.ins.reduce((s, r) => s + (r.amount || 0), 0)
+    const varMo     = mapping.variable.reduce((s, r) => s + (r.amount || 0), 0) / Math.max(1, mapping.varMonths)
+    const annMo     = mapping.annual.reduce((s, r) => s + (r.annualAmount || 0), 0) / 12
+    const inst      = mapping.installments.reduce((s, r) => s + (r.monthlyPayment || 0), 0)
+    const debts     = mapping.debts.reduce((s, r) => s + (r.monthlyPayment || 0), 0)
+    const rawExpenses = fixed + sub + ins + varMo + annMo + inst + debts
+
+    const income   = mapping.incomeOverride   !== null ? mapping.incomeOverride   : Math.round(rawIncome)
+    const expenses = mapping.expensesOverride !== null ? mapping.expensesOverride : Math.round(rawExpenses)
+    const surplus  = Math.max(0, income - expenses)
+    const budget   = Math.round(surplus * (1 - Math.max(0, Math.min(1, mapping.bufferPct))))
+    return { budget, hasData: rawIncome > 0 || rawExpenses > 0, surplus }
+  }, [mapping])
+
+  const allocated = totalMo
+  const remaining = savingsBudget.budget - allocated
+  const allocPct  = savingsBudget.budget > 0 ? Math.min(100, (allocated / savingsBudget.budget) * 100) : 0
+  const isOver    = allocated > savingsBudget.budget && savingsBudget.budget > 0
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -62,6 +90,65 @@ export default function GoalsPage() {
         <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">🎯 יעדים פיננסיים</h1>
         <p className="text-muted-txt text-sm">הגדר יעדים לפי טווח זמן — המערכת תחשב כמה לחסוך מדי חודש</p>
       </div>
+
+      {/* Savings budget bar — comes from /app/checking */}
+      {savingsBudget.hasData && savingsBudget.budget > 0 ? (
+        <div className={`rounded-2xl border-2 p-5 transition-colors ${
+          isOver
+            ? 'border-expense/50 bg-expense/5'
+            : 'border-gold/40 bg-gradient-to-br from-gold/10 to-transparent'
+        }`}>
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <div className="text-xs text-muted-txt mb-1 flex items-center gap-1.5">
+                💧 תקציב חיסכון חודשי · מטאב <Link href="/app/checking" className="text-gold hover:underline">התנהלות עו&quot;ש</Link>
+              </div>
+              <div className="text-3xl sm:text-4xl font-black text-gold tabular-nums">{fmt(savingsBudget.budget)}<span className="text-xs font-normal text-muted-txt me-2">/חודש</span></div>
+            </div>
+            <div className="text-right space-y-0.5">
+              <div className="text-xs text-muted-txt">מוקצה ליעדים</div>
+              <div className={`text-xl font-bold tabular-nums ${isOver ? 'text-expense' : 'text-txt'}`}>{fmt(allocated)}</div>
+              <div className="text-xs text-muted-txt">
+                {remaining >= 0 ? 'נותר: ' : 'חריגה: '}
+                <span className={`tabular-nums font-bold ${remaining >= 0 ? 'text-income' : 'text-expense'}`}>
+                  {fmt(Math.abs(remaining))}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="h-3 rounded-full bg-line overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                isOver ? 'bg-expense' : allocPct > 85 ? 'bg-gold' : 'bg-income'
+              }`}
+              style={{ width: `${allocPct}%` }}
+            />
+          </div>
+
+          {isOver && (
+            <div className="mt-3 text-xs text-expense">
+              ⚠️ ההפרשות שלך עולות על תקציב החיסכון החודשי בעוד {fmt(Math.abs(remaining))}. הקטן את הסכומים או הגדל את התקציב.
+            </div>
+          )}
+        </div>
+      ) : (
+        <Link
+          href="/app/checking"
+          className="block rounded-2xl border border-dashed border-gold/40 bg-surface2 p-4 hover:bg-surface3 hover:border-gold/60 transition-colors"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-txt">💧 קבע תקציב חיסכון חודשי</div>
+              <div className="text-xs text-muted-txt mt-0.5">
+                לך לטאב &quot;התנהלות עו&quot;ש&quot; כדי לחשב כמה אפשר להקצות מדי חודש לחיסכון
+              </div>
+            </div>
+            <span className="text-gold text-xl">←</span>
+          </div>
+        </Link>
+      )}
 
       {/* KPI cards */}
       {activeGoals.length > 0 && (

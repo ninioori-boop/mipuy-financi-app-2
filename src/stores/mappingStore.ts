@@ -108,6 +108,19 @@ interface MappingState {
   varMonths: number
   creditImported: boolean
 
+  /** Fraction of monthly surplus the user wants kept in the checking buffer (0..1).
+   *  Anything above this flows to the goals tab as the monthly savings budget. */
+  bufferPct: number
+  setBufferPct: (pct: number) => void
+
+  /** Optional manual overrides for the checking tool. When null, the checking
+   *  and goals tabs derive totals from the mapping rows. When set, they take
+   *  precedence so the user's manual numbers flow downstream consistently. */
+  incomeOverride:   number | null
+  expensesOverride: number | null
+  setIncomeOverride:   (val: number | null) => void
+  setExpensesOverride: (val: number | null) => void
+
   // Simple sections (income / fixed / sub / ins)
   addRow: (section: SimpleSection, name?: string) => void
   updateRow: (section: SimpleSection, id: string, field: 'name' | 'amount', value: string | number) => void
@@ -156,6 +169,13 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   savings: DEFAULT_SAVINGS,
   varMonths: 3,
   creditImported: false,
+  bufferPct: 0.4,
+  setBufferPct: (pct) => set({ bufferPct: Math.max(0, Math.min(1, pct)) }),
+
+  incomeOverride: null,
+  expensesOverride: null,
+  setIncomeOverride:   (val) => set({ incomeOverride:   val }),
+  setExpensesOverride: (val) => set({ expensesOverride: val }),
 
   addRow: (section, name = '') => {
     const prev = get()[section] as MappingRow[]

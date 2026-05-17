@@ -44,6 +44,9 @@ export interface Snapshot {
     savings:       ReturnType<typeof useMappingStore.getState>['savings']
     varMonths:     number
     creditImported: boolean
+    bufferPct:     number
+    incomeOverride:   number | null
+    expensesOverride: number | null
   }
   goals: {
     short:  ReturnType<typeof useGoalsStore.getState>['short']
@@ -84,6 +87,9 @@ export function collectSnapshot(): Snapshot {
       variable: p.variable, annual: p.annual,
       debts: p.debts, installments: p.installments, savings: p.savings,
       varMonths: p.varMonths, creditImported: p.creditImported,
+      bufferPct: p.bufferPct,
+      incomeOverride:   p.incomeOverride,
+      expensesOverride: p.expensesOverride,
     },
     goals: { short: g.short, medium: g.medium, long: g.long },
     credit: { learnedDB: c.learnedDB, reportMonths: c.reportMonths },
@@ -129,6 +135,9 @@ export function applySnapshot(raw: unknown): void {
       ...(Array.isArray(m.savings)      ? { savings: m.savings }           : {}),
       ...(typeof m.varMonths === 'number'  ? { varMonths: m.varMonths }       : {}),
       ...(typeof m.creditImported === 'boolean' ? { creditImported: m.creditImported } : {}),
+      ...(typeof m.bufferPct === 'number' ? { bufferPct: m.bufferPct }         : {}),
+      ...(typeof m.incomeOverride   === 'number' || m.incomeOverride   === null ? { incomeOverride:   m.incomeOverride   } : {}),
+      ...(typeof m.expensesOverride === 'number' || m.expensesOverride === null ? { expensesOverride: m.expensesOverride } : {}),
     })
   }
 
@@ -174,7 +183,8 @@ export function resetAllStores(): void {
   useMappingStore.setState({
     income: [], fixed: [], sub: [], ins: [],
     variable: [], annual: [], debts: [], installments: [], savings: [],
-    varMonths: 3, creditImported: false,
+    varMonths: 3, creditImported: false, bufferPct: 0.4,
+    incomeOverride: null, expensesOverride: null,
   })
   useGoalsStore.setState({ short: [], medium: [], long: [] })
   useCreditStore.setState({
