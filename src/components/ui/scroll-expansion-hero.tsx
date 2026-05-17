@@ -198,13 +198,18 @@ const ScrollExpandMedia = ({
           <div className='container mx-auto flex flex-col items-center justify-start relative z-10'>
             <div className='flex flex-col items-center justify-center w-full h-[100dvh] relative'>
               <div
-                className='absolute z-0 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 transition-none rounded-2xl'
+                className='absolute z-0 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 transition-none'
                 style={{
                   width: `${mediaWidth}px`,
                   height: `${mediaHeight}px`,
                   maxWidth: '95vw',
                   maxHeight: '85vh',
-                  boxShadow: '0px 0px 50px rgba(0, 0, 0, 0.3)',
+                  // Soft radial mask blends the image edges into the page background
+                  // instead of cutting them with a hard rectangle/border.
+                  WebkitMaskImage:
+                    'radial-gradient(ellipse 75% 75% at center, #000 50%, transparent 100%)',
+                  maskImage:
+                    'radial-gradient(ellipse 75% 75% at center, #000 50%, transparent 100%)',
                 }}
               >
                 {mediaType === 'video' ? (
@@ -272,12 +277,19 @@ const ScrollExpandMedia = ({
                       alt={title || 'Media content'}
                       width={1280}
                       height={720}
-                      className='w-full h-full object-cover rounded-xl'
+                      className='w-full h-full object-cover'
+                    />
+                    {/* Softer dark wash + warm gold tint to harmonise with the brand */}
+                    <motion.div
+                      className='absolute inset-0 bg-gradient-to-b from-[#0A0A0A]/60 via-[#0A0A0A]/20 to-[#0A0A0A]/70 mix-blend-multiply'
+                      initial={{ opacity: 0.8 }}
+                      animate={{ opacity: 0.85 - scrollProgress * 0.4 }}
+                      transition={{ duration: 0.2 }}
                     />
                     <motion.div
-                      className='absolute inset-0 bg-black/50 rounded-xl'
-                      initial={{ opacity: 0.7 }}
-                      animate={{ opacity: 0.7 - scrollProgress * 0.3 }}
+                      className='absolute inset-0 bg-gold/10 mix-blend-overlay'
+                      initial={{ opacity: 0.4 }}
+                      animate={{ opacity: 0.5 - scrollProgress * 0.3 }}
                       transition={{ duration: 0.2 }}
                     />
                   </div>
@@ -304,22 +316,53 @@ const ScrollExpandMedia = ({
               </div>
 
               <div
-                className={`flex items-center justify-center text-center gap-4 w-full relative z-10 transition-none flex-col ${
+                className={`flex items-center justify-center text-center gap-2 sm:gap-4 w-full relative z-10 transition-none flex-col ${
                   textBlend ? 'mix-blend-difference' : 'mix-blend-normal'
                 }`}
               >
-                <motion.h2
-                  className='text-4xl md:text-5xl lg:text-6xl font-bold text-gold transition-none'
-                  style={{ transform: `translateX(-${textTranslateX}vw)` }}
+                {/* Each word is wrapped in a motion.div that runs a one-time spring entry
+                    from off-screen; the inner h2 keeps the scroll-driven translateX. */}
+                <motion.div
+                  initial={{ x: 220, opacity: 0, filter: 'blur(8px)' }}
+                  animate={{ x: 0, opacity: 1, filter: 'blur(0px)' }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 70,
+                    damping: 18,
+                    mass: 0.9,
+                    delay: 0.15,
+                    opacity: { duration: 1.1, ease: 'easeOut', delay: 0.15 },
+                    filter:  { duration: 1.0, ease: 'easeOut', delay: 0.15 },
+                  }}
                 >
-                  {firstWord}
-                </motion.h2>
-                <motion.h2
-                  className='text-4xl md:text-5xl lg:text-6xl font-bold text-center text-gold transition-none'
-                  style={{ transform: `translateX(${textTranslateX}vw)` }}
+                  <h2
+                    className='text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-bold text-gold leading-[0.95] tracking-tight drop-shadow-[0_8px_32px_rgba(201,168,108,0.35)]'
+                    style={{ transform: `translateX(-${textTranslateX}vw)` }}
+                  >
+                    {firstWord}
+                  </h2>
+                </motion.div>
+
+                <motion.div
+                  initial={{ x: -220, opacity: 0, filter: 'blur(8px)' }}
+                  animate={{ x: 0, opacity: 1, filter: 'blur(0px)' }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 70,
+                    damping: 18,
+                    mass: 0.9,
+                    delay: 0.3,
+                    opacity: { duration: 1.1, ease: 'easeOut', delay: 0.3 },
+                    filter:  { duration: 1.0, ease: 'easeOut', delay: 0.3 },
+                  }}
                 >
-                  {restOfTitle}
-                </motion.h2>
+                  <h2
+                    className='text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-bold text-center text-gold leading-[0.95] tracking-tight drop-shadow-[0_8px_32px_rgba(201,168,108,0.35)]'
+                    style={{ transform: `translateX(${textTranslateX}vw)` }}
+                  >
+                    {restOfTitle}
+                  </h2>
+                </motion.div>
               </div>
             </div>
 
