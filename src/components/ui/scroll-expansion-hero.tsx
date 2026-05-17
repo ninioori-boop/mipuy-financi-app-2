@@ -56,17 +56,20 @@ const ScrollExpandMedia = ({
         e.preventDefault()
       } else if (!mediaFullyExpanded) {
         e.preventDefault()
-        const scrollDelta = e.deltaY * 0.0009
+        // ~2× the original sensitivity so low-delta mice complete the expand fast.
+        const scrollDelta = e.deltaY * 0.0019
         const newProgress = Math.min(
           Math.max(scrollProgress + scrollDelta, 0),
           1
         )
         setScrollProgress(newProgress)
 
-        if (newProgress >= 1) {
+        // Unlock at 0.9 instead of 1.0 — guarantees users always reach the CTA
+        // even if their wheel/trackpad gives them slightly less than full delta.
+        if (newProgress >= 0.9) {
           setMediaFullyExpanded(true)
           setShowContent(true)
-        } else if (newProgress < 0.75) {
+        } else if (newProgress < 0.7) {
           setShowContent(false)
         }
       }
@@ -87,7 +90,8 @@ const ScrollExpandMedia = ({
         e.preventDefault()
       } else if (!mediaFullyExpanded) {
         e.preventDefault()
-        const scrollFactor = deltaY < 0 ? 0.008 : 0.005
+        // ~2× the original sensitivity for touch as well.
+        const scrollFactor = deltaY < 0 ? 0.016 : 0.011
         const scrollDelta = deltaY * scrollFactor
         const newProgress = Math.min(
           Math.max(scrollProgress + scrollDelta, 0),
@@ -95,10 +99,10 @@ const ScrollExpandMedia = ({
         )
         setScrollProgress(newProgress)
 
-        if (newProgress >= 1) {
+        if (newProgress >= 0.9) {
           setMediaFullyExpanded(true)
           setShowContent(true)
-        } else if (newProgress < 0.75) {
+        } else if (newProgress < 0.7) {
           setShowContent(false)
         }
 

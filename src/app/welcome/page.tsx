@@ -26,6 +26,26 @@ export default function WelcomePage() {
         className="fixed inset-0 z-[2] bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(0,0,0,0.6)_70%,rgba(0,0,0,0.95)_100%)] pointer-events-none"
       />
 
+      {/* Always-visible escape nav — guarantees access to the system even if the
+          scroll-to-expand effect doesn't reach completion (low-delta mice, etc.) */}
+      <nav className="fixed top-4 inset-x-4 z-50 flex items-center justify-between gap-3 pointer-events-none">
+        <Link
+          href="/app/credit"
+          className="pointer-events-auto inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/[0.06] backdrop-blur-xl text-white/85 text-sm hover:bg-white/[0.12] hover:text-white transition-all shadow-lg"
+        >
+          כניסה למערכת
+          <span aria-hidden>←</span>
+        </Link>
+
+        <Link
+          href="/app/guide"
+          className="pointer-events-auto inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold text-surface font-semibold text-sm hover:bg-gold-light transition-all shadow-[0_4px_20px_rgba(201,168,108,0.35)]"
+        >
+          התחלה מהמדריך
+          <span aria-hidden>←</span>
+        </Link>
+      </nav>
+
       {/* Scroll-to-expand hero on top of brand background */}
       <div className="relative z-10">
         <ScrollExpandMedia
