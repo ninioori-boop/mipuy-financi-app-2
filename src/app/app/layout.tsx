@@ -38,6 +38,7 @@ const groups: TabGroup[] = [
   {
     title: 'כלים',
     items: [
+      { href: '/app/checking', emoji: '💧', label: 'התנהלות עו"ש' },
       { href: '/app/goals',    emoji: '🎯', label: 'יעדים' },
       { href: '/app/loans',    emoji: '💰', label: 'הלוואות' },
       { href: '/app/compound', emoji: '📈', label: 'ריבית' },
