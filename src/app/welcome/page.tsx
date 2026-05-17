@@ -30,7 +30,7 @@ export default function WelcomePage() {
       <div className="relative z-10">
         <ScrollExpandMedia
           mediaType="image"
-          mediaSrc="https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1920&auto=format&fit=crop"
+          mediaSrc="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1920&auto=format&fit=crop"
           title="ברוכים הבאים"
           date="למערכת ניהול כלכלת הבית"
           scrollToExpand="גללו לחשיפת המערכת"
