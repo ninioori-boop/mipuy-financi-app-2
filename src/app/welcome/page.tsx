@@ -3,32 +3,29 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
-import { ShaderAnimation } from '@/components/ui/shader-animation'
 
 export default function WelcomePage() {
   return (
     <div className="relative min-h-[100dvh] w-full overflow-hidden bg-[#0A0A0A]">
 
-      {/* Brand background — visible at the image's faded edges */}
+      {/* Brand background — two subtle blobs, visible at the image's faded edges.
+          Kept small/low-blur so the GPU cost is minimal; the WebGL shader and a
+          third blob were removed because they were hidden under the full-bleed
+          image and cost ~500KB of bundle + 60fps of GPU work for no visual gain. */}
       <div aria-hidden className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[10%]  left-[8%]   w-[55vw] h-[55vw] max-w-[760px] max-h-[760px] rounded-full bg-gold/25       blur-[120px] animate-blob-a will-change-transform" />
-        <div className="absolute top-[45%]  right-[5%]  w-[60vw] h-[60vw] max-w-[860px] max-h-[860px] rounded-full bg-gold-dark/30  blur-[140px] animate-blob-b will-change-transform" />
-        <div className="absolute bottom-[2%] left-[28%] w-[45vw] h-[45vw] max-w-[640px] max-h-[640px] rounded-full bg-gold-light/15 blur-[110px] animate-blob-c will-change-transform" />
-      </div>
-
-      <div className="fixed inset-0 z-[1] pointer-events-none">
-        <ShaderAnimation />
+        <div className="absolute top-[12%]  left-[5%]   w-[40vw] h-[40vw] max-w-[520px] max-h-[520px] rounded-full bg-gold/22      blur-[80px]" />
+        <div className="absolute bottom-[8%] right-[5%] w-[42vw] h-[42vw] max-w-[560px] max-h-[560px] rounded-full bg-gold-dark/25 blur-[90px]" />
       </div>
 
       {/* Hero image — full-bleed, edges softened into brand background */}
       <motion.div
         className="absolute inset-0 z-[2]"
-        initial={{ scale: 1.08, opacity: 0 }}
+        initial={{ scale: 1.06, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 1.6, ease: 'easeOut' }}
+        transition={{ duration: 1.4, ease: 'easeOut' }}
       >
         <Image
-          src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=2400&auto=format&fit=crop"
+          src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1600&auto=format&fit=crop"
           alt=""
           fill
           priority
