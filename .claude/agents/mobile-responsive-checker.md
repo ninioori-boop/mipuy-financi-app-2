@@ -84,6 +84,46 @@ A `flex flex-row` with 3+ items that don't wrap will compress unreadably on mobi
 
 `<input type="number">` on mobile shows the full text keyboard. Adding `inputMode="numeric"` (or `inputMode="decimal"`) summons the number pad — much faster data entry. Flag missing inputMode on numeric inputs.
 
+#### 7. Range sliders without explicit LTR
+
+The whole app is RTL. `<input type="range">` inside an RTL parent works **backwards** (drag right = lower value) unless explicitly flipped. Every range input must have BOTH:
+
+```tsx
+<input
+  type="range"
+  dir="ltr"
+  style={{ direction: 'ltr' }}
+  className="w-full accent-gold h-2 touch-pan-x"
+  ...
+/>
+```
+
+Flag any `<input type="range">` that's missing `dir="ltr"` or `style={{ direction: 'ltr' }}`. Both are needed (different browsers respect different signals). Also flag missing `touch-pan-x` (helps the gesture cooperate with vertical page scroll on mobile) and missing explicit `h-2`+ (the default ~1px track is hard to grab with a finger).
+
+#### 8. Currency values without `tabular-nums`
+
+When a number changes (slider drag, input typing, recompute), proportional digit widths cause horizontal jumping — especially noticeable on currency totals like `₪1,234` → `₪12,345`. Every dynamic currency value must use `tabular-nums`:
+
+| Unsafe | Safe |
+|---|---|
+| `<span className="font-bold">{fmt(amount)}</span>` | `<span className="font-bold tabular-nums">{fmt(amount)}</span>` |
+| `<div className="text-2xl font-black">₪{val}</div>` | `<div className="text-2xl font-black tabular-nums">₪{val}</div>` |
+
+Flag any element rendering `fmt(...)`, `.toLocaleString('he-IL')`, or a literal `₪` followed by `{val}` that doesn't have `tabular-nums` somewhere in its class chain. The whole point is to lock digit widths so the number doesn't dance around as it updates.
+
+#### 9. Full-viewport height — prefer `100dvh` on hero/landing pages
+
+`h-screen` / `min-h-screen` = `100vh`, which on mobile Safari and Chrome includes the address bar in the viewport calculation. Result: 100vh > the actually-visible area, content gets pushed under the address bar.
+
+For hero / landing / login / welcome screens that should fill the visible viewport exactly, use the **dynamic** viewport unit instead:
+
+| Unsafe (mobile cut-off) | Safe |
+|---|---|
+| `className="min-h-screen"` | `className="min-h-[100dvh]"` |
+| `className="h-screen"` | `className="h-[100dvh]"` |
+
+Flag `h-screen` / `min-h-screen` on top-level page containers (the outermost div of a route, or any hero `<section>` / `<main>` that should fill the viewport). Don't flag interior elements where 100vh is intentional (e.g., modal backdrops).
+
 ### Live pass (only if Playwright tools succeed)
 
 Try to navigate to `http://localhost:3000{ROUTE}` at 375×667 viewport. If it works:
@@ -112,8 +152,15 @@ Be terse. Group by file, then by severity.
 ✅ All text-3xl+ have sm: variants
 ✅ Paddings scale (p-4 sm:p-6)
 ✅ Touch targets OK
-⚠ Line 269: `<input type="number">` missing `inputMode="numeric"`
-   Suggested: add `inputMode="numeric"` to summon the mobile number pad
+✅ inputMode set on all numeric inputs
+❌ Line 287: `<input type="range">` missing `dir="ltr"` + `style={{ direction: 'ltr' }}`
+   Snippet: `<input type="range" className="w-full accent-gold ..."`
+   Suggested: add `dir="ltr"` and `style={{ direction: 'ltr' }}`; otherwise the slider drags backwards in RTL
+⚠ Line 207: currency value missing `tabular-nums` → number will jump as it updates
+   Snippet: `<div className="text-5xl font-black text-gold">{fmt(surplus)}</div>`
+   Suggested: add `tabular-nums` to the className
+⚠ Line 7: top-level container uses `min-h-screen` → mobile address bar pushes content
+   Suggested: change `min-h-screen` to `min-h-[100dvh]`
 
 ### Live pass (Playwright)
 ✅ Navigated /app/checking at 375×667
