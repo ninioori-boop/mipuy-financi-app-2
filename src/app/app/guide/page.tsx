@@ -86,6 +86,13 @@ export default function GuidePage() {
               tip: 'כפתור "סיום" סוגר את הסיכום — הכל נשמר אוטומטית בענן בכל הקלדה',
               color: 'border-teal-400/30 bg-teal-400/5', num: 'bg-teal-400/20 text-teal-400',
             },
+            {
+              step: '★', icon: '🏢', tab: 'עסק (אופציונלי)',
+              title: 'תקציב עסקי לעצמאים',
+              desc: 'כלי אופציונלי ללקוחות עצמאים בלבד — מפריד בין תקציב העסק לתקציב הבית. בוחרים סוג עסק (עוסק מורשה / פטור / חברה), מזינים מחזור והוצאות גולמיות ותפעוליות, והמערכת מחשבת אוטומטית מס הכנסה, ביטוח לאומי, מע"מ ורווח נקי. המשכורת האישית נשלחת כהכנסה לטאב החודשי.',
+              tip: 'רלוונטי רק ללקוחות עצמאים — לקוחות שכירים יכולים להתעלם מהטאב הזה',
+              color: 'border-emerald-400/30 bg-emerald-400/5', num: 'bg-emerald-400/20 text-emerald-400',
+            },
           ] as const).map(({ step, icon, tab, title, desc, tip, color, num }) => (
             <div key={step} className={`rounded-xl border p-5 ${color}`}>
               <div className="flex items-start gap-4">

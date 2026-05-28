@@ -45,6 +45,12 @@ const groups: TabGroup[] = [
     ],
   },
   {
+    title: 'עסק',
+    items: [
+      { href: '/app/business', emoji: '🏢', label: 'תקציב עסקי' },
+    ],
+  },
+  {
     title: 'ליווי',
     items: [
       { href: '/app/meetings', emoji: '📝', label: 'פגישות' },

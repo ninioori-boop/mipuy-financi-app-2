@@ -24,6 +24,7 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore }   from '@/stores/goalsStore'
 import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
+import { useBusinessStore } from '@/stores/businessStore'
 import { saveUserData, loadUserData } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 
@@ -115,6 +116,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useGoalsStore.subscribe(triggerSave),
       useCreditStore.subscribe(triggerSave),
       useMeetingsStore.subscribe(triggerSave),
+      useBusinessStore.subscribe(triggerSave),
     ]
 
     return () => {

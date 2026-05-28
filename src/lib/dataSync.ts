@@ -17,6 +17,7 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore }   from '@/stores/goalsStore'
 import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
+import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
 
 export const SCHEMA_VERSION = 1
 
@@ -60,6 +61,19 @@ export interface Snapshot {
   meetings: {
     meetings: ReturnType<typeof useMeetingsStore.getState>['meetings']
   }
+  business: {
+    businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
+    revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
+    cogs:                 ReturnType<typeof useBusinessStore.getState>['cogs']
+    opex:                 ReturnType<typeof useBusinessStore.getState>['opex']
+    ownerSalary:          number
+    taxPoints:            number
+    vatRate:              number
+    incomeTaxOverride:    number | null
+    bituachLeumiOverride: number | null
+    companyTaxOverride:   number | null
+    vatOverride:          number | null
+  }
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -74,6 +88,7 @@ export function collectSnapshot(): Snapshot {
   const g = useGoalsStore.getState()
   const c = useCreditStore.getState()
   const mt = useMeetingsStore.getState()
+  const b = useBusinessStore.getState()
 
   return {
     version: SCHEMA_VERSION,
@@ -94,6 +109,16 @@ export function collectSnapshot(): Snapshot {
     goals: { short: g.short, medium: g.medium, long: g.long },
     credit: { learnedDB: c.learnedDB, reportMonths: c.reportMonths },
     meetings: { meetings: mt.meetings },
+    business: {
+      businessType: b.businessType,
+      revenue: b.revenue, cogs: b.cogs, opex: b.opex,
+      ownerSalary: b.ownerSalary,
+      taxPoints: b.taxPoints, vatRate: b.vatRate,
+      incomeTaxOverride: b.incomeTaxOverride,
+      bituachLeumiOverride: b.bituachLeumiOverride,
+      companyTaxOverride: b.companyTaxOverride,
+      vatOverride: b.vatOverride,
+    },
   }
 }
 
@@ -166,6 +191,25 @@ export function applySnapshot(raw: unknown): void {
       meetings: raw.meetings.meetings as ReturnType<typeof useMeetingsStore.getState>['meetings'],
     })
   }
+
+  // business
+  if (isObject(raw.business)) {
+    const b = raw.business as Partial<Snapshot['business']>
+    const validType = b.businessType === 'osek_murshe' || b.businessType === 'osek_patur' || b.businessType === 'company'
+    useBusinessStore.setState({
+      ...(validType ? { businessType: b.businessType } : {}),
+      ...(Array.isArray(b.revenue) ? { revenue: b.revenue } : {}),
+      ...(Array.isArray(b.cogs)    ? { cogs: b.cogs }       : {}),
+      ...(Array.isArray(b.opex)    ? { opex: b.opex }       : {}),
+      ...(typeof b.ownerSalary === 'number' ? { ownerSalary: b.ownerSalary } : {}),
+      ...(typeof b.taxPoints   === 'number' ? { taxPoints: b.taxPoints }     : {}),
+      ...(typeof b.vatRate     === 'number' ? { vatRate: b.vatRate }         : {}),
+      ...(typeof b.incomeTaxOverride    === 'number' || b.incomeTaxOverride    === null ? { incomeTaxOverride: b.incomeTaxOverride }       : {}),
+      ...(typeof b.bituachLeumiOverride === 'number' || b.bituachLeumiOverride === null ? { bituachLeumiOverride: b.bituachLeumiOverride } : {}),
+      ...(typeof b.companyTaxOverride   === 'number' || b.companyTaxOverride   === null ? { companyTaxOverride: b.companyTaxOverride }     : {}),
+      ...(typeof b.vatOverride          === 'number' || b.vatOverride          === null ? { vatOverride: b.vatOverride }                   : {}),
+    })
+  }
 }
 
 /**
@@ -193,6 +237,17 @@ export function resetAllStores(): void {
     isLoading: false, loadingMessage: '',
   })
   useMeetingsStore.setState({ meetings: [] })
+  useBusinessStore.setState({
+    businessType: DEFAULT_BUSINESS.businessType,
+    revenue: [], cogs: [], opex: [],
+    ownerSalary: 0,
+    taxPoints: DEFAULT_BUSINESS.taxPoints,
+    vatRate: DEFAULT_BUSINESS.vatRate,
+    incomeTaxOverride: null,
+    bituachLeumiOverride: null,
+    companyTaxOverride: null,
+    vatOverride: null,
+  })
 }
 
 /** Quick byte-size estimate to enforce a sanity cap before saving. */
