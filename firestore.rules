@@ -12,6 +12,12 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == clientId;
     }
 
+    // מאגר סיווג משותף — כל משתמש מחובר קורא/כותב. מכיל רק מיפויי שם-עסק→קטגוריה,
+    // ללא שום מידע אישי או פיננסי. מאפשר ללמידה לעבור בין כל החשבונות מאחורי הקלעים.
+    match /shared/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
     // כל שאר האוספים — חסומים לחלוטין
     match /{document=**} {
       allow read, write: if false;

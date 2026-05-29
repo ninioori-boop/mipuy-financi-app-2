@@ -26,7 +26,7 @@ import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
-import { saveUserData, loadUserData } from '@/lib/firestoreService'
+import { saveUserData, loadUserData, loadSharedLearnedDB } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 
 const DEBOUNCE_MS = 2000
@@ -58,6 +58,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
 
     let cancelled = false
     setStatus('loading')
+
+    // Shared cross-account category-learning pool — loaded silently, never blocks
+    // the main load. Lives outside the per-user snapshot, so it never triggers a save.
+    loadSharedLearnedDB()
+      .then(db => { if (!cancelled) useCreditStore.getState().setSharedLearnedDB(db) })
+      .catch(() => {})
 
     loadUserData(user.uid)
       .then(data => {

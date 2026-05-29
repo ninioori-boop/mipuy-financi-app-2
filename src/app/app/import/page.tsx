@@ -8,6 +8,7 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { parseExcelFile } from '@/lib/parseExcel'
 import { extractTransactions } from '@/lib/parsing'
+import { normalizeForLookup } from '@/lib/categorize'
 import { ALL_CATEGORIES, MONTHS_LIST } from '@/lib/constants'
 import { FileDropzone } from '@/components/credit/FileDropzone'
 import { SmartPatterns } from '@/components/credit/SmartPatterns'
@@ -37,14 +38,20 @@ export default function ImportPage() {
   const [reportMonths,     setReportMonths]      = useState(3)
   const [targetMonth,      setTargetMonth]       = useState('')
 
-  const { learnedDB } = useCreditStore()
   const mapping = useMappingStore()
   const { initMonth, applyImport } = useMonthlyStore()
   const router = useRouter()
 
   // ── local transaction edits ──
-  const updateCategory = useCallback((idx: number, category: string) =>
-    setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, category } : t)), [])
+  // Manual correction: apply to every row with the same merchant in this batch,
+  // and feed the shared cross-account learning pool (behind the scenes).
+  const updateCategory = useCallback((idx: number, category: string) => {
+    const target = transactions[idx]
+    if (!target) return
+    const key = normalizeForLookup(target.desc)
+    setTransactions(prev => prev.map(t => normalizeForLookup(t.desc) === key ? { ...t, category } : t))
+    useCreditStore.getState().learn(target.desc, category)
+  }, [transactions])
   const updateDesc     = useCallback((idx: number, desc: string) =>
     setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, desc } : t)), [])
   const updateAmount   = useCallback((idx: number, amount: number) =>
@@ -61,7 +68,7 @@ export default function ImportPage() {
       const names: string[] = []
       for (const file of files) {
         const rows = await parseExcelFile(file)
-        const txns = extractTransactions(rows, file.name, learnedDB)
+        const txns = extractTransactions(rows, file.name, useCreditStore.getState().mergedLearnedDB())
         allTxns.push(...txns)
         names.push(file.name)
       }
@@ -76,7 +83,7 @@ export default function ImportPage() {
       setIsLoading(false)
       toast.error('שגיאה בפענוח הקובץ: ' + (e as Error).message)
     }
-  }, [learnedDB])
+  }, [])
 
   function autoDetectMonth(txns: Transaction[]) {
     const counts: Record<string, number> = {}

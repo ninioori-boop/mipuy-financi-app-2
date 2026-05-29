@@ -36,7 +36,7 @@ export default function CreditPage() {
   const {
     transactions, uploadedFileNames, isLoading, loadingMessage,
     reportMonths, setReportMonths,
-    setTransactions, updateCategory, updateDesc, updateAmount, deleteTransaction, setLoading,
+    setTransactions, updateCategory, applyAiCategory, updateDesc, updateAmount, deleteTransaction, setLoading,
   } = useCreditStore()
 
   const handleFiles = useCallback(async (files: File[]) => {
@@ -46,7 +46,7 @@ export default function CreditPage() {
       const fileNames: string[] = []
       for (const file of files) {
         const rows = await parseExcelFile(file)
-        const txns = extractTransactions(rows, file.name, useCreditStore.getState().learnedDB)
+        const txns = extractTransactions(rows, file.name, useCreditStore.getState().mergedLearnedDB())
         allTxns.push(...txns)
         fileNames.push(file.name)
       }
@@ -107,7 +107,7 @@ export default function CreditPage() {
         for (let i = 0; i < Math.min(aiExpenses.length, batch.length); i++) {
           const cat = aiExpenses[i].category
           if (ALL_CATEGORIES.includes(cat) && cat !== 'שונות') {
-            updateCategory(batch[i].idx, cat)
+            applyAiCategory(batch[i].idx, cat)
             updated++
           }
         }
@@ -125,7 +125,7 @@ export default function CreditPage() {
         action: { label: 'נסה שוב', onClick: () => runAI(txns, unmatchedCount) },
       })
     }
-  }, [setLoading, updateCategory])
+  }, [setLoading, applyAiCategory])
 
   function handleMonthsChange(delta: number) {
     const next = Math.max(1, Math.min(24, reportMonths + delta))

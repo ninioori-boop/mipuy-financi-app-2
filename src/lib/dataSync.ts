@@ -284,7 +284,7 @@ export function resetAllStores(): void {
   useGoalsStore.setState({ short: [], medium: [], long: [] })
   useCreditStore.setState({
     transactions: [], uploadedFileNames: [],
-    learnedDB: {}, reportMonths: 3,
+    learnedDB: {}, sharedLearnedDB: {}, reportMonths: 3,
     isLoading: false, loadingMessage: '',
   })
   useMeetingsStore.setState({ meetings: [] })
