@@ -18,6 +18,7 @@ import { useGoalsStore }   from '@/stores/goalsStore'
 import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
+import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
 
 export const SCHEMA_VERSION = 1
 
@@ -74,6 +75,20 @@ export interface Snapshot {
     companyTaxOverride:   number | null
     vatOverride:          number | null
   }
+  businessAnnual: {
+    businessType:         ReturnType<typeof useBusinessAnnualStore.getState>['businessType']
+    year:                 number
+    revenue:              ReturnType<typeof useBusinessAnnualStore.getState>['revenue']
+    cogs:                 ReturnType<typeof useBusinessAnnualStore.getState>['cogs']
+    opex:                 ReturnType<typeof useBusinessAnnualStore.getState>['opex']
+    ownerSalary:          number
+    taxPoints:            number
+    vatRate:              number
+    incomeTaxOverride:    number | null
+    bituachLeumiOverride: number | null
+    companyTaxOverride:   number | null
+    vatOverride:          number | null
+  }
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -89,6 +104,7 @@ export function collectSnapshot(): Snapshot {
   const c = useCreditStore.getState()
   const mt = useMeetingsStore.getState()
   const b = useBusinessStore.getState()
+  const ba = useBusinessAnnualStore.getState()
 
   return {
     version: SCHEMA_VERSION,
@@ -118,6 +134,17 @@ export function collectSnapshot(): Snapshot {
       bituachLeumiOverride: b.bituachLeumiOverride,
       companyTaxOverride: b.companyTaxOverride,
       vatOverride: b.vatOverride,
+    },
+    businessAnnual: {
+      businessType: ba.businessType,
+      year: ba.year,
+      revenue: ba.revenue, cogs: ba.cogs, opex: ba.opex,
+      ownerSalary: ba.ownerSalary,
+      taxPoints: ba.taxPoints, vatRate: ba.vatRate,
+      incomeTaxOverride: ba.incomeTaxOverride,
+      bituachLeumiOverride: ba.bituachLeumiOverride,
+      companyTaxOverride: ba.companyTaxOverride,
+      vatOverride: ba.vatOverride,
     },
   }
 }
@@ -210,6 +237,26 @@ export function applySnapshot(raw: unknown): void {
       ...(typeof b.vatOverride          === 'number' || b.vatOverride          === null ? { vatOverride: b.vatOverride }                   : {}),
     })
   }
+
+  // businessAnnual
+  if (isObject(raw.businessAnnual)) {
+    const ba = raw.businessAnnual as Partial<Snapshot['businessAnnual']>
+    const validType = ba.businessType === 'osek_murshe' || ba.businessType === 'osek_patur' || ba.businessType === 'company'
+    useBusinessAnnualStore.setState({
+      ...(validType ? { businessType: ba.businessType } : {}),
+      ...(typeof ba.year === 'number' ? { year: ba.year } : {}),
+      ...(Array.isArray(ba.revenue) ? { revenue: ba.revenue } : {}),
+      ...(Array.isArray(ba.cogs)    ? { cogs: ba.cogs }       : {}),
+      ...(Array.isArray(ba.opex)    ? { opex: ba.opex }       : {}),
+      ...(typeof ba.ownerSalary === 'number' ? { ownerSalary: ba.ownerSalary } : {}),
+      ...(typeof ba.taxPoints   === 'number' ? { taxPoints: ba.taxPoints }     : {}),
+      ...(typeof ba.vatRate     === 'number' ? { vatRate: ba.vatRate }         : {}),
+      ...(typeof ba.incomeTaxOverride    === 'number' || ba.incomeTaxOverride    === null ? { incomeTaxOverride: ba.incomeTaxOverride }       : {}),
+      ...(typeof ba.bituachLeumiOverride === 'number' || ba.bituachLeumiOverride === null ? { bituachLeumiOverride: ba.bituachLeumiOverride } : {}),
+      ...(typeof ba.companyTaxOverride   === 'number' || ba.companyTaxOverride   === null ? { companyTaxOverride: ba.companyTaxOverride }     : {}),
+      ...(typeof ba.vatOverride          === 'number' || ba.vatOverride          === null ? { vatOverride: ba.vatOverride }                   : {}),
+    })
+  }
 }
 
 /**
@@ -243,6 +290,18 @@ export function resetAllStores(): void {
     ownerSalary: 0,
     taxPoints: DEFAULT_BUSINESS.taxPoints,
     vatRate: DEFAULT_BUSINESS.vatRate,
+    incomeTaxOverride: null,
+    bituachLeumiOverride: null,
+    companyTaxOverride: null,
+    vatOverride: null,
+  })
+  useBusinessAnnualStore.setState({
+    businessType: DEFAULT_BUSINESS_ANNUAL.businessType,
+    year: new Date().getFullYear(),
+    revenue: [], cogs: [], opex: [],
+    ownerSalary: 0,
+    taxPoints: DEFAULT_BUSINESS_ANNUAL.taxPoints,
+    vatRate: DEFAULT_BUSINESS_ANNUAL.vatRate,
     incomeTaxOverride: null,
     bituachLeumiOverride: null,
     companyTaxOverride: null,
