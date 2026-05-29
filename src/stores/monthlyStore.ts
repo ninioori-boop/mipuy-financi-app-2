@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES } from '@/lib/constants'
+import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES } from '@/lib/constants'
 
 function uid() { return Math.random().toString(36).slice(2) }
 
@@ -219,8 +219,11 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           })
           return updated
         }
+        // Annual categories (e.g. חופשה וטיול) have no dedicated monthly section;
+        // fold them into variable expenses so the amount isn't silently dropped.
+        const variableCats = new Set([...VAR_CATEGORIES, ...ANNUAL_CATEGORIES])
         fixed    = fillActual(fixed,    FIXED_CATEGORIES)
-        variable = fillActual(variable, VAR_CATEGORIES)
+        variable = fillActual(variable, variableCats)
         sub      = fillActual(sub,      SUB_CATEGORIES)
         ins      = fillActual(ins,      INSURANCE_CATEGORIES)
 
