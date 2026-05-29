@@ -7,9 +7,20 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // מפות פיננסיות — הלקוח עצמו בלבד (v2 אין יועצים)
+    // מפות פיננסיות — הלקוח עצמו, או היועץ המשויך אליו
     match /maps/{clientId} {
-      allow read, write: if request.auth != null && request.auth.uid == clientId;
+      allow read, write: if request.auth != null &&
+        (request.auth.uid == clientId ||
+        (resource != null && request.auth.uid == resource.data.advisorUid));
+      allow create: if request.auth != null && request.auth.uid == clientId;
+    }
+
+    // קודי הזמנה
+    match /invites/{code} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null &&
+        (request.auth.uid == resource.data.advisorUid || !resource.data.used);
     }
 
     // מאגר סיווג משותף — כל משתמש מחובר קורא/כותב. מכיל רק מיפויי שם-עסק→קטגוריה,
