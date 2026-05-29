@@ -231,11 +231,15 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       return [...existing, { id: uid(), name: cat, annualAmount: addAmt, fromCredit: true }]
     }
 
-    let variable = [...s.variable]
-    let fixed    = [...s.fixed]
-    let sub      = [...s.sub]
-    let ins      = [...s.ins]
-    let annual   = [...s.annual]
+    // Drop previously-imported credit rows first, keeping manual rows, so that
+    // re-running the import (after AI, on months change, on re-upload) REPLACES
+    // the credit-derived amounts instead of accumulating them. Without this the
+    // amounts double/triple every time the import re-runs.
+    let variable = s.variable.filter(r => !r.fromCredit)
+    let fixed    = s.fixed.filter(r => !r.fromCredit)
+    let sub      = s.sub.filter(r => !r.fromCredit)
+    let ins      = s.ins.filter(r => !r.fromCredit)
+    let annual   = s.annual.filter(r => !r.fromCredit)
 
     Object.entries(totals).forEach(([cat, totalAmt]) => {
       if (totalAmt <= 0) return
