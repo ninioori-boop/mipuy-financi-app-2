@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import type { SavingRow } from '@/stores/mappingStore'
 
 function fmt(n: number) {
@@ -20,6 +21,34 @@ function Num({ value, onChange, placeholder }: { value: number; onChange: (v: nu
       onChange={e => onChange(parseFloat(e.target.value) || 0)}
       placeholder={placeholder} style={{ direction: 'ltr' }}
       className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+    />
+  )
+}
+
+// Percent input that keeps a local text value so decimals like "0.7" can be typed
+// freely (a plain controlled number input collapses "0." back to "0" on re-render).
+function PctInput({ value, onChange, className }: { value: number; onChange: (v: number) => void; className: string }) {
+  const [text, setText] = useState(value ? String(value) : '')
+  useEffect(() => {
+    const parsed = parseFloat(text)
+    if ((isNaN(parsed) ? 0 : parsed) !== value) setText(value ? String(value) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      onChange={e => {
+        const raw = e.target.value.replace(',', '.')
+        if (!/^\d*\.?\d*$/.test(raw)) return
+        setText(raw)
+        const n = parseFloat(raw)
+        onChange(isNaN(n) ? 0 : n)
+      }}
+      placeholder="0"
+      style={{ direction: 'ltr' }}
+      className={className}
     />
   )
 }
@@ -88,20 +117,18 @@ export function SavingPanel({ savings, onAdd, onUpdate, onDelete }: Props) {
               <span className="text-[11px] text-muted-txt">דמי ניהול:</span>
               <label className="flex items-center gap-1 text-[11px] text-muted-txt">
                 מהצבירה
-                <input
-                  type="number" value={row.feeBalance || ''} min={0} step={0.1}
-                  onChange={e => onUpdate(row.id, 'feeBalance', parseFloat(e.target.value) || 0)}
-                  placeholder="0" style={{ direction: 'ltr' }}
+                <PctInput
+                  value={row.feeBalance}
+                  onChange={v => onUpdate(row.id, 'feeBalance', v)}
                   className="w-14 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
                 />
                 %
               </label>
               <label className="flex items-center gap-1 text-[11px] text-muted-txt">
                 מההפקדה
-                <input
-                  type="number" value={row.feeDeposit || ''} min={0} step={0.1}
-                  onChange={e => onUpdate(row.id, 'feeDeposit', parseFloat(e.target.value) || 0)}
-                  placeholder="0" style={{ direction: 'ltr' }}
+                <PctInput
+                  value={row.feeDeposit}
+                  onChange={v => onUpdate(row.id, 'feeDeposit', v)}
                   className="w-14 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
                 />
                 %
