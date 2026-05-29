@@ -45,6 +45,8 @@ export interface SavingRow {
   name: string
   monthlyContribution: number
   accumulated: number
+  feeBalance: number   // דמי ניהול מהצבירה (%)
+  feeDeposit: number   // דמי ניהול מההפקדה (%)
 }
 
 export type SimpleSection = 'income' | 'fixed' | 'sub' | 'ins'
@@ -92,8 +94,8 @@ const DEFAULT_DEBTS: DebtRow[] = [
 const DEFAULT_INSTALLMENTS: InstallmentRow[] = []
 
 const DEFAULT_SAVINGS: SavingRow[] = [
-  'קרן חירום', 'חיסכון בבנק', 'קרן השתלמות', 'פנסיה', 'קופת גמל להשקעה', 'חסכונות ילדים',
-].map(name => ({ id: uid(), name, monthlyContribution: 0, accumulated: 0 }))
+  'קרן חירום', 'חיסכון בבנק', 'קרן השתלמות', 'קרן פנסיה', 'קופת גמל להשקעה', 'חסכונות ילדים',
+].map(name => ({ id: uid(), name, monthlyContribution: 0, accumulated: 0, feeBalance: 0, feeDeposit: 0 }))
 
 interface MappingState {
   income: MappingRow[]
@@ -120,6 +122,10 @@ interface MappingState {
   expensesOverride: number | null
   setIncomeOverride:   (val: number | null) => void
   setExpensesOverride: (val: number | null) => void
+
+  /** Client credit-rating score (free number). */
+  creditScore: number
+  setCreditScore: (val: number) => void
 
   // Simple sections (income / fixed / sub / ins)
   addRow: (section: SimpleSection, name?: string) => void
@@ -176,6 +182,9 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   expensesOverride: null,
   setIncomeOverride:   (val) => set({ incomeOverride:   val }),
   setExpensesOverride: (val) => set({ expensesOverride: val }),
+
+  creditScore: 0,
+  setCreditScore: (val) => set({ creditScore: Math.max(0, val) }),
 
   addRow: (section, name = '') => {
     const prev = get()[section] as MappingRow[]
@@ -294,7 +303,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     set(s => ({ installments: s.installments.filter(r => r.id !== id) })),
 
   addSavingRow: () =>
-    set(s => ({ savings: [...s.savings, { id: uid(), name: '', monthlyContribution: 0, accumulated: 0 }] })),
+    set(s => ({ savings: [...s.savings, { id: uid(), name: '', monthlyContribution: 0, accumulated: 0, feeBalance: 0, feeDeposit: 0 }] })),
   updateSavingRow: (id, field, value) =>
     set(s => ({ savings: s.savings.map(r => r.id === id ? { ...r, [field]: value } : r) })),
   deleteSavingRow: (id) =>

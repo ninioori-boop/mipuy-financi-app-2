@@ -49,7 +49,7 @@ export function SavingPanel({ savings, onAdd, onUpdate, onDelete }: Props) {
 
       <div className="space-y-2">
         {savings.map(row => (
-          <div key={row.id} className="group">
+          <div key={row.id} className="group space-y-1.5">
             {/* Desktop row */}
             <div className="hidden sm:grid grid-cols-[1fr_8rem_8rem_1.5rem] gap-2 items-center">
               <input
@@ -81,6 +81,31 @@ export function SavingPanel({ savings, onAdd, onUpdate, onDelete }: Props) {
                   <Num value={row.accumulated} onChange={v => onUpdate(row.id, 'accumulated', v)} placeholder="₪" />
                 </div>
               </div>
+            </div>
+
+            {/* דמי ניהול — שורה משותפת (דסקטופ + מובייל) */}
+            <div className="flex items-center flex-wrap gap-x-3 gap-y-1 ps-1">
+              <span className="text-[11px] text-muted-txt">דמי ניהול:</span>
+              <label className="flex items-center gap-1 text-[11px] text-muted-txt">
+                מהצבירה
+                <input
+                  type="number" value={row.feeBalance || ''} min={0} step={0.1}
+                  onChange={e => onUpdate(row.id, 'feeBalance', parseFloat(e.target.value) || 0)}
+                  placeholder="0" style={{ direction: 'ltr' }}
+                  className="w-14 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                />
+                %
+              </label>
+              <label className="flex items-center gap-1 text-[11px] text-muted-txt">
+                מההפקדה
+                <input
+                  type="number" value={row.feeDeposit || ''} min={0} step={0.1}
+                  onChange={e => onUpdate(row.id, 'feeDeposit', parseFloat(e.target.value) || 0)}
+                  placeholder="0" style={{ direction: 'ltr' }}
+                  className="w-14 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                />
+                %
+              </label>
             </div>
           </div>
         ))}

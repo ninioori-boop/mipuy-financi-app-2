@@ -38,6 +38,24 @@ export default function MappingPage() {
         <p className="text-muted-txt text-sm">הגדר הכנסות והוצאות חודשיות — הבסיס לתכנון התקציב</p>
       </div>
 
+      {/* Credit rating score */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-txt">📊 ציון דירוג אשראי</div>
+          <div className="text-xs text-muted-txt mt-0.5">הציון העדכני של הלקוח (לפי דוח נתוני אשראי)</div>
+        </div>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={store.creditScore || ''}
+          min={0}
+          onChange={e => store.setCreditScore(parseFloat(e.target.value) || 0)}
+          placeholder="—"
+          style={{ direction: 'ltr' }}
+          className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-lg font-bold text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
+        />
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}

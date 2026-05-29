@@ -49,6 +49,7 @@ export interface Snapshot {
     bufferPct:     number
     incomeOverride:   number | null
     expensesOverride: number | null
+    creditScore:   number
   }
   goals: {
     short:  ReturnType<typeof useGoalsStore.getState>['short']
@@ -121,6 +122,7 @@ export function collectSnapshot(): Snapshot {
       bufferPct: p.bufferPct,
       incomeOverride:   p.incomeOverride,
       expensesOverride: p.expensesOverride,
+      creditScore:      p.creditScore,
     },
     goals: { short: g.short, medium: g.medium, long: g.long },
     credit: { learnedDB: c.learnedDB, reportMonths: c.reportMonths },
@@ -190,6 +192,7 @@ export function applySnapshot(raw: unknown): void {
       ...(typeof m.bufferPct === 'number' ? { bufferPct: m.bufferPct }         : {}),
       ...(typeof m.incomeOverride   === 'number' || m.incomeOverride   === null ? { incomeOverride:   m.incomeOverride   } : {}),
       ...(typeof m.expensesOverride === 'number' || m.expensesOverride === null ? { expensesOverride: m.expensesOverride } : {}),
+      ...(typeof m.creditScore === 'number' ? { creditScore: m.creditScore } : {}),
     })
   }
 
@@ -276,6 +279,7 @@ export function resetAllStores(): void {
     variable: [], annual: [], debts: [], installments: [], savings: [],
     varMonths: 3, creditImported: false, bufferPct: 0.4,
     incomeOverride: null, expensesOverride: null,
+    creditScore: 0,
   })
   useGoalsStore.setState({ short: [], medium: [], long: [] })
   useCreditStore.setState({
