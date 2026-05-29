@@ -257,7 +257,10 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       if (VAR_CATEGORIES.has(cat)) {
         variable = mergeRows(variable, cat, Math.round(totalAmt))
       } else if (ANNUAL_CATEGORIES.has(cat)) {
-        annual = mergeAnnual(annual, cat, Math.round(totalAmt / m * 12))
+        // Annual categories are lumpy (vacation, gifts) — use the actual total
+        // spent as the yearly figure (the panel shows ÷12 for the monthly).
+        // Do NOT annualize a monthly average, which over-inflates a one-off spend.
+        annual = mergeAnnual(annual, cat, Math.round(totalAmt))
       } else if (FIXED_CATEGORIES.has(cat)) {
         fixed = mergeRows(fixed, cat, Math.round(totalAmt / m))
       } else if (INSURANCE_CATEGORIES.has(cat)) {
