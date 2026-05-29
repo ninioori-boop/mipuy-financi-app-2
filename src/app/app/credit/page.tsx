@@ -23,8 +23,9 @@ const SYSTEM_PROMPT =
   '- שם עיר בסוף — חלק ממיקום, לא מהשם\n' +
   '- אם לא בטוח — השתמש ב"שונות"\n' +
   '- אל תמציא קטגוריות חדשות\n\n' +
-  'פורמט תגובה — JSON בלבד ללא טקסט נוסף:\n' +
-  '{"expenses":[{"description":"תיאור","category":"קטגוריה"}]}'
+  'החזר אך ורק את הקטגוריות, באותו סדר בדיוק של העסקאות שקיבלת (קטגוריה אחת לכל שורה).\n' +
+  'פורמט תגובה — JSON בלבד ללא טקסט נוסף, מערך מחרוזות לפי הסדר:\n' +
+  '{"categories":["קטגוריה1","קטגוריה2"]}'
 
 // Push latest transactions from store to mapping (reads fresh state)
 function pushToMapping() {
@@ -102,10 +103,16 @@ export default function CreditPage() {
         if (!jsonMatch) throw new Error('תגובה לא תקינה מ-Claude')
         const jsonClean = jsonMatch[0].replace(/,\s*([}\]])/g, '$1')
         const parsed = JSON.parse(jsonClean)
-        const aiExpenses: { description: string; category: string }[] = parsed.expenses ?? []
+        // Categories come back as a plain string array, in input order. Tolerate the
+        // older {"expenses":[{category}]} shape too. (description is never used — matched by index.)
+        const cats: string[] = Array.isArray(parsed.categories)
+          ? parsed.categories
+          : Array.isArray(parsed.expenses)
+            ? parsed.expenses.map((e: { category?: string }) => e?.category ?? '')
+            : []
 
-        for (let i = 0; i < Math.min(aiExpenses.length, batch.length); i++) {
-          const cat = aiExpenses[i].category
+        for (let i = 0; i < Math.min(cats.length, batch.length); i++) {
+          const cat = cats[i]
           if (ALL_CATEGORIES.includes(cat) && cat !== 'שונות') {
             applyAiCategory(batch[i].idx, cat)
             updated++
