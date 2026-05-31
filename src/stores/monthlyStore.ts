@@ -19,6 +19,7 @@ export interface InstRow {
   monthly: number
   current: number
   totalPay: number
+  fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
 }
 
 export interface DebtRow {
@@ -27,6 +28,7 @@ export interface DebtRow {
   remaining: number
   monthly: number
   months: number
+  fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
 }
 
 export interface SavingRow {
@@ -34,6 +36,7 @@ export interface SavingRow {
   name: string
   monthly: number
   accumulated: number
+  fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
 }
 
 export interface MonthData {
@@ -101,6 +104,25 @@ interface MonthlyState {
     mappingSavings:      { name: string; monthlyContribution: number; accumulated: number }[],
     varMonths: number,
   ) => void
+
+  /**
+   * Mirror installments / debts / savings from the mapping store into every
+   * existing month (or just `monthId` if provided). Rows are tagged with
+   * fromMapping:true so that user edits in the monthly tab (which clear the
+   * flag) are preserved against future syncs.
+   *
+   * Rules:
+   *   - fromMapping rows whose name is no longer in mapping → removed.
+   *   - fromMapping rows whose mapping counterpart changed → updated in place.
+   *   - Mapping rows not yet present in the month → added as fromMapping.
+   *   - Non-fromMapping rows (manual) → never touched.
+   */
+  syncFromMapping: (
+    mappingInstallments: { name: string; totalAmount: number; monthlyPayment: number; paidCount: number; totalCount: number }[],
+    mappingDebts:        { name: string; remainingBalance: number; monthlyPayment: number; remainingMonths: number }[],
+    mappingSavings:      { name: string; monthlyContribution: number; accumulated: number }[],
+    monthId?: string,
+  ) => void
 }
 
 export const useMonthlyStore = create<MonthlyState>((set, get) => {
@@ -148,7 +170,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateInstRow: (monthId, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        installments: m.installments.map(r => r.id === id ? { ...r, [field]: value } : r),
+        // Clear fromMapping on user edit — the row becomes "manual" for this
+        // specific month and future mapping syncs will no longer touch it.
+        installments: m.installments.map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
       })),
 
     deleteInstRow: (monthId, id) =>
@@ -166,7 +190,8 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateDebtRow: (monthId, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        debts: m.debts.map(r => r.id === id ? { ...r, [field]: value } : r),
+        // Clear fromMapping on user edit — see updateInstRow comment.
+        debts: m.debts.map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
       })),
 
     deleteDebtRow: (monthId, id) =>
@@ -184,7 +209,8 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateSavingRow: (monthId, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        savings: m.savings.map(r => r.id === id ? { ...r, [field]: value } : r),
+        // Clear fromMapping on user edit — see updateInstRow comment.
+        savings: m.savings.map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
       })),
 
     deleteSavingRow: (monthId, id) =>
@@ -274,6 +300,105 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         const savings = [...m.savings, ...newSavings]
 
         return { ...m, fixed, variable, sub, ins, installments, debts, savings }
+      })
+    },
+
+    syncFromMapping: (mInst, mDebts, mSav, monthId) => {
+      set(s => {
+        const targets = monthId ? [monthId] : Object.keys(s.months)
+        if (targets.length === 0) return s
+
+        const instByName = new Map(mInst.map(i => [i.name, i]))
+        const debtByName = new Map(mDebts.map(d => [d.name, d]))
+        const savByName  = new Map(mSav.map(v => [v.name, v]))
+
+        const newMonths = { ...s.months }
+        targets.forEach(mid => {
+          const m = newMonths[mid]
+          if (!m) return
+
+          // INSTALLMENTS
+          const instExisting = new Set(m.installments.map(r => r.name))
+          const installments: InstRow[] = []
+          for (const r of m.installments) {
+            if (!r.fromMapping) { installments.push(r); continue }
+            const src = instByName.get(r.name)
+            if (!src) continue   // mapping removed it → drop from monthly
+            installments.push({
+              ...r,
+              total:    Math.round(src.totalAmount),
+              monthly:  Math.round(src.monthlyPayment),
+              current:  src.paidCount,
+              totalPay: src.totalCount,
+            })
+          }
+          for (const [name, src] of instByName) {
+            if (instExisting.has(name)) continue
+            if (src.monthlyPayment <= 0 && src.totalAmount <= 0) continue
+            installments.push({
+              id: uid(), name,
+              total:    Math.round(src.totalAmount),
+              monthly:  Math.round(src.monthlyPayment),
+              current:  src.paidCount,
+              totalPay: src.totalCount,
+              fromMapping: true,
+            })
+          }
+
+          // DEBTS
+          const debtExisting = new Set(m.debts.map(r => r.name))
+          const debts: DebtRow[] = []
+          for (const r of m.debts) {
+            if (!r.fromMapping) { debts.push(r); continue }
+            const src = debtByName.get(r.name)
+            if (!src) continue
+            debts.push({
+              ...r,
+              remaining: Math.round(src.remainingBalance),
+              monthly:   Math.round(src.monthlyPayment),
+              months:    src.remainingMonths,
+            })
+          }
+          for (const [name, src] of debtByName) {
+            if (debtExisting.has(name)) continue
+            if (src.monthlyPayment <= 0 && src.remainingBalance <= 0) continue
+            debts.push({
+              id: uid(), name,
+              remaining: Math.round(src.remainingBalance),
+              monthly:   Math.round(src.monthlyPayment),
+              months:    src.remainingMonths,
+              fromMapping: true,
+            })
+          }
+
+          // SAVINGS
+          const savExisting = new Set(m.savings.map(r => r.name))
+          const savings: SavingRow[] = []
+          for (const r of m.savings) {
+            if (!r.fromMapping) { savings.push(r); continue }
+            const src = savByName.get(r.name)
+            if (!src) continue
+            savings.push({
+              ...r,
+              monthly:     Math.round(src.monthlyContribution),
+              accumulated: Math.round(src.accumulated),
+            })
+          }
+          for (const [name, src] of savByName) {
+            if (savExisting.has(name)) continue
+            if (src.monthlyContribution <= 0 && src.accumulated <= 0) continue
+            savings.push({
+              id: uid(), name,
+              monthly:     Math.round(src.monthlyContribution),
+              accumulated: Math.round(src.accumulated),
+              fromMapping: true,
+            })
+          }
+
+          newMonths[mid] = { ...m, installments, debts, savings }
+        })
+
+        return { months: newMonths }
       })
     },
   }

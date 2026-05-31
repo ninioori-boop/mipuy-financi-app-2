@@ -140,7 +140,31 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     }
   }, [user, hydrated, setStatus, markSaved])
 
-  // ── 3. Online/offline awareness ──
+  // ── 3. Mirror mapping installments/debts/savings into all monthly tabs ──
+  // Subscribe to any mapping change; on user pause (500ms debounce) call
+  // syncFromMapping with no monthId → updates EVERY existing month.
+  // User-edited rows (fromMapping:false) stay untouched.
+  useEffect(() => {
+    if (!user || !hydrated) return
+
+    let mappingTimer: ReturnType<typeof setTimeout> | null = null
+    const triggerSync = () => {
+      if (mappingTimer) clearTimeout(mappingTimer)
+      mappingTimer = setTimeout(() => {
+        const mp = useMappingStore.getState()
+        useMonthlyStore.getState().syncFromMapping(mp.installments, mp.debts, mp.savings)
+      }, 500)
+    }
+    // Run once on mount to backfill from current mapping snapshot
+    triggerSync()
+    const unsub = useMappingStore.subscribe(triggerSync)
+    return () => {
+      unsub()
+      if (mappingTimer) clearTimeout(mappingTimer)
+    }
+  }, [user, hydrated])
+
+  // ── 4. Online/offline awareness ──
   useEffect(() => {
     const onOffline = () => useSyncStore.getState().setStatus('offline')
     const onOnline  = () => useSyncStore.getState().setStatus('idle')

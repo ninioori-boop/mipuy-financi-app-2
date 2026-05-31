@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useMappingStore } from '@/stores/mappingStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import { BudgetSection } from '@/components/monthly/BudgetSection'
 
@@ -15,12 +16,19 @@ export default function MonthlyPage() {
   const { month: monthId } = useParams<{ month: string }>()
   const monthName = MONTHS_LIST.find(m => m.id === monthId)?.name ?? monthId
 
-  const { months, initMonth, setYear, addRow, updateRow, deleteRow,
+  const { months, initMonth, syncFromMapping, setYear, addRow, updateRow, deleteRow,
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
           addSavingRow, updateSavingRow, deleteSavingRow } = useMonthlyStore()
 
-  useEffect(() => { initMonth(monthId) }, [monthId])
+  // Initialize the month and immediately mirror mapping installments/debts/savings.
+  // The sync uses fromMapping:true so subsequent user edits in this month are
+  // preserved (the edit clears the flag and future syncs leave that row alone).
+  useEffect(() => {
+    initMonth(monthId)
+    const mp = useMappingStore.getState()
+    syncFromMapping(mp.installments, mp.debts, mp.savings, monthId)
+  }, [monthId, initMonth, syncFromMapping])
 
   const data = months[monthId]
   if (!data) return null
