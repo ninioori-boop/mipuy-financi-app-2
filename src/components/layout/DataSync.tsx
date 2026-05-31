@@ -15,7 +15,7 @@
  *   - Refuses to save snapshots over a size cap (Firestore doc limit ≈ 1MB)
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore }    from '@/stores/authStore'
 import { useSyncStore }    from '@/stores/syncStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
@@ -36,12 +36,15 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const user            = useAuthStore(s => s.user)
   const authLoading     = useAuthStore(s => s.loading)
   const hydrated        = useSyncStore(s => s.hydrated)
+  const status          = useSyncStore(s => s.status)
+  const errorMessage    = useSyncStore(s => s.errorMessage)
   const setStatus       = useSyncStore(s => s.setStatus)
   const setHydrated     = useSyncStore(s => s.setHydrated)
   const markSaved       = useSyncStore(s => s.markSaved)
 
   const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
+  const [retryCount, setRetryCount] = useState(0)
 
   // ── 1. Load on auth ready / user change ──
   useEffect(() => {
@@ -77,11 +80,15 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       .catch(err => {
         if (cancelled) return
         setStatus('error', (err as Error)?.message ?? 'שגיאה בטעינת נתונים')
-        setHydrated(true)  // allow user to keep working even if load failed
+        // Intentionally do NOT setHydrated(true) on load failure.
+        // The save effect below is gated on `hydrated`, so leaving it false
+        // prevents an empty-defaults snapshot from overwriting real Firestore
+        // data on the user's next interaction. UI is blocked by the overlay
+        // at the bottom of this component until a retry succeeds.
       })
 
     return () => { cancelled = true }
-  }, [user, authLoading, setStatus, setHydrated])
+  }, [user, authLoading, setStatus, setHydrated, retryCount])
 
   // ── 2. Subscribe to data stores → debounced save ──
   useEffect(() => {
@@ -144,6 +151,29 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       window.removeEventListener('online',  onOnline)
     }
   }, [])
+
+  if (user && !hydrated && status === 'error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-surface px-4">
+        <div className="max-w-md w-full rounded-xl border border-line bg-surface2 p-6 space-y-4 text-center">
+          <div className="text-3xl">⚠️</div>
+          <h2 className="text-lg font-bold text-txt">שגיאה בטעינת הנתונים</h2>
+          <p className="text-sm text-muted-txt">
+            {errorMessage ?? 'הטעינה מ-Firestore נכשלה.'}
+          </p>
+          <p className="text-xs text-muted-txt">
+            הנתונים שלך בענן בטוחים. אל תבצע שינויים עד שהטעינה תצליח — נסה שוב כדי להמשיך.
+          </p>
+          <button
+            onClick={() => setRetryCount(c => c + 1)}
+            className="w-full py-2.5 rounded-lg bg-gold/20 border border-gold/40 text-gold font-bold text-sm hover:bg-gold/30 transition-colors"
+          >
+            נסה שוב
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return <>{children}</>
 }
