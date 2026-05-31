@@ -96,6 +96,9 @@ interface MonthlyState {
     mappingVariable: { name: string; amount: number }[],
     mappingSub:      { name: string; amount: number }[],
     mappingIns:      { name: string; amount: number }[],
+    mappingInstallments: { name: string; totalAmount: number; monthlyPayment: number; paidCount: number; totalCount: number }[],
+    mappingDebts:        { name: string; remainingBalance: number; monthlyPayment: number; remainingMonths: number }[],
+    mappingSavings:      { name: string; monthlyContribution: number; accumulated: number }[],
     varMonths: number,
   ) => void
 }
@@ -190,7 +193,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         savings: m.savings.filter(r => r.id !== id),
       })),
 
-    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, varMonths) => {
+    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths) => {
       updateMonth(monthId, m => {
         // Step 1: merge mapping plan rows (skip rows already present by name)
         function mergePlan(rows: BudgetRow[], src: { name: string; amount: number }[]): BudgetRow[] {
@@ -227,7 +230,50 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         sub      = fillActual(sub,      SUB_CATEGORIES)
         ins      = fillActual(ins,      INSURANCE_CATEGORIES)
 
-        return { ...m, fixed, variable, sub, ins }
+        // Step 3: merge installments / debts / savings from mapping into the
+        // month's own sections. Skip rows already present in the month by name
+        // (so re-running the import doesn't duplicate). Annual-plan rows from
+        // the mapping intentionally stay only in the mapping/annual view — they
+        // are not pushed per-month.
+        const namesIn = <T extends { name: string }>(rows: T[]) => new Set(rows.map(r => r.name))
+
+        const instNames = namesIn(m.installments)
+        const newInstallments: InstRow[] = mappingInstallments
+          .filter(i => !instNames.has(i.name) && (i.monthlyPayment > 0 || i.totalAmount > 0))
+          .map(i => ({
+            id: uid(),
+            name: i.name,
+            total:    Math.round(i.totalAmount),
+            monthly:  Math.round(i.monthlyPayment),
+            current:  i.paidCount,
+            totalPay: i.totalCount,
+          }))
+        const installments = [...m.installments, ...newInstallments]
+
+        const debtNames = namesIn(m.debts)
+        const newDebts: DebtRow[] = mappingDebts
+          .filter(d => !debtNames.has(d.name) && (d.monthlyPayment > 0 || d.remainingBalance > 0))
+          .map(d => ({
+            id: uid(),
+            name: d.name,
+            remaining: Math.round(d.remainingBalance),
+            monthly:   Math.round(d.monthlyPayment),
+            months:    d.remainingMonths,
+          }))
+        const debts = [...m.debts, ...newDebts]
+
+        const savNames = namesIn(m.savings)
+        const newSavings: SavingRow[] = mappingSavings
+          .filter(s => !savNames.has(s.name) && (s.monthlyContribution > 0 || s.accumulated > 0))
+          .map(s => ({
+            id: uid(),
+            name: s.name,
+            monthly:     Math.round(s.monthlyContribution),
+            accumulated: Math.round(s.accumulated),
+          }))
+        const savings = [...m.savings, ...newSavings]
+
+        return { ...m, fixed, variable, sub, ins, installments, debts, savings }
       })
     },
   }

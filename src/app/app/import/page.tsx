@@ -171,6 +171,7 @@ export default function ImportPage() {
     applyImport(
       targetMonth, catSums,
       mapping.fixed, mapping.variable, mapping.sub, mapping.ins,
+      mapping.installments, mapping.debts, mapping.savings,
       mapping.varMonths,
     )
 
