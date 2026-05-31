@@ -12,6 +12,7 @@ export interface MappingRow {
   name: string
   amount: number       // monthly for income/fixed/sub/ins; period-total for variable
   fromCredit?: boolean
+  fromBank?:   boolean // true → originated from Bank tab import; protects from Credit-import wipe
 }
 
 export interface AnnualRow {
@@ -19,6 +20,7 @@ export interface AnnualRow {
   name: string
   annualAmount: number // yearly; monthly = annualAmount / 12
   fromCredit?: boolean
+  fromBank?:   boolean // true → originated from Bank tab import; protects from Credit-import wipe
 }
 
 export interface DebtRow {
@@ -219,9 +221,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       totals[t.category] = (totals[t.category] ?? 0) + t.amount
     })
 
-    // Helper: merge new amount into existing fromCredit rows, or add new row
+    // Helper: merge new amount into existing fromCredit rows, or add new row.
+    // Bank-imported rows (fromBank) are NOT merge targets — they stay as-is to
+    // preserve the bank-provided value; credit data lands in a separate row.
     function mergeRows(existing: MappingRow[], cat: string, addAmt: number): MappingRow[] {
-      const idx = existing.findIndex(r => r.fromCredit && r.name === cat)
+      const idx = existing.findIndex(r => r.fromCredit && !r.fromBank && r.name === cat)
       if (idx >= 0) {
         const updated = [...existing]
         updated[idx] = { ...updated[idx], amount: updated[idx].amount + addAmt }
@@ -231,7 +235,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }
 
     function mergeAnnual(existing: AnnualRow[], cat: string, addAmt: number): AnnualRow[] {
-      const idx = existing.findIndex(r => r.fromCredit && r.name === cat)
+      const idx = existing.findIndex(r => r.fromCredit && !r.fromBank && r.name === cat)
       if (idx >= 0) {
         const updated = [...existing]
         updated[idx] = { ...updated[idx], annualAmount: updated[idx].annualAmount + addAmt }
@@ -244,11 +248,14 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     // re-running the import (after AI, on months change, on re-upload) REPLACES
     // the credit-derived amounts instead of accumulating them. Without this the
     // amounts double/triple every time the import re-runs.
-    let variable = s.variable.filter(r => !r.fromCredit)
-    let fixed    = s.fixed.filter(r => !r.fromCredit)
-    let sub      = s.sub.filter(r => !r.fromCredit)
-    let ins      = s.ins.filter(r => !r.fromCredit)
-    let annual   = s.annual.filter(r => !r.fromCredit)
+    // Drop fromCredit rows that did NOT originate from the Bank tab. Bank rows
+    // (fromBank:true) survive the wipe — they represent manual setup work that
+    // a re-run of credit import must not destroy.
+    let variable = s.variable.filter(r => !(r.fromCredit && !r.fromBank))
+    let fixed    = s.fixed.filter(r => !(r.fromCredit && !r.fromBank))
+    let sub      = s.sub.filter(r => !(r.fromCredit && !r.fromBank))
+    let ins      = s.ins.filter(r => !(r.fromCredit && !r.fromBank))
+    let annual   = s.annual.filter(r => !(r.fromCredit && !r.fromBank))
 
     Object.entries(totals).forEach(([cat, totalAmt]) => {
       if (totalAmt <= 0) return
@@ -320,11 +327,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     const newAnnual:   AnnualRow[]  = []
 
     rows.forEach(r => {
-      if (r.section === 'fixed')    newFixed.push(   { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
-      else if (r.section === 'variable') newVariable.push({ id: uid(), name: r.name, amount: r.amount, fromCredit: true })
-      else if (r.section === 'sub')     newSub.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
-      else if (r.section === 'ins')     newIns.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true })
-      else if (r.section === 'annual')  newAnnual.push( { id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true })
+      if (r.section === 'fixed')    newFixed.push(   { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
+      else if (r.section === 'variable') newVariable.push({ id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
+      else if (r.section === 'sub')     newSub.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
+      else if (r.section === 'ins')     newIns.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
+      else if (r.section === 'annual')  newAnnual.push( { id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true, fromBank: true })
     })
 
     set(s => ({
