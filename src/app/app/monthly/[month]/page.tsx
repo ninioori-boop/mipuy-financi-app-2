@@ -21,13 +21,19 @@ export default function MonthlyPage() {
           addDebtRow, updateDebtRow, deleteDebtRow,
           addSavingRow, updateSavingRow, deleteSavingRow } = useMonthlyStore()
 
-  // Initialize the month and immediately mirror mapping installments/debts/savings.
-  // The sync uses fromMapping:true so subsequent user edits in this month are
-  // preserved (the edit clears the flag and future syncs leave that row alone).
+  // Initialize the month and immediately mirror mapping (all 4 budget sections
+  // + installments/debts/savings). The sync uses fromMapping:true so subsequent
+  // user edits in this month are preserved (the edit clears the flag and future
+  // syncs leave that row alone).
   useEffect(() => {
     initMonth(monthId)
     const mp = useMappingStore.getState()
-    syncFromMapping(mp.installments, mp.debts, mp.savings, monthId)
+    syncFromMapping(
+      mp.fixed, mp.variable, mp.sub, mp.ins,
+      mp.installments, mp.debts, mp.savings,
+      mp.varMonths,
+      monthId,
+    )
   }, [monthId, initMonth, syncFromMapping])
 
   const data = months[monthId]

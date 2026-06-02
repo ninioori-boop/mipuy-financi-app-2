@@ -182,6 +182,29 @@ describe('applyImport — installments / debts / savings carry mapping rows into
   })
 })
 
+// Helper to keep syncFromMapping calls concise — the action now takes 8
+// positional args (4 budget sections + 3 specialty sections + varMonths)
+// plus an optional monthId. Tests only specify what they care about.
+type SyncOpts = {
+  fixed?:    { name: string; amount: number }[]
+  variable?: { name: string; amount: number }[]
+  sub?:      { name: string; amount: number }[]
+  ins?:      { name: string; amount: number }[]
+  inst?:     { name: string; totalAmount: number; monthlyPayment: number; paidCount: number; totalCount: number }[]
+  debt?:     { name: string; remainingBalance: number; monthlyPayment: number; remainingMonths: number }[]
+  sav?:      { name: string; monthlyContribution: number; accumulated: number }[]
+  varMonths?: number
+  monthId?:  string
+}
+function callSync(o: SyncOpts = {}) {
+  useMonthlyStore.getState().syncFromMapping(
+    o.fixed ?? [], o.variable ?? [], o.sub ?? [], o.ins ?? [],
+    o.inst ?? [], o.debt ?? [], o.sav ?? [],
+    o.varMonths ?? 1,
+    o.monthId,
+  )
+}
+
 describe('syncFromMapping — mirrors installments/debts/savings into every month', () => {
   beforeEach(() => useMonthlyStore.setState({ months: {} }))
 
@@ -190,11 +213,11 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
     store.initMonth('jan')
     store.initMonth('feb')
 
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [{ name: 'loan', remainingBalance: 25000, monthlyPayment: 850, remainingMonths: 30 }],
-      [{ name: 'pension', monthlyContribution: 1200, accumulated: 50000 }],
-    )
+    callSync({
+      inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
+      debt: [{ name: 'loan', remainingBalance: 25000, monthlyPayment: 850, remainingMonths: 30 }],
+      sav:  [{ name: 'pension', monthlyContribution: 1200, accumulated: 50000 }],
+    })
 
     for (const mid of ['jan', 'feb']) {
       const m = useMonthlyStore.getState().months[mid]
@@ -213,15 +236,9 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
   it('updates fromMapping rows when mapping changes (same name, new values)', () => {
     const store = useMonthlyStore.getState()
     store.initMonth('mar')
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }] })
     // user changes amount in mapping → second sync
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 7200, monthlyPayment: 600, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 7200, monthlyPayment: 600, paidCount: 1, totalCount: 12 }] })
 
     const m = useMonthlyStore.getState().months['mar']
     const tvRows = m.installments.filter(r => r.name === 'TV')
@@ -233,14 +250,11 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
   it('removes fromMapping rows when mapping deletes them', () => {
     const store = useMonthlyStore.getState()
     store.initMonth('apr')
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }] })
     expect(useMonthlyStore.getState().months['apr'].installments.find(r => r.name === 'TV')).toBeDefined()
 
     // mapping no longer has TV
-    store.syncFromMapping([], [], [])
+    callSync({})
 
     expect(useMonthlyStore.getState().months['apr'].installments.find(r => r.name === 'TV')).toBeUndefined()
   })
@@ -255,10 +269,7 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
     store.updateInstRow('may', manualId, 'monthly', 999)
 
     // Sync brings in unrelated mapping rows
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }] })
 
     const m = useMonthlyStore.getState().months['may']
     const manual = m.installments.find(r => r.id === manualId)
@@ -271,10 +282,7 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
   it('user editing a fromMapping row disconnects it (subsequent mapping changes do not touch it)', () => {
     const store = useMonthlyStore.getState()
     store.initMonth('jun')
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }] })
     const tvId = useMonthlyStore.getState().months['jun'].installments.find(r => r.name === 'TV')!.id
 
     // User edits the monthly row — should clear fromMapping
@@ -282,13 +290,10 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
     expect(useMonthlyStore.getState().months['jun'].installments.find(r => r.id === tvId)!.fromMapping).toBe(false)
 
     // Mapping changes amount, then deletes — neither should affect this manual row
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 7200, monthlyPayment: 600, paidCount: 1, totalCount: 12 }],
-      [], [],
-    )
+    callSync({ inst: [{ name: 'TV', totalAmount: 7200, monthlyPayment: 600, paidCount: 1, totalCount: 12 }] })
     expect(useMonthlyStore.getState().months['jun'].installments.find(r => r.id === tvId)!.monthly).toBe(450)
 
-    store.syncFromMapping([], [], [])
+    callSync({})
     expect(useMonthlyStore.getState().months['jun'].installments.find(r => r.id === tvId)?.monthly).toBe(450)
   })
 
@@ -296,12 +301,110 @@ describe('syncFromMapping — mirrors installments/debts/savings into every mont
     const store = useMonthlyStore.getState()
     store.initMonth('jul')
     store.initMonth('aug')
-    store.syncFromMapping(
-      [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
-      [], [],
-      'jul',
-    )
+    callSync({
+      inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
+      monthId: 'jul',
+    })
     expect(useMonthlyStore.getState().months['jul'].installments.find(r => r.name === 'TV')).toBeDefined()
     expect(useMonthlyStore.getState().months['aug'].installments.find(r => r.name === 'TV')).toBeUndefined()
+  })
+})
+
+describe('syncFromMapping — mirrors budget sections (fixed/variable/sub/ins) into every month', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  it('adds fromMapping rows for all 4 budget sections; variable amount is divided by varMonths', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan')
+
+    // Use category names that do NOT collide with MONTH_DEFAULT_ROWS — those
+    // defaults exist as plain rows (no fromMapping) and are treated as manual,
+    // so sync would skip them. This is the SAME mechanism that protects Oliver.
+    callSync({
+      fixed:    [{ name: 'משכנתא',         amount: 4500 }],
+      variable: [{ name: 'מזון לבית',       amount: 3600 }],   // period total over varMonths
+      sub:      [{ name: 'Netflix',        amount: 30 }],
+      ins:      [{ name: 'ביטוח דירה',      amount: 220 }],
+      varMonths: 3,
+    })
+
+    const m = useMonthlyStore.getState().months['jan']
+    expect(m.fixed.find(r => r.name === 'משכנתא')?.fromMapping).toBe(true)
+    expect(m.fixed.find(r => r.name === 'משכנתא')?.plan).toBe(4500)
+    expect(m.variable.find(r => r.name === 'מזון לבית')?.fromMapping).toBe(true)
+    expect(m.variable.find(r => r.name === 'מזון לבית')?.plan).toBe(1200) // 3600 / 3
+    expect(m.sub.find(r => r.name === 'Netflix')?.plan).toBe(30)
+    expect(m.ins.find(r => r.name === 'ביטוח דירה')?.plan).toBe(220)
+  })
+
+  it('default monthly rows are treated as manual (sync does not overwrite them — preserves user setup)', () => {
+    // MONTH_DEFAULT_ROWS gives a fresh month some pre-filled rows (e.g.,
+    // 'ביטוח רכב' in ins). These count as manual because they have no
+    // fromMapping flag. Even if the user later adds a same-named row in
+    // mapping, the default row's plan stays at its current value.
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan2')
+    const defaultId = useMonthlyStore.getState().months['jan2'].ins.find(r => r.name === 'ביטוח רכב')?.id
+    expect(defaultId, 'sanity: default ins includes ביטוח רכב').toBeDefined()
+
+    callSync({ ins: [{ name: 'ביטוח רכב', amount: 999 }] })
+
+    const ins = useMonthlyStore.getState().months['jan2'].ins
+    const row = ins.find(r => r.id === defaultId)
+    expect(row, 'default row must still exist').toBeDefined()
+    expect(row!.plan).toBe(0)                              // default plan, unchanged
+    expect(row!.fromMapping).toBeFalsy()
+    expect(ins.filter(r => r.name === 'ביטוח רכב')).toHaveLength(1) // no duplicate
+  })
+
+  it('Oliver-scenario: manual rows in monthly are preserved when sync runs', () => {
+    // Oliver opened his next-month budget BEFORE the auto-sync existed, and
+    // typed in variable amounts himself. After we deploy this, the sync must
+    // NOT overwrite his work, and must NOT create duplicates by name.
+    const store = useMonthlyStore.getState()
+    store.initMonth('aug')
+
+    // Oliver's hand-typed row in his monthly variable (no fromMapping flag)
+    store.addRow('aug', 'variable', 'מזון לבית')
+    const oliverRowId = useMonthlyStore.getState().months['aug'].variable.find(r => r.name === 'מזון לבית')!.id
+    store.updateRow('aug', 'variable', oliverRowId, 'plan', 2500)
+
+    // Mapping now has a different amount for the same category name
+    callSync({
+      variable: [{ name: 'מזון לבית', amount: 3000 }],
+      varMonths: 1,
+    })
+
+    const m = useMonthlyStore.getState().months['aug']
+    const rows = m.variable.filter(r => r.name === 'מזון לבית')
+    expect(rows, 'no duplicate row created').toHaveLength(1)
+    expect(rows[0].id).toBe(oliverRowId)                  // same row, not replaced
+    expect(rows[0].plan).toBe(2500)                       // Oliver's value preserved
+    expect(rows[0].fromMapping).toBeFalsy()               // still manual
+  })
+
+  it('new mapping row that is NOT in the month is added (fixed section)', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('sep')
+    callSync({ fixed: [{ name: 'ארנונה חדשה', amount: 380 }] })
+
+    const row = useMonthlyStore.getState().months['sep'].fixed.find(r => r.name === 'ארנונה חדשה')
+    expect(row, 'new mapping row must appear in the month').toBeDefined()
+    expect(row!.plan).toBe(380)
+    expect(row!.fromMapping).toBe(true)
+  })
+
+  it('user editing a budget row disconnects it from mapping', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('oct')
+    callSync({ variable: [{ name: 'דלק וחניה', amount: 800 }] })
+    const id = useMonthlyStore.getState().months['oct'].variable.find(r => r.name === 'דלק וחניה')!.id
+
+    store.updateRow('oct', 'variable', id, 'plan', 950)
+    expect(useMonthlyStore.getState().months['oct'].variable.find(r => r.id === id)!.fromMapping).toBe(false)
+
+    // Future sync changes the mapping — row stays at user's value
+    callSync({ variable: [{ name: 'דלק וחניה', amount: 1200 }] })
+    expect(useMonthlyStore.getState().months['oct'].variable.find(r => r.id === id)!.plan).toBe(950)
   })
 })

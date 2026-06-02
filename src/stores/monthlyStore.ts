@@ -10,6 +10,7 @@ export interface BudgetRow {
   name: string
   plan: number
   actual: number
+  fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
 }
 
 export interface InstRow {
@@ -106,21 +107,30 @@ interface MonthlyState {
   ) => void
 
   /**
-   * Mirror installments / debts / savings from the mapping store into every
-   * existing month (or just `monthId` if provided). Rows are tagged with
-   * fromMapping:true so that user edits in the monthly tab (which clear the
-   * flag) are preserved against future syncs.
+   * Mirror mapping into every existing month (or just `monthId` if provided).
+   * Covers 4 budget sections (fixed/variable/sub/ins) + 3 specialty sections
+   * (installments/debts/savings). Rows are tagged with fromMapping:true so
+   * that user edits in the monthly tab (which clear the flag) are preserved
+   * against future syncs.
    *
-   * Rules:
+   * Variable rows: mapping stores period totals; this divides by varMonths
+   * to land a monthly plan amount, matching the existing applyImport logic.
+   *
+   * Rules per section:
    *   - fromMapping rows whose name is no longer in mapping → removed.
    *   - fromMapping rows whose mapping counterpart changed → updated in place.
    *   - Mapping rows not yet present in the month → added as fromMapping.
-   *   - Non-fromMapping rows (manual) → never touched.
+   *   - Non-fromMapping rows (manual) → NEVER touched.
    */
   syncFromMapping: (
+    mappingFixed:    { name: string; amount: number }[],
+    mappingVariable: { name: string; amount: number }[],
+    mappingSub:      { name: string; amount: number }[],
+    mappingIns:      { name: string; amount: number }[],
     mappingInstallments: { name: string; totalAmount: number; monthlyPayment: number; paidCount: number; totalCount: number }[],
     mappingDebts:        { name: string; remainingBalance: number; monthlyPayment: number; remainingMonths: number }[],
     mappingSavings:      { name: string; monthlyContribution: number; accumulated: number }[],
+    varMonths: number,
     monthId?: string,
   ) => void
 }
@@ -152,7 +162,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateRow: (monthId, section, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        [section]: m[section].map(r => r.id === id ? { ...r, [field]: value } : r),
+        // Clear fromMapping on user edit — the row becomes "manual" for this
+        // specific month and future mapping syncs will no longer touch it.
+        // (income section never carries fromMapping, so this is a no-op there.)
+        [section]: m[section].map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
       })),
 
     deleteRow: (monthId, section, id) =>
@@ -303,19 +316,59 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       })
     },
 
-    syncFromMapping: (mInst, mDebts, mSav, monthId) => {
+    syncFromMapping: (mFixed, mVariable, mSub, mIns, mInst, mDebts, mSav, varMonths, monthId) => {
       set(s => {
         const targets = monthId ? [monthId] : Object.keys(s.months)
         if (targets.length === 0) return s
 
+        const varDivisor = Math.max(1, varMonths)
+        // Budget sections: mapping rows arrive as { name, amount }. Variable
+        // mapping amounts are period totals, so they need division to land a
+        // monthly plan figure.
+        const fixedByName = new Map(mFixed.map(r => [r.name, r.amount] as const))
+        const varByName   = new Map(mVariable.map(r => [r.name, Math.round(r.amount / varDivisor)] as const))
+        const subByName   = new Map(mSub.map(r => [r.name, r.amount] as const))
+        const insByName   = new Map(mIns.map(r => [r.name, r.amount] as const))
+
+        // Specialty sections: shape-converted from mapping types.
         const instByName = new Map(mInst.map(i => [i.name, i]))
         const debtByName = new Map(mDebts.map(d => [d.name, d]))
         const savByName  = new Map(mSav.map(v => [v.name, v]))
+
+        // Generic merge for the 4 budget sections (BudgetRow shape).
+        function syncBudgetSection(existing: BudgetRow[], byName: Map<string, number>): BudgetRow[] {
+          const existingNames = new Set(existing.map(r => r.name))
+          const result: BudgetRow[] = []
+          for (const r of existing) {
+            if (!r.fromMapping) { result.push(r); continue }  // manual — leave untouched
+            const newPlan = byName.get(r.name)
+            if (newPlan === undefined) continue                // mapping removed → drop
+            result.push({ ...r, plan: Math.round(newPlan) })
+          }
+          for (const [name, amount] of byName) {
+            if (existingNames.has(name)) continue              // name already in month (manual or fromMapping)
+            if (amount <= 0) continue                          // skip empty/noise
+            result.push({
+              id: uid(),
+              name,
+              plan: Math.round(amount),
+              actual: 0,
+              fromMapping: true,
+            })
+          }
+          return result
+        }
 
         const newMonths = { ...s.months }
         targets.forEach(mid => {
           const m = newMonths[mid]
           if (!m) return
+
+          // BUDGET SECTIONS (fixed / variable / sub / ins)
+          const fixed    = syncBudgetSection(m.fixed,    fixedByName)
+          const variable = syncBudgetSection(m.variable, varByName)
+          const sub      = syncBudgetSection(m.sub,      subByName)
+          const ins      = syncBudgetSection(m.ins,      insByName)
 
           // INSTALLMENTS
           const instExisting = new Set(m.installments.map(r => r.name))
@@ -395,7 +448,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
             })
           }
 
-          newMonths[mid] = { ...m, installments, debts, savings }
+          newMonths[mid] = { ...m, fixed, variable, sub, ins, installments, debts, savings }
         })
 
         return { months: newMonths }

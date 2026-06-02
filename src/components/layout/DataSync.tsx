@@ -166,7 +166,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       if (mappingTimer) clearTimeout(mappingTimer)
       mappingTimer = setTimeout(() => {
         const mp = useMappingStore.getState()
-        useMonthlyStore.getState().syncFromMapping(mp.installments, mp.debts, mp.savings)
+        useMonthlyStore.getState().syncFromMapping(
+          mp.fixed, mp.variable, mp.sub, mp.ins,
+          mp.installments, mp.debts, mp.savings,
+          mp.varMonths,
+        )
       }, 500)
     }
     // Run once on mount to backfill from current mapping snapshot
