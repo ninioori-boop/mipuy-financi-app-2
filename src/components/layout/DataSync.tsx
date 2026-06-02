@@ -51,7 +51,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (authLoading) return
 
     if (!user) {
-      // Logged out: clear in-memory data, mark un-hydrated
+      // Logged out: cancel any pending save FIRST, then clear in-memory data.
+      // Without this clear, a debounced save scheduled before logout could
+      // still fire in the gap between this branch running and React running
+      // the save-effect cleanup, writing to the previous user's UID.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
       resetAllStores()
       setHydrated(false)
       setStatus('idle')
@@ -97,6 +104,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const triggerSave = () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
+        // Belt-and-suspenders: even if the cleanup race somehow leaves a stale
+        // timer armed, re-verify the current authed UID matches the one this
+        // closure captured. If the user logged out (or switched accounts)
+        // during the debounce window, abort — never write to a stale UID.
+        const currentUid = useAuthStore.getState().user?.uid
+        if (currentUid !== user.uid) return
+
         const snap = collectSnapshot()
         const json = JSON.stringify(snap)
         if (json === lastSavedJson.current) return  // no real change
