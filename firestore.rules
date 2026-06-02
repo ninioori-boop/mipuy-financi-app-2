@@ -2,34 +2,36 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // כל משתמש קורא/כותב רק את המסמך שלו
+    // ── User data ─────────────────────────────────────────────────────
+    // Every authenticated user reads and writes only their own document.
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // מפות פיננסיות — הלקוח עצמו, או היועץ המשויך אליו
-    match /maps/{clientId} {
-      allow read, write: if request.auth != null &&
-        (request.auth.uid == clientId ||
-        (resource != null && request.auth.uid == resource.data.advisorUid));
-      allow create: if request.auth != null && request.auth.uid == clientId;
+    // ── Shared category-learning DB ───────────────────────────────────
+    // Cross-account merchant→category memory written by saveLearnedEntry.
+    // Locked down so that:
+    //   - reads remain open to any authenticated user (everyone benefits
+    //     from the shared pool),
+    //   - writes can only add or update keys inside `db`, never remove
+    //     existing keys and never replace the doc with an arbitrary shape.
+    // This blocks both a full-wipe attack (setDoc(.., {})) and a partial
+    // key-deletion attack (updateDoc with FieldValue.delete()).
+    match /shared/learnedDB {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map;
+      allow update: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map
+        && request.resource.data.db.keys().hasAll(resource.data.db.keys());
     }
 
-    // קודי הזמנה
-    match /invites/{code} {
-      allow read:   if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null &&
-        (request.auth.uid == resource.data.advisorUid || !resource.data.used);
-    }
-
-    // מאגר סיווג משותף — כל משתמש מחובר קורא/כותב. מכיל רק מיפויי שם-עסק→קטגוריה,
-    // ללא שום מידע אישי או פיננסי. מאפשר ללמידה לעבור בין כל החשבונות מאחורי הקלעים.
-    match /shared/{docId} {
-      allow read, write: if request.auth != null;
-    }
-
-    // כל שאר האוספים — חסומים לחלוטין
+    // ── Everything else: blocked ──────────────────────────────────────
+    // The advisor / invites / maps feature is not wired into the app's
+    // UI, so its collections do not need rules. The catch-all denies
+    // access to any other path.
     match /{document=**} {
       allow read, write: if false;
     }
