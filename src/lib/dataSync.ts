@@ -155,9 +155,28 @@ export function collectSnapshot(): Snapshot {
 export function applySnapshot(raw: unknown): void {
   if (!isObject(raw)) return
 
-  // monthly
+  // monthly — back-compat: months saved before the deletion-tracker existed
+  // don't have `deletedFromMapping`. Inject it as empty arrays so the rest of
+  // the app can rely on the field being present.
   if (isObject(raw.monthly) && isObject(raw.monthly.months)) {
-    useMonthlyStore.setState({ months: raw.monthly.months as ReturnType<typeof useMonthlyStore.getState>['months'] })
+    const migrated: Record<string, unknown> = {}
+    for (const [id, m] of Object.entries(raw.monthly.months as Record<string, unknown>)) {
+      if (!isObject(m)) continue
+      const dm = (m.deletedFromMapping ?? {}) as Record<string, unknown>
+      migrated[id] = {
+        ...m,
+        deletedFromMapping: {
+          fixed:        Array.isArray(dm.fixed)        ? dm.fixed        : [],
+          variable:     Array.isArray(dm.variable)     ? dm.variable     : [],
+          sub:          Array.isArray(dm.sub)          ? dm.sub          : [],
+          ins:          Array.isArray(dm.ins)          ? dm.ins          : [],
+          installments: Array.isArray(dm.installments) ? dm.installments : [],
+          debts:        Array.isArray(dm.debts)        ? dm.debts        : [],
+          savings:      Array.isArray(dm.savings)      ? dm.savings      : [],
+        },
+      }
+    }
+    useMonthlyStore.setState({ months: migrated as ReturnType<typeof useMonthlyStore.getState>['months'] })
   }
 
   // annual

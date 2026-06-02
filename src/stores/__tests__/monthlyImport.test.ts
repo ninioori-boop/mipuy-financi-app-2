@@ -408,3 +408,66 @@ describe('syncFromMapping — mirrors budget sections (fixed/variable/sub/ins) i
     expect(useMonthlyStore.getState().months['oct'].variable.find(r => r.id === id)!.plan).toBe(950)
   })
 })
+
+describe('syncFromMapping — user deletions in monthly persist across syncs', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  it('deleting a fromMapping variable row blocks the next sync from re-adding it', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan')
+
+    // First sync brings in a mapping row
+    callSync({ variable: [{ name: 'מזון לבית', amount: 1500 }] })
+    const id = useMonthlyStore.getState().months['jan'].variable.find(r => r.name === 'מזון לבית')!.id
+    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === 'מזון לבית')?.fromMapping).toBe(true)
+
+    // User deletes the row in monthly
+    store.deleteRow('jan', 'variable', id)
+    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === 'מזון לבית')).toBeUndefined()
+    // Deletion is tracked
+    expect(useMonthlyStore.getState().months['jan'].deletedFromMapping.variable).toContain('מזון לבית')
+
+    // Sync runs again — mapping STILL has the row — but the user's deletion wins
+    callSync({ variable: [{ name: 'מזון לבית', amount: 1500 }] })
+    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === 'מזון לבית')).toBeUndefined()
+  })
+
+  it('same protection works for installments / debts / savings', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('feb')
+
+    callSync({
+      inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
+      debt: [{ name: 'loan', remainingBalance: 10000, monthlyPayment: 400, remainingMonths: 25 }],
+      sav:  [{ name: 'pension', monthlyContribution: 1000, accumulated: 20000 }],
+    })
+
+    const m = useMonthlyStore.getState().months['feb']
+    store.deleteInstRow('feb', m.installments.find(r => r.name === 'TV')!.id)
+    store.deleteDebtRow('feb', m.debts.find(r => r.name === 'loan')!.id)
+    store.deleteSavingRow('feb', m.savings.find(r => r.name === 'pension')!.id)
+
+    // Re-sync with same mapping data — deletions must persist
+    callSync({
+      inst: [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
+      debt: [{ name: 'loan', remainingBalance: 10000, monthlyPayment: 400, remainingMonths: 25 }],
+      sav:  [{ name: 'pension', monthlyContribution: 1000, accumulated: 20000 }],
+    })
+
+    const after = useMonthlyStore.getState().months['feb']
+    expect(after.installments.find(r => r.name === 'TV')).toBeUndefined()
+    expect(after.debts.find(r => r.name === 'loan')).toBeUndefined()
+    expect(after.savings.find(r => r.name === 'pension')).toBeUndefined()
+  })
+
+  it('deleting a MANUAL row does NOT track it (mapping had no claim on it)', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('mar')
+    store.addRow('mar', 'fixed', 'manual-fixed-row')
+    const id = useMonthlyStore.getState().months['mar'].fixed.find(r => r.name === 'manual-fixed-row')!.id
+
+    store.deleteRow('mar', 'fixed', id)
+    // No deletion tracking for manual rows — they never came from mapping
+    expect(useMonthlyStore.getState().months['mar'].deletedFromMapping.fixed).not.toContain('manual-fixed-row')
+  })
+})

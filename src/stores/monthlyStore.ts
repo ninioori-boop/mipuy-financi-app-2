@@ -50,6 +50,18 @@ export interface MonthData {
   installments: InstRow[]
   debts: DebtRow[]
   savings: SavingRow[]
+  // Names of fromMapping rows the user deleted in this month. syncFromMapping
+  // checks this so a deletion isn't undone on the next sync run. Per-section
+  // because the same name could legitimately exist in multiple sections.
+  deletedFromMapping: {
+    fixed:         string[]
+    variable:      string[]
+    sub:           string[]
+    ins:           string[]
+    installments:  string[]
+    debts:         string[]
+    savings:       string[]
+  }
 }
 
 export type SimpleSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins'
@@ -68,6 +80,10 @@ function makeDefaultMonth(): MonthData {
     installments: [],
     debts:        [],
     savings:      [],
+    deletedFromMapping: {
+      fixed: [], variable: [], sub: [], ins: [],
+      installments: [], debts: [], savings: [],
+    },
   }
 }
 
@@ -169,10 +185,26 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       })),
 
     deleteRow: (monthId, section, id) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        [section]: m[section].filter(r => r.id !== id),
-      })),
+      updateMonth(monthId, m => {
+        const target = m[section].find(r => r.id === id)
+        const filtered = m[section].filter(r => r.id !== id)
+        // If we just deleted a row that came from mapping, remember its name
+        // so the next sync doesn't undo the deletion.
+        if (target?.fromMapping && target.name && section !== 'income') {
+          const list = m.deletedFromMapping[section as keyof MonthData['deletedFromMapping']]
+          if (!list.includes(target.name)) {
+            return {
+              ...m,
+              [section]: filtered,
+              deletedFromMapping: {
+                ...m.deletedFromMapping,
+                [section]: [...list, target.name],
+              },
+            }
+          }
+        }
+        return { ...m, [section]: filtered }
+      }),
 
     addInstRow: (monthId) =>
       updateMonth(monthId, m => ({
@@ -189,10 +221,21 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       })),
 
     deleteInstRow: (monthId, id) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        installments: m.installments.filter(r => r.id !== id),
-      })),
+      updateMonth(monthId, m => {
+        const target = m.installments.find(r => r.id === id)
+        const filtered = m.installments.filter(r => r.id !== id)
+        if (target?.fromMapping && target.name && !m.deletedFromMapping.installments.includes(target.name)) {
+          return {
+            ...m,
+            installments: filtered,
+            deletedFromMapping: {
+              ...m.deletedFromMapping,
+              installments: [...m.deletedFromMapping.installments, target.name],
+            },
+          }
+        }
+        return { ...m, installments: filtered }
+      }),
 
     addDebtRow: (monthId) =>
       updateMonth(monthId, m => ({
@@ -208,10 +251,21 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       })),
 
     deleteDebtRow: (monthId, id) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        debts: m.debts.filter(r => r.id !== id),
-      })),
+      updateMonth(monthId, m => {
+        const target = m.debts.find(r => r.id === id)
+        const filtered = m.debts.filter(r => r.id !== id)
+        if (target?.fromMapping && target.name && !m.deletedFromMapping.debts.includes(target.name)) {
+          return {
+            ...m,
+            debts: filtered,
+            deletedFromMapping: {
+              ...m.deletedFromMapping,
+              debts: [...m.deletedFromMapping.debts, target.name],
+            },
+          }
+        }
+        return { ...m, debts: filtered }
+      }),
 
     addSavingRow: (monthId) =>
       updateMonth(monthId, m => ({
@@ -227,10 +281,21 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       })),
 
     deleteSavingRow: (monthId, id) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        savings: m.savings.filter(r => r.id !== id),
-      })),
+      updateMonth(monthId, m => {
+        const target = m.savings.find(r => r.id === id)
+        const filtered = m.savings.filter(r => r.id !== id)
+        if (target?.fromMapping && target.name && !m.deletedFromMapping.savings.includes(target.name)) {
+          return {
+            ...m,
+            savings: filtered,
+            deletedFromMapping: {
+              ...m.deletedFromMapping,
+              savings: [...m.deletedFromMapping.savings, target.name],
+            },
+          }
+        }
+        return { ...m, savings: filtered }
+      }),
 
     applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths) => {
       updateMonth(monthId, m => {
@@ -336,8 +401,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         const savByName  = new Map(mSav.map(v => [v.name, v]))
 
         // Generic merge for the 4 budget sections (BudgetRow shape).
-        function syncBudgetSection(existing: BudgetRow[], byName: Map<string, number>): BudgetRow[] {
+        // deletedNames blocks re-adding rows the user explicitly deleted.
+        function syncBudgetSection(existing: BudgetRow[], byName: Map<string, number>, deletedNames: string[]): BudgetRow[] {
           const existingNames = new Set(existing.map(r => r.name))
+          const deletedSet = new Set(deletedNames)
           const result: BudgetRow[] = []
           for (const r of existing) {
             if (!r.fromMapping) { result.push(r); continue }  // manual — leave untouched
@@ -347,6 +414,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           }
           for (const [name, amount] of byName) {
             if (existingNames.has(name)) continue              // name already in month (manual or fromMapping)
+            if (deletedSet.has(name)) continue                 // user explicitly deleted — respect it
             if (amount <= 0) continue                          // skip empty/noise
             result.push({
               id: uid(),
@@ -365,10 +433,11 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           if (!m) return
 
           // BUDGET SECTIONS (fixed / variable / sub / ins)
-          const fixed    = syncBudgetSection(m.fixed,    fixedByName)
-          const variable = syncBudgetSection(m.variable, varByName)
-          const sub      = syncBudgetSection(m.sub,      subByName)
-          const ins      = syncBudgetSection(m.ins,      insByName)
+          const del = m.deletedFromMapping
+          const fixed    = syncBudgetSection(m.fixed,    fixedByName, del.fixed)
+          const variable = syncBudgetSection(m.variable, varByName,   del.variable)
+          const sub      = syncBudgetSection(m.sub,      subByName,   del.sub)
+          const ins      = syncBudgetSection(m.ins,      insByName,   del.ins)
 
           // INSTALLMENTS
           const instExisting = new Set(m.installments.map(r => r.name))
@@ -385,8 +454,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
               totalPay: src.totalCount,
             })
           }
+          const instDeleted = new Set(del.installments)
           for (const [name, src] of instByName) {
             if (instExisting.has(name)) continue
+            if (instDeleted.has(name)) continue   // user explicitly deleted — respect it
             if (src.monthlyPayment <= 0 && src.totalAmount <= 0) continue
             installments.push({
               id: uid(), name,
@@ -412,8 +483,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
               months:    src.remainingMonths,
             })
           }
+          const debtDeleted = new Set(del.debts)
           for (const [name, src] of debtByName) {
             if (debtExisting.has(name)) continue
+            if (debtDeleted.has(name)) continue   // user explicitly deleted — respect it
             if (src.monthlyPayment <= 0 && src.remainingBalance <= 0) continue
             debts.push({
               id: uid(), name,
@@ -437,8 +510,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
               accumulated: Math.round(src.accumulated),
             })
           }
+          const savDeleted = new Set(del.savings)
           for (const [name, src] of savByName) {
             if (savExisting.has(name)) continue
+            if (savDeleted.has(name)) continue   // user explicitly deleted — respect it
             if (src.monthlyContribution <= 0 && src.accumulated <= 0) continue
             savings.push({
               id: uid(), name,
