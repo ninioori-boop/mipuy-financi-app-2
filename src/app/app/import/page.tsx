@@ -112,47 +112,71 @@ export default function ImportPage() {
     let updated = 0
     setIsLoading(true)
     setLoadingMessage(`מנתח ${unmatchedCount} עסקאות לא מזוהות...`)
+
+    const failedBatches: typeof unmatched[] = []
+    let lastError: Error | null = null
+
     try {
       for (let b = 0; b < unmatched.length; b += BATCH) {
         const batch = unmatched.slice(b, b + BATCH)
         setLoadingMessage(`מנתח... (${Math.min(b + BATCH, unmatched.length)}/${unmatched.length})`)
-        const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
-        const res = await fetchWithRetry('/api/categorize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
-          body: JSON.stringify({ system: SYSTEM_PROMPT, message: `סווג את העסקאות הבאות:\n${lines}` }),
-        })
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error ?? `שגיאת API ${res.status}`) }
-        const data = await res.json()
-        const rawText: string = data.text ?? ''
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) throw new Error('תגובה לא תקינה מ-Claude')
-        const parsed = JSON.parse(jsonMatch[0].replace(/,\s*([}\]])/g, '$1'))
-        // Categories as a plain string array, in input order. Tolerate the older
-        // {"expenses":[{category}]} shape too. (description is never used — matched by index.)
-        const cats: string[] = Array.isArray(parsed.categories)
-          ? parsed.categories
-          : Array.isArray(parsed.expenses)
-            ? parsed.expenses.map((e: { category?: string }) => e?.category ?? '')
-            : []
-        setTransactions(prev => {
-          const next = [...prev]
-          for (let i = 0; i < Math.min(cats.length, batch.length); i++) {
-            const cat = cats[i]
-            const id  = batch[i].id
-            if (!id || !ALL_CATEGORIES.includes(cat) || cat === 'שונות') continue
-            const idx = next.findIndex(t => t.id === id)
-            if (idx < 0) continue   // row was deleted mid-run — skip
-            next[idx] = { ...next[idx], category: cat }
-            updated++
-          }
-          return next
-        })
+
+        try {
+          const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
+          const res = await fetchWithRetry('/api/categorize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
+            body: JSON.stringify({ system: SYSTEM_PROMPT, message: `סווג את העסקאות הבאות:\n${lines}` }),
+          })
+          if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error ?? `שגיאת API ${res.status}`) }
+          const data = await res.json()
+          const rawText: string = data.text ?? ''
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+          if (!jsonMatch) throw new Error('תגובה לא תקינה מ-Claude')
+          const parsed = JSON.parse(jsonMatch[0].replace(/,\s*([}\]])/g, '$1'))
+          // Categories as a plain string array, in input order. Tolerate the older
+          // {"expenses":[{category}]} shape too. (description is never used — matched by id.)
+          const cats: string[] = Array.isArray(parsed.categories)
+            ? parsed.categories
+            : Array.isArray(parsed.expenses)
+              ? parsed.expenses.map((e: { category?: string }) => e?.category ?? '')
+              : []
+          setTransactions(prev => {
+            const next = [...prev]
+            for (let i = 0; i < Math.min(cats.length, batch.length); i++) {
+              const cat = cats[i]
+              const id  = batch[i].id
+              if (!id || !ALL_CATEGORIES.includes(cat) || cat === 'שונות') continue
+              const idx = next.findIndex(t => t.id === id)
+              if (idx < 0) continue   // row was deleted mid-run — skip
+              next[idx] = { ...next[idx], category: cat }
+              updated++
+            }
+            return next
+          })
+        } catch (batchErr) {
+          // Single batch failed — record it and keep going so other batches still run
+          lastError = batchErr as Error
+          failedBatches.push(batch)
+          console.warn(`[AI batch ${b / BATCH + 1}] נכשל:`, batchErr)
+        }
       }
+
       setIsLoading(false)
-      if (updated > 0) toast.success(`🤖 סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
-      else toast.info('לא נמצאו עסקאות חדשות לסיווג')
+      const failedCount = failedBatches.reduce((s, b) => s + b.length, 0)
+
+      if (failedCount === 0) {
+        if (updated > 0) toast.success(`🤖 סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
+        else toast.info('לא נמצאו עסקאות חדשות לסיווג')
+      } else {
+        const retryTxns = failedBatches.flat().map(({ t }) => t)
+        toast.warning(
+          `🤖 סיווג ${updated}/${unmatchedCount}. ${failedCount} נכשלו (${lastError?.message ?? 'שגיאה'}).`,
+          { action: { label: `נסה שוב ${failedCount}`, onClick: () => runAI(retryTxns, failedCount) } },
+        )
+      }
     } catch (e) {
+      // Catastrophic failure outside any batch — full-run retry as a safety net
       setIsLoading(false)
       toast.error('שגיאה בניתוח AI: ' + (e as Error).message, {
         action: { label: 'נסה שוב', onClick: () => runAI(txns, unmatchedCount) },
