@@ -139,6 +139,7 @@ export function extractTransactions(
       : null
 
     transactions.push({
+      id: Math.random().toString(36).slice(2),
       desc,
       amount: Math.abs(amount),
       originalAmount,

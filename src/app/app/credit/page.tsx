@@ -37,7 +37,7 @@ export default function CreditPage() {
   const {
     transactions, uploadedFileNames, isLoading, loadingMessage,
     reportMonths, setReportMonths,
-    setTransactions, updateCategory, applyAiCategory, updateDesc, updateAmount, deleteTransaction, setLoading,
+    setTransactions, updateCategory, applyAiCategoryById, updateDesc, updateAmount, deleteTransaction, setLoading,
   } = useCreditStore()
 
   const handleFiles = useCallback(async (files: File[]) => {
@@ -68,9 +68,12 @@ export default function CreditPage() {
   }, [setTransactions, setLoading])
 
   const runAI = useCallback(async (txns: typeof transactions, unmatchedCount: number) => {
+    // Capture each row's stable id at batch creation. If the user deletes a row
+    // mid-run (or any earlier row), the id still points to the right transaction
+    // — index-based lookup would have shifted onto a neighbour.
     const unmatched = txns
-      .map((t, idx) => ({ idx, t }))
-      .filter(({ t }) => t.category === 'שונות' && !t.isRefund)
+      .map(t => ({ id: t.id, t }))
+      .filter(({ t, id }) => t.category === 'שונות' && !t.isRefund && !!id)
 
     if (!unmatched.length) return
 
@@ -113,8 +116,9 @@ export default function CreditPage() {
 
         for (let i = 0; i < Math.min(cats.length, batch.length); i++) {
           const cat = cats[i]
-          if (ALL_CATEGORIES.includes(cat) && cat !== 'שונות') {
-            applyAiCategory(batch[i].idx, cat)
+          const id  = batch[i].id
+          if (id && ALL_CATEGORIES.includes(cat) && cat !== 'שונות') {
+            applyAiCategoryById(id, cat)
             updated++
           }
         }
@@ -132,7 +136,7 @@ export default function CreditPage() {
         action: { label: 'נסה שוב', onClick: () => runAI(txns, unmatchedCount) },
       })
     }
-  }, [setLoading, applyAiCategory])
+  }, [setLoading, applyAiCategoryById])
 
   function handleMonthsChange(delta: number) {
     const next = Math.max(1, Math.min(24, reportMonths + delta))

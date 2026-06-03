@@ -14,6 +14,7 @@ export interface Transaction {
   installment: InstallmentInfo | null
   isStandingOrder: boolean
   isRefund: boolean
+  id?: string              // runtime-only stable id; lets in-flight AI/UI ops survive concurrent deletes (optional for back-compat)
 }
 
 export interface ColumnMap {

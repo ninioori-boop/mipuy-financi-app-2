@@ -104,7 +104,9 @@ export default function ImportPage() {
 
   // ── AI categorization (same logic as credit page, updates local state) ──
   const runAI = useCallback(async (txns: Transaction[], unmatchedCount: number) => {
-    const unmatched = txns.map((t, idx) => ({ idx, t })).filter(({ t }) => t.category === 'שונות' && !t.isRefund)
+    // Capture each row's stable id at batch creation so a delete during the
+    // run can't shift indices onto a neighbouring row.
+    const unmatched = txns.map(t => ({ id: t.id, t })).filter(({ t, id }) => t.category === 'שונות' && !t.isRefund && !!id)
     if (!unmatched.length) return
     const BATCH = 80
     let updated = 0
@@ -137,10 +139,12 @@ export default function ImportPage() {
           const next = [...prev]
           for (let i = 0; i < Math.min(cats.length, batch.length); i++) {
             const cat = cats[i]
-            if (ALL_CATEGORIES.includes(cat) && cat !== 'שונות') {
-              next[batch[i].idx] = { ...next[batch[i].idx], category: cat }
-              updated++
-            }
+            const id  = batch[i].id
+            if (!id || !ALL_CATEGORIES.includes(cat) || cat === 'שונות') continue
+            const idx = next.findIndex(t => t.id === id)
+            if (idx < 0) continue   // row was deleted mid-run — skip
+            next[idx] = { ...next[idx], category: cat }
+            updated++
           }
           return next
         })
