@@ -57,7 +57,7 @@ interface PickerState { desc: string; amount: number }
 
 export default function BankPage() {
   // persistent state (survives tab switches)
-  const { rawRows, fileName, sentRows: sentArr, setData, markSent, reset } = useBankStore()
+  const { rawRows, fileName, sentRows: sentArr, reportMonths, setData, markSent, setReportMonths, reset } = useBankStore()
   const sentRows = new Set(sentArr)
 
   // ephemeral UI state (OK to reset on remount)
@@ -125,11 +125,21 @@ export default function BankPage() {
       toast.error('הזן תיאור או סכום')
       return
     }
-    importFromBank([{ name: desc.trim() || `שורה ${listIdx + 1}`, amount, section }])
+    // If the statement covers multiple months, the picked amount usually
+    // represents the total for the whole period — divide to get a monthly
+    // figure. reportMonths defaults to 1 (no change), so this is opt-in.
+    const divisor = Math.max(1, reportMonths)
+    const monthlyAmount = Math.round(amount / divisor)
+    importFromBank([{ name: desc.trim() || `שורה ${listIdx + 1}`, amount: monthlyAmount, section }])
     markSent(listIdx)
     setActiveRow(null)
     const secLabel = SECTIONS.find(s => s.id === section)?.label ?? section
-    toast.success(`✅ "${desc.trim() || `שורה ${listIdx + 1}`}" נשלח ל${secLabel}`)
+    const divNote = divisor > 1 ? ` (${amount} ÷ ${divisor} = ${monthlyAmount})` : ''
+    toast.success(`✅ "${desc.trim() || `שורה ${listIdx + 1}`}" נשלח ל${secLabel}${divNote}`)
+  }
+
+  function handleMonthsChange(delta: number) {
+    setReportMonths(reportMonths + delta)
   }
 
   return (
@@ -146,6 +156,40 @@ export default function BankPage() {
       {/* Upload */}
       <div className="rounded-xl border border-line bg-surface2 p-6 space-y-4">
         <FileDropzone onFiles={handleFiles} isLoading={isLoading} />
+
+        {/* Months selector — divides the picked amount by this number before sending */}
+        <div className="flex items-center gap-4 bg-surface border border-line rounded-xl px-4 py-3 flex-wrap">
+          <span className="text-lg">📅</span>
+          <div className="flex-1 min-w-[140px]">
+            <div className="text-sm font-semibold text-txt">מספר חודשים שהדוח מכסה</div>
+            <div className="text-xs text-muted-txt mt-0.5">
+              אם הדוח של חודש בודד, השאר 1. אם של 2-3 חודשים — הסכום שתבחר יחולק אוטומטית למספר חודשי.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleMonthsChange(-1)}
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors text-base font-bold"
+            >−</button>
+            <input
+              type="number"
+              value={reportMonths}
+              min={1}
+              max={24}
+              onChange={e => setReportMonths(parseInt(e.target.value) || 1)}
+              className="w-12 text-center bg-bg border border-gold rounded-lg text-gold font-bold text-base py-1 focus:outline-none"
+              style={{ direction: 'ltr' }}
+            />
+            <button
+              onClick={() => handleMonthsChange(1)}
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors text-base font-bold"
+            >+</button>
+            <span className="text-sm text-gold/80 font-semibold min-w-[110px]">
+              {reportMonths === 1 ? 'ללא חלוקה' : `חלוקה ל-${reportMonths} חודשים`}
+            </span>
+          </div>
+        </div>
+
         {fileName && (
           <div className="text-xs text-muted-txt flex items-center gap-3">
             <span>📄 {fileName}</span>
