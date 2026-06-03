@@ -30,42 +30,63 @@ export function SaveStatusBar() {
 
   if (!user) {
     return (
-      <span className="text-xs text-muted-txt flex items-center gap-1.5">
-        <span className="size-1.5 rounded-full bg-yellow-400/70" />
+      <span className="inline-flex items-center gap-2 text-sm text-muted-txt px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5">
+        <span className="size-2.5 rounded-full bg-yellow-400/80" />
         מצב מקומי — נתונים לא נשמרים
       </span>
     )
   }
 
-  let dotColor = 'bg-muted-txt/50'
-  let label    = 'מוכן'
+  let dotColor   = 'bg-muted-txt/50'
+  let pillBg     = ''                           // empty = no pill background (idle/ready)
+  let pillBorder = 'border-transparent'
+  let textColor  = 'text-muted-txt'
+  let label      = 'מוכן'
 
   if (status === 'loading') {
-    dotColor = 'bg-blue-400 animate-pulse'
-    label    = 'טוען נתונים…'
+    dotColor   = 'bg-blue-400 animate-pulse'
+    pillBg     = 'bg-blue-400/10'
+    pillBorder = 'border-blue-400/30'
+    textColor  = 'text-blue-300'
+    label      = 'טוען נתונים…'
   } else if (status === 'saving') {
-    dotColor = 'bg-gold animate-pulse'
-    label    = 'שומר…'
+    dotColor   = 'bg-gold animate-pulse'
+    pillBg     = 'bg-gold/15'
+    pillBorder = 'border-gold/40'
+    textColor  = 'text-gold'
+    label      = 'שומר…'
   } else if (status === 'saved') {
-    dotColor = 'bg-green-400'
-    label    = lastSavedAt ? `נשמר ${timeAgo(lastSavedAt)}` : 'נשמר'
+    dotColor   = 'bg-green-400'
+    pillBg     = 'bg-green-400/10'
+    pillBorder = 'border-green-400/30'
+    textColor  = 'text-green-400'
+    label      = lastSavedAt ? `נשמר ${timeAgo(lastSavedAt)}` : 'נשמר'
   } else if (status === 'error') {
-    dotColor = 'bg-expense'
-    label    = errorMessage ?? 'שגיאת שמירה'
+    dotColor   = 'bg-expense'
+    pillBg     = 'bg-expense/10'
+    pillBorder = 'border-expense/40'
+    textColor  = 'text-expense'
+    label      = errorMessage ?? 'שגיאת שמירה'
   } else if (status === 'offline') {
-    dotColor = 'bg-yellow-400'
-    label    = 'מצב לא מקוון — שמירה מושהית'
+    dotColor   = 'bg-yellow-400'
+    pillBg     = 'bg-yellow-400/10'
+    pillBorder = 'border-yellow-400/30'
+    textColor  = 'text-yellow-300'
+    label      = 'מצב לא מקוון — שמירה מושהית'
   } else if (lastSavedAt) {
-    dotColor = 'bg-green-400/60'
-    label    = `נשמר ${timeAgo(lastSavedAt)}`
+    dotColor   = 'bg-green-400/70'
+    pillBg     = 'bg-green-400/5'
+    pillBorder = 'border-green-400/20'
+    textColor  = 'text-green-400/80'
+    label      = `נשמר ${timeAgo(lastSavedAt)}`
   }
 
   return (
     <span
-      className="text-xs text-muted-txt flex items-center gap-1.5"
+      className={`inline-flex items-center gap-2 text-sm font-medium px-2.5 py-1 rounded-full border ${pillBorder} ${pillBg} ${textColor}`}
       title={status === 'error' && errorMessage ? errorMessage : undefined}
     >
-      <span className={`size-1.5 rounded-full ${dotColor}`} />
+      <span className={`size-2.5 rounded-full ${dotColor}`} />
       {label}
     </span>
   )
