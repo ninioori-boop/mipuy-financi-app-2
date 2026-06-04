@@ -6,7 +6,6 @@ import {
   VAR_CATEGORIES, ANNUAL_CATEGORIES, FIXED_CATEGORIES,
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
-import { normalizeForLookup } from '@/lib/categorize'
 
 export interface MappingRow {
   id: string
@@ -167,7 +166,19 @@ interface MappingState {
   deleteSavingRow: (id: string) => void
 
   // Bank import
-  importFromBank: (rows: { name: string; amount: number; section: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' }[]) => void
+  importFromBank: (rows: {
+    name:    string
+    amount:  number             // monthly cost-basis to ADD to the target section as a new row
+    section: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
+    /**
+     * When present, the matching fromCredit row in the source category's
+     * section gets reduced by `amount`. Used by the credit-tab SmartPatterns
+     * "carve a merchant out of its category" flow: e.g. sending Cellcom to
+     * "מנויים" should reduce the "תקשורת" row by Cellcom's historical
+     * contribution (item.amount × count), leaving only non-Cellcom items.
+     */
+    subtractFrom?: { category: string; amount: number }
+  }[]) => void
 }
 
 export const useMappingStore = create<MappingState>((set, get) => ({
@@ -219,54 +230,15 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     const m = Math.max(1, months)
     const s = get()
 
-    // Three aggregations, applied in parallel as we walk the transactions:
-    //   • variable / annual  — keep the old "by category" semantics (a single
-    //     row per category like "מזון לבית" or "חופשה וטיול").
-    //   • fixed / sub / ins  — NEW: per-merchant rows so each subscription,
-    //     each insurance, each fixed-cost provider gets its own line.
-    const variableCategoryTotals: Record<string, number> = {}
-    const annualCategoryTotals:   Record<string, number> = {}
-    type MerchantBucket = {
-      sectionType: 'fixed' | 'sub' | 'ins'
-      displayName: string
-      total:       number
-    }
-    const merchantBuckets = new Map<string, MerchantBucket>()
-
+    // Sum amounts by category (exclude refunds). Each category produces ONE
+    // row in mapping — a clear, consolidated total the coach can read at a
+    // glance. Individual merchants get "carved out" of their category row on
+    // demand via the SmartPatterns "send to mapping" buttons (which subtract
+    // the merchant's historical contribution from the category total).
+    const totals: Record<string, number> = {}
     transactions.forEach(t => {
       if (t.isRefund) return
-      const cat = t.category
-      if (SKIP_CATEGORIES.has(cat)) return
-
-      if (VAR_CATEGORIES.has(cat)) {
-        variableCategoryTotals[cat] = (variableCategoryTotals[cat] ?? 0) + t.amount
-        return
-      }
-      if (ANNUAL_CATEGORIES.has(cat)) {
-        annualCategoryTotals[cat] = (annualCategoryTotals[cat] ?? 0) + t.amount
-        return
-      }
-      let sectionType: 'fixed' | 'sub' | 'ins' | null = null
-      if (FIXED_CATEGORIES.has(cat))          sectionType = 'fixed'
-      else if (SUB_CATEGORIES.has(cat))       sectionType = 'sub'
-      else if (INSURANCE_CATEGORIES.has(cat)) sectionType = 'ins'
-      if (!sectionType) return
-
-      // Reuse the same normalization the bank tab uses so "NETFLIX.COM 27/03"
-      // and "Netflix" collapse to the same bucket. Fall back to the raw desc
-      // if normalization comes back empty (unusual rows with no real name).
-      const merchantKey = normalizeForLookup(t.desc) || t.desc.toLowerCase().trim() || cat
-      const bucketKey = `${sectionType}:${merchantKey}`
-      const existing = merchantBuckets.get(bucketKey)
-      if (existing) {
-        existing.total += t.amount
-      } else {
-        merchantBuckets.set(bucketKey, {
-          sectionType,
-          displayName: t.desc.trim() || cat,
-          total: t.amount,
-        })
-      }
+      totals[t.category] = (totals[t.category] ?? 0) + t.amount
     })
 
     // Helper: merge new amount into existing fromCredit rows, or add new row.
@@ -301,25 +273,24 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     let ins      = s.ins.filter(r => !(r.fromCredit && !r.fromBank))
     let annual   = s.annual.filter(r => !(r.fromCredit && !r.fromBank))
 
-    // Variable — one row per category (unchanged semantics).
-    Object.entries(variableCategoryTotals).forEach(([cat, total]) => {
-      if (total > 0) variable = mergeRows(variable, cat, Math.round(total))
-    })
+    Object.entries(totals).forEach(([cat, totalAmt]) => {
+      if (totalAmt <= 0) return
+      if (SKIP_CATEGORIES.has(cat)) return
 
-    // Annual — one row per category, full-year sum (unchanged semantics).
-    // Annual categories are lumpy (vacation, gifts) — use the actual total
-    // spent as the yearly figure (the panel shows ÷12 for the monthly).
-    Object.entries(annualCategoryTotals).forEach(([cat, total]) => {
-      if (total > 0) annual = mergeAnnual(annual, cat, Math.round(total))
-    })
-
-    // Fixed / sub / ins — NEW: one row per merchant, monthly amount = total / m.
-    merchantBuckets.forEach(({ sectionType, displayName, total }) => {
-      if (total <= 0) return
-      const amount = Math.round(total / m)
-      if (sectionType === 'fixed')    fixed = mergeRows(fixed, displayName, amount)
-      else if (sectionType === 'sub') sub   = mergeRows(sub,   displayName, amount)
-      else if (sectionType === 'ins') ins   = mergeRows(ins,   displayName, amount)
+      if (VAR_CATEGORIES.has(cat)) {
+        variable = mergeRows(variable, cat, Math.round(totalAmt))
+      } else if (ANNUAL_CATEGORIES.has(cat)) {
+        // Annual categories are lumpy (vacation, gifts) — use the actual total
+        // spent as the yearly figure (the panel shows ÷12 for the monthly).
+        // Do NOT annualize a monthly average, which over-inflates a one-off spend.
+        annual = mergeAnnual(annual, cat, Math.round(totalAmt))
+      } else if (FIXED_CATEGORIES.has(cat)) {
+        fixed = mergeRows(fixed, cat, Math.round(totalAmt / m))
+      } else if (INSURANCE_CATEGORIES.has(cat)) {
+        ins = mergeRows(ins, cat, Math.round(totalAmt / m))
+      } else if (SUB_CATEGORIES.has(cat)) {
+        sub = mergeRows(sub, cat, Math.round(totalAmt / m))
+      }
     })
 
     const sortMR = (rows: MappingRow[]) => [...rows].sort((a, b) => b.amount - a.amount)
@@ -365,26 +336,67 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     set(s => ({ savings: s.savings.filter(r => r.id !== id) })),
 
   importFromBank: (rows) => {
-    const newFixed:    MappingRow[] = []
-    const newVariable: MappingRow[] = []
-    const newSub:      MappingRow[] = []
-    const newIns:      MappingRow[] = []
-    const newAnnual:   AnnualRow[]  = []
+    set(s => {
+      let fixed    = s.fixed
+      let variable = s.variable
+      let sub      = s.sub
+      let ins      = s.ins
+      let annual   = s.annual
 
-    rows.forEach(r => {
-      if (r.section === 'fixed')    newFixed.push(   { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
-      else if (r.section === 'variable') newVariable.push({ id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
-      else if (r.section === 'sub')     newSub.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
-      else if (r.section === 'ins')     newIns.push(    { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true })
-      else if (r.section === 'annual')  newAnnual.push( { id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true, fromBank: true })
+      // For each incoming row: (a) add a fromCredit+fromBank row to the
+      // target section, (b) optionally subtract the merchant's historical
+      // contribution from a category row in its source section.
+      rows.forEach(r => {
+        // (a) ADD to target
+        if (r.section === 'annual') {
+          annual = [{ id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true, fromBank: true }, ...annual]
+        } else {
+          const newRow: MappingRow = { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true }
+          if      (r.section === 'fixed')    fixed    = [newRow, ...fixed]
+          else if (r.section === 'variable') variable = [newRow, ...variable]
+          else if (r.section === 'sub')      sub      = [newRow, ...sub]
+          else if (r.section === 'ins')      ins      = [newRow, ...ins]
+        }
+
+        // (b) SUBTRACT from source category row, if requested
+        if (!r.subtractFrom) return
+        const { category, amount: subAmt } = r.subtractFrom
+
+        let sourceSection: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | null = null
+        if      (FIXED_CATEGORIES.has(category))     sourceSection = 'fixed'
+        else if (VAR_CATEGORIES.has(category))       sourceSection = 'variable'
+        else if (SUB_CATEGORIES.has(category))       sourceSection = 'sub'
+        else if (INSURANCE_CATEGORIES.has(category)) sourceSection = 'ins'
+        else if (ANNUAL_CATEGORIES.has(category))    sourceSection = 'annual'
+        if (!sourceSection) return  // category not classifiable — silently skip
+
+        if (sourceSection === 'annual') {
+          const idx = annual.findIndex(row => row.fromCredit && !row.fromBank && row.name === category)
+          if (idx < 0) return
+          const newAmt = annual[idx].annualAmount - subAmt
+          annual = newAmt <= 0
+            ? annual.filter((_, i) => i !== idx)
+            : annual.map((row, i) => i === idx ? { ...row, annualAmount: newAmt } : row)
+          return
+        }
+
+        const target = sourceSection === 'fixed' ? fixed
+                     : sourceSection === 'variable' ? variable
+                     : sourceSection === 'sub' ? sub
+                     : ins
+        const idx = target.findIndex(row => row.fromCredit && !row.fromBank && row.name === category)
+        if (idx < 0) return
+        const newAmt  = target[idx].amount - subAmt
+        const updated = newAmt <= 0
+          ? target.filter((_, i) => i !== idx)
+          : target.map((row, i) => i === idx ? { ...row, amount: newAmt } : row)
+        if      (sourceSection === 'fixed')    fixed    = updated
+        else if (sourceSection === 'variable') variable = updated
+        else if (sourceSection === 'sub')      sub      = updated
+        else                                   ins      = updated
+      })
+
+      return { fixed, variable, sub, ins, annual }
     })
-
-    set(s => ({
-      fixed:    [...newFixed,    ...s.fixed],
-      variable: [...newVariable, ...s.variable],
-      sub:      [...newSub,      ...s.sub],
-      ins:      [...newIns,      ...s.ins],
-      annual:   [...newAnnual,   ...s.annual],
-    }))
   },
 }))

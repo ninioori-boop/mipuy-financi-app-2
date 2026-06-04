@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// Mock the Firebase chain so creditStore (transitively pulled by mappingStore
-// via the snapshot type) loads without real credentials.
+// Mock the Firebase chain so the store loads without real credentials.
 vi.mock('@/lib/firebase', () => ({ auth: {}, db: {} }))
 vi.mock('@/lib/firestoreService', () => ({
   saveLearnedEntry:    vi.fn().mockResolvedValue(undefined),
@@ -20,116 +19,137 @@ function makeTxn(desc: string, amount: number, category: string): Transaction {
   }
 }
 
-describe('importFromCredit — per-merchant rows for fixed / sub / ins', () => {
-  beforeEach(() => {
-    // Reset the persisted arrays. We can't easily blank everything (the store
-    // has defaults), but importFromCredit's filter drops fromCredit:!fromBank
-    // rows, so the assertions below only look at the rows we add.
-    useMappingStore.setState({
-      income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
-      debts: [], installments: [], savings: [],
-      varMonths: 1, creditImported: false, bufferPct: 0.4,
-      incomeOverride: null, expensesOverride: null, creditScore: 0,
-    })
+function resetMapping() {
+  useMappingStore.setState({
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts: [], installments: [], savings: [],
+    varMonths: 1, creditImported: false, bufferPct: 0.4,
+    incomeOverride: null, expensesOverride: null, creditScore: 0,
   })
+}
 
-  it('splits three different sub-category merchants into three rows', () => {
-    // Three subscription charges, all categorized as "תקשורת" (a SUB_CATEGORY).
-    // The old behaviour created ONE row "תקשורת 153"; the new behaviour must
-    // create THREE rows — one per merchant.
+describe('importFromCredit — one row per category (no per-merchant split)', () => {
+  beforeEach(resetMapping)
+
+  it('subscription-category transactions aggregate into a SINGLE category row', () => {
+    // Three different merchants, same category. The mapping must show one
+    // consolidated row "תקשורת 153" — splitting happens manually via
+    // SmartPatterns, not automatically here.
     const txns: Transaction[] = [
       makeTxn('Netflix',  50, 'תקשורת'),
       makeTxn('ChatGPT',  73, 'תקשורת'),
       makeTxn('Spotify',  30, 'תקשורת'),
     ]
-
     useMappingStore.getState().importFromCredit(txns, 1)
 
     const sub = useMappingStore.getState().sub
-    const fromCreditSub = sub.filter(r => r.fromCredit && !r.fromBank)
-    expect(fromCreditSub).toHaveLength(3)
-
-    const names = fromCreditSub.map(r => r.name).sort()
-    expect(names).toEqual(['ChatGPT', 'Netflix', 'Spotify'])
-
-    expect(fromCreditSub.find(r => r.name === 'Netflix')!.amount).toBe(50)
-    expect(fromCreditSub.find(r => r.name === 'ChatGPT')!.amount).toBe(73)
-    expect(fromCreditSub.find(r => r.name === 'Spotify')!.amount).toBe(30)
-
-    // No lumped "תקשורת" row exists — the old behaviour is gone
-    expect(sub.find(r => r.fromCredit && !r.fromBank && r.name === 'תקשורת')).toBeUndefined()
+    const fromCredit = sub.filter(r => r.fromCredit && !r.fromBank)
+    expect(fromCredit).toHaveLength(1)
+    expect(fromCredit[0].name).toBe('תקשורת')
+    expect(fromCredit[0].amount).toBe(153)
   })
+})
 
-  it('merges different desc variants of the SAME merchant into one row', () => {
-    // Three charges from the same merchant with variations that normalizeForLookup
-    // actually collapses: case (NETFLIX vs Netflix), legal suffix (בע"מ), and a
-    // trailing branch dash+number. They all share one bucket → one row.
-    const txns: Transaction[] = [
-      makeTxn('Netflix',          50, 'תקשורת'),
-      makeTxn('NETFLIX',          50, 'תקשורת'),       // case-only diff
-      makeTxn('Netflix - 12345',  50, 'תקשורת'),       // trailing branch code stripped
-    ]
+describe('importFromBank — subtractFrom carves a merchant out of its source category', () => {
+  beforeEach(resetMapping)
 
-    useMappingStore.getState().importFromCredit(txns, 1)
-
-    const sub = useMappingStore.getState().sub
-    const merged = sub.filter(r => r.fromCredit && !r.fromBank)
-    expect(merged).toHaveLength(1)
-    expect(merged[0].amount).toBe(150)  // 50 + 50 + 50
-  })
-
-  it('variable section still aggregates by CATEGORY (per-merchant change does NOT apply there)', () => {
-    const txns: Transaction[] = [
-      makeTxn('שופרסל',  500, 'מזון לבית'),
-      makeTxn('רמי לוי', 300, 'מזון לבית'),
-      makeTxn('מגה',     200, 'מזון לבית'),
-    ]
-
-    useMappingStore.getState().importFromCredit(txns, 1)
-
-    const variable = useMappingStore.getState().variable
-    const fromCreditVar = variable.filter(r => r.fromCredit && !r.fromBank)
-    // Variable section: ONE row per category, not per merchant
-    expect(fromCreditVar).toHaveLength(1)
-    expect(fromCreditVar[0].name).toBe('מזון לבית')
-    expect(fromCreditVar[0].amount).toBe(1000) // 500 + 300 + 200
-  })
-
-  it('fixed section receives per-merchant rows divided by months', () => {
-    // 3-month report with two fixed-cost merchants
-    const txns: Transaction[] = [
-      makeTxn('כללית', 540, 'קופת חולים'),  // 540 / 3 = 180 monthly
-      makeTxn('מכבי',  279, 'קופת חולים'),  // 279 / 3 = 93 monthly
-    ]
-
-    useMappingStore.getState().importFromCredit(txns, 3)
-
-    const fixed = useMappingStore.getState().fixed
-    const fromCreditFixed = fixed.filter(r => r.fromCredit && !r.fromBank)
-    expect(fromCreditFixed).toHaveLength(2)
-    expect(fromCreditFixed.find(r => r.name === 'כללית')!.amount).toBe(180)
-    expect(fromCreditFixed.find(r => r.name === 'מכבי')!.amount).toBe(93)
-  })
-
-  it('a manual (non-fromCredit) row in fixed/sub/ins is NOT touched by re-import', () => {
-    // Pre-existing manual row the coach added by hand
+  it('Cellcom example: תקשורת 1400 → 500 after sending Cellcom (3×300) to subs', () => {
+    // Seed an existing category row to mimic the post-credit-import state
     useMappingStore.setState(s => ({
-      sub: [
-        ...s.sub,
-        { id: 'manual-1', name: 'Apple Music ידני', amount: 20 },
-      ],
+      sub: [...s.sub, {
+        id: 'cat-row',
+        name: 'תקשורת',
+        amount: 1400,
+        fromCredit: true,
+      }],
     }))
 
-    const txns: Transaction[] = [makeTxn('Netflix', 50, 'תקשורת')]
-    useMappingStore.getState().importFromCredit(txns, 1)
+    // User clicks "→ מנויים" on Cellcom in SmartPatterns (single charge 300,
+    // appears 3 times = 900 historical contribution to תקשורת).
+    useMappingStore.getState().importFromBank([{
+      name: 'סלקום',
+      amount: 300,             // monthly cost-basis added to subs
+      section: 'sub',
+      subtractFrom: { category: 'תקשורת', amount: 900 }, // 300 × 3 removed from source
+    }])
 
     const sub = useMappingStore.getState().sub
-    const manualSurvives = sub.find(r => r.id === 'manual-1')
-    expect(manualSurvives, 'manual row must survive credit re-import').toBeDefined()
-    expect(manualSurvives!.amount).toBe(20)
-    expect(manualSurvives!.fromCredit).toBeFalsy()
+    const tikshoret = sub.find(r => r.name === 'תקשורת')
+    const cellcom   = sub.find(r => r.name === 'סלקום')
+    expect(tikshoret, 'תקשורת row must still exist with the reduced amount').toBeDefined()
+    expect(tikshoret!.amount).toBe(500)                  // 1400 - 900 = 500
+    expect(cellcom, 'Cellcom must be added as its own row').toBeDefined()
+    expect(cellcom!.amount).toBe(300)
+    expect(cellcom!.fromBank).toBe(true)                 // protected from credit re-imports
+  })
 
-    // The new credit row also exists alongside
-    expect(sub.find(r => r.fromCredit && r.name === 'Netflix')?.amount).toBe(50)
+  it('cross-section subtract: sending a sub-category item to fixed reduces the sub row, adds a fixed row', () => {
+    useMappingStore.setState(s => ({
+      sub: [...s.sub, {
+        id: 'sub-cat-row',
+        name: 'תקשורת',
+        amount: 500,
+        fromCredit: true,
+      }],
+    }))
+
+    useMappingStore.getState().importFromBank([{
+      name: 'אינטרנט ביתי',
+      amount: 100,
+      section: 'fixed',
+      subtractFrom: { category: 'תקשורת', amount: 300 },
+    }])
+
+    const sub   = useMappingStore.getState().sub
+    const fixed = useMappingStore.getState().fixed
+    expect(sub.find(r => r.name === 'תקשורת')!.amount).toBe(200)    // 500 - 300
+    expect(fixed.find(r => r.name === 'אינטרנט ביתי')!.amount).toBe(100)
+  })
+
+  it('removes the source row entirely when the subtraction would zero it out', () => {
+    useMappingStore.setState(s => ({
+      sub: [...s.sub, {
+        id: 'cat-row',
+        name: 'תקשורת',
+        amount: 300,
+        fromCredit: true,
+      }],
+    }))
+
+    useMappingStore.getState().importFromBank([{
+      name: 'סלקום',
+      amount: 300,
+      section: 'sub',
+      subtractFrom: { category: 'תקשורת', amount: 300 },   // exactly equal — wipes the row
+    }])
+
+    const sub = useMappingStore.getState().sub
+    expect(sub.find(r => r.name === 'תקשורת'), 'category row gone after full carve-out').toBeUndefined()
+    expect(sub.find(r => r.name === 'סלקום')!.amount).toBe(300)
+  })
+
+  it('subtractFrom is a silent no-op when no matching category row exists', () => {
+    // mapping.sub starts empty — no תקשורת row to subtract from
+    useMappingStore.getState().importFromBank([{
+      name: 'סלקום',
+      amount: 300,
+      section: 'sub',
+      subtractFrom: { category: 'תקשורת', amount: 900 },
+    }])
+
+    const sub = useMappingStore.getState().sub
+    expect(sub.filter(r => r.name === 'סלקום')).toHaveLength(1)
+    // No row was created or destroyed — just the new Cellcom row exists
+    expect(sub.filter(r => r.fromBank).length).toBe(1)
+  })
+
+  it('rows without subtractFrom behave like a plain add (bank-tab flow unchanged)', () => {
+    useMappingStore.getState().importFromBank([
+      { name: 'Netflix', amount: 50, section: 'sub' },
+      { name: 'משכנתא',   amount: 4500, section: 'fixed' },
+    ])
+
+    expect(useMappingStore.getState().sub.find(r => r.name === 'Netflix')!.amount).toBe(50)
+    expect(useMappingStore.getState().fixed.find(r => r.name === 'משכנתא')!.amount).toBe(4500)
   })
 })

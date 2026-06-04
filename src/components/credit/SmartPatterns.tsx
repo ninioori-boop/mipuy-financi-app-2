@@ -8,12 +8,17 @@ import { useMappingStore } from '@/stores/mappingStore'
 type MappingSection = 'fixed' | 'sub' | 'ins'
 
 interface PatternItem {
-  desc: string
-  amount: number
-  meta: string
-  tag: string
-  tagColor: string
+  desc:      string
+  amount:    number             // single-charge amount (== the user's expected monthly cost)
+  meta:      string
+  tag:       string
+  tagColor:  string
   progress?: number
+  // When present, sending this item to mapping ALSO subtracts the merchant's
+  // historical contribution from its source category row (so the category
+  // total reduces and accounting stays clean).
+  category?: string             // source category (auto-categorized)
+  count?:    number             // how many times this merchant charged in the report
 }
 
 interface SendOption {
@@ -155,7 +160,11 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
   const [sentItems, setSentItems] = useState<Map<string, string>>(new Map())
 
   function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
-    importFromBank([{ name: item.desc, amount: Math.round(item.amount), section: target }])
+    const amount       = Math.round(item.amount)
+    const subtractFrom = item.category && item.count
+      ? { category: item.category, amount: Math.round(item.amount * item.count) }
+      : undefined
+    importFromBank([{ name: item.desc, amount, section: target, subtractFrom }])
     setSentItems(prev => {
       const next = new Map(prev)
       next.set(itemKey(item), targetLabel)
@@ -180,6 +189,8 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         desc: t.desc, amount: t.amount,
         meta: t.date,
         tag: 'הו"ק', tagColor: 'border-blue-400/50 text-blue-300',
+        category: t.category,
+        count: 1,                                     // standing orders are typically one charge per month
       })),
       sendActions: [
         { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
@@ -211,6 +222,8 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         desc: r.desc, amount: r.amount,
         meta: `מופיע ${r.count} פעמים`,
         tag: 'חוזר', tagColor: 'border-purple-400/50 text-purple-300',
+        category: r.category,
+        count: r.count,
       })),
       sendActions: [
         { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
