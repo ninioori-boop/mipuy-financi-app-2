@@ -27,10 +27,17 @@ const SYSTEM_PROMPT =
   'פורמט תגובה — JSON בלבד ללא טקסט נוסף, מערך מחרוזות לפי הסדר:\n' +
   '{"categories":["קטגוריה1","קטגוריה2"]}'
 
-// Push latest transactions from store to mapping (reads fresh state)
+// Push latest transactions from store to mapping. Reads fresh state at call
+// time, so any manual category edits the advisor made before clicking are
+// included. Manual approval flow (no auto-sync on upload / AI / months change).
 function pushToMapping() {
   const { transactions, reportMonths } = useCreditStore.getState()
+  if (!transactions.length) {
+    toast.warning('אין עסקאות לשליחה')
+    return
+  }
   useMappingStore.getState().importFromCredit(transactions, reportMonths)
+  toast.success(`📤 ${transactions.length} עסקאות נשלחו למיפוי`)
 }
 
 export default function CreditPage() {
@@ -54,8 +61,9 @@ export default function CreditPage() {
       setTransactions(allTxns, fileNames)
       setLoading(false)
 
-      // ייבוא ראשוני למיפוי — לפני AI (עם סיווג מה-learnedDB)
-      useMappingStore.getState().importFromCredit(allTxns, useCreditStore.getState().reportMonths)
+      // No auto-sync to mapping. The advisor reviews + edits categories
+      // here, then clicks "📤 שלח למיפוי" when they're satisfied — manual
+      // approval flow. AI still runs automatically on unmatched rows.
 
       const unmatchedCount = allTxns.filter(t => t.category === 'שונות').length
       if (unmatchedCount > 0) {
@@ -139,8 +147,8 @@ export default function CreditPage() {
       setLoading(false)
       const failedCount = failedBatches.reduce((s, b) => s + b.length, 0)
 
-      // ייבוא מחדש למיפוי עם הקטגוריות המעודכנות מה-AI
-      if (updated > 0) pushToMapping()
+      // No auto-push to mapping — AI updates the categories in creditStore;
+      // advisor reviews and presses "📤 שלח למיפוי" when ready.
 
       if (failedCount === 0) {
         if (updated > 0) toast.success(`🤖 סיווג ${updated} מתוך ${unmatchedCount} עסקאות`)
@@ -165,13 +173,9 @@ export default function CreditPage() {
   function handleMonthsChange(delta: number) {
     const next = Math.max(1, Math.min(24, reportMonths + delta))
     setReportMonths(next)
-    // עדכן מיפוי אם יש עסקאות
-    if (useCreditStore.getState().transactions.length) {
-      useMappingStore.getState().importFromCredit(
-        useCreditStore.getState().transactions,
-        next,
-      )
-    }
+    // Months selector affects the per-month division used by importFromCredit.
+    // Under manual flow, the new value just gets stored — it'll be applied on
+    // the NEXT click of "📤 שלח למיפוי".
   }
 
   const hasResults = transactions.length > 0
@@ -213,11 +217,6 @@ export default function CreditPage() {
               onChange={e => {
                 const v = Math.max(1, Math.min(24, parseInt(e.target.value) || 1))
                 setReportMonths(v)
-                if (useCreditStore.getState().transactions.length) {
-                  useMappingStore.getState().importFromCredit(
-                    useCreditStore.getState().transactions, v,
-                  )
-                }
               }}
               className="w-12 text-center bg-bg border border-gold rounded-lg text-gold font-bold text-base py-1 focus:outline-none"
               style={{ direction: 'ltr' }}
@@ -260,6 +259,13 @@ export default function CreditPage() {
             <SmartPatterns transactions={transactions} />
           </div>
 
+          {/* Hint about the manual-approval flow — shown above the editable table */}
+          <div className="rounded-xl border border-gold/30 bg-gold/5 px-4 py-3 text-sm text-txt">
+            <span className="font-semibold text-gold">✏️ עריכה ידנית פעילה.</span>{' '}
+            ניתן לתקן קטגוריות בטבלה למטה. <strong>לא נשלח כלום למיפוי אוטומטית</strong> —
+            כשתסיים, לחץ <span className="text-gold font-semibold">"📤 שלח למיפוי"</span> בתחתית הדף.
+          </div>
+
           {/* Category breakdown — expandable per-category with editing */}
           <div className="rounded-xl border border-line bg-surface2 p-6">
             <div className="text-sm font-semibold text-txt mb-4">📊 הוצאות לפי קטגוריה</div>
@@ -275,24 +281,31 @@ export default function CreditPage() {
           {/* AI Full Analysis */}
           <AiAnalysis transactions={transactions} reportMonths={reportMonths} />
 
-          {/* Bottom actions */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={pushToMapping}
-              className="text-sm px-4 py-2 rounded-lg border border-gold/30 bg-gold/10 text-gold hover:bg-gold/20 transition-colors"
-            >
-              🗂️ עדכן מיפוי ידני
-            </button>
-            <button
-              onClick={() => {
-                const count = transactions.filter(t => t.category === 'שונות').length
-                runAI(transactions, count)
-              }}
-              disabled={isLoading}
-              className="text-sm px-4 py-2 rounded-lg border border-line bg-surface2 text-muted-txt hover:text-txt hover:border-gold/50 transition-colors disabled:opacity-50"
-            >
-              🤖 הרץ ניתוח AI שוב
-            </button>
+          {/* Bottom actions — primary CTA: send to mapping (manual approval flow) */}
+          <div className="rounded-xl border-2 border-gold/40 bg-gold/5 p-5 space-y-3">
+            <div className="text-sm text-muted-txt">
+              💡 כשתסיים לערוך קטגוריות ולוודא שהכל תקין — שלח את הדוח למיפוי.
+              <br />
+              הקטגוריות הנוכחיות בטבלה (כולל עריכות ידניות) יועתקו למיפוי. ניתן ללחוץ שוב אחרי עריכה נוספת.
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <button
+                onClick={pushToMapping}
+                className="text-base font-bold px-6 py-3 rounded-xl bg-gold text-surface hover:bg-gold-light transition-colors shadow-md"
+              >
+                📤 שלח {transactions.length} עסקאות למיפוי
+              </button>
+              <button
+                onClick={() => {
+                  const count = transactions.filter(t => t.category === 'שונות').length
+                  runAI(transactions, count)
+                }}
+                disabled={isLoading}
+                className="text-sm px-4 py-2 rounded-lg border border-line bg-surface2 text-muted-txt hover:text-txt hover:border-gold/50 transition-colors disabled:opacity-50"
+              >
+                🤖 הרץ ניתוח AI שוב
+              </button>
+            </div>
           </div>
         </>
       )}
