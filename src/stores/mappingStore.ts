@@ -6,6 +6,7 @@ import {
   VAR_CATEGORIES, ANNUAL_CATEGORIES, FIXED_CATEGORIES,
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
+import { normalizeForLookup } from '@/lib/categorize'
 
 export interface MappingRow {
   id: string
@@ -218,11 +219,54 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     const m = Math.max(1, months)
     const s = get()
 
-    // Sum amounts by category (exclude refunds)
-    const totals: Record<string, number> = {}
+    // Three aggregations, applied in parallel as we walk the transactions:
+    //   • variable / annual  — keep the old "by category" semantics (a single
+    //     row per category like "מזון לבית" or "חופשה וטיול").
+    //   • fixed / sub / ins  — NEW: per-merchant rows so each subscription,
+    //     each insurance, each fixed-cost provider gets its own line.
+    const variableCategoryTotals: Record<string, number> = {}
+    const annualCategoryTotals:   Record<string, number> = {}
+    type MerchantBucket = {
+      sectionType: 'fixed' | 'sub' | 'ins'
+      displayName: string
+      total:       number
+    }
+    const merchantBuckets = new Map<string, MerchantBucket>()
+
     transactions.forEach(t => {
       if (t.isRefund) return
-      totals[t.category] = (totals[t.category] ?? 0) + t.amount
+      const cat = t.category
+      if (SKIP_CATEGORIES.has(cat)) return
+
+      if (VAR_CATEGORIES.has(cat)) {
+        variableCategoryTotals[cat] = (variableCategoryTotals[cat] ?? 0) + t.amount
+        return
+      }
+      if (ANNUAL_CATEGORIES.has(cat)) {
+        annualCategoryTotals[cat] = (annualCategoryTotals[cat] ?? 0) + t.amount
+        return
+      }
+      let sectionType: 'fixed' | 'sub' | 'ins' | null = null
+      if (FIXED_CATEGORIES.has(cat))          sectionType = 'fixed'
+      else if (SUB_CATEGORIES.has(cat))       sectionType = 'sub'
+      else if (INSURANCE_CATEGORIES.has(cat)) sectionType = 'ins'
+      if (!sectionType) return
+
+      // Reuse the same normalization the bank tab uses so "NETFLIX.COM 27/03"
+      // and "Netflix" collapse to the same bucket. Fall back to the raw desc
+      // if normalization comes back empty (unusual rows with no real name).
+      const merchantKey = normalizeForLookup(t.desc) || t.desc.toLowerCase().trim() || cat
+      const bucketKey = `${sectionType}:${merchantKey}`
+      const existing = merchantBuckets.get(bucketKey)
+      if (existing) {
+        existing.total += t.amount
+      } else {
+        merchantBuckets.set(bucketKey, {
+          sectionType,
+          displayName: t.desc.trim() || cat,
+          total: t.amount,
+        })
+      }
     })
 
     // Helper: merge new amount into existing fromCredit rows, or add new row.
@@ -248,10 +292,6 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       return [...existing, { id: uid(), name: cat, annualAmount: addAmt, fromCredit: true }]
     }
 
-    // Drop previously-imported credit rows first, keeping manual rows, so that
-    // re-running the import (after AI, on months change, on re-upload) REPLACES
-    // the credit-derived amounts instead of accumulating them. Without this the
-    // amounts double/triple every time the import re-runs.
     // Drop fromCredit rows that did NOT originate from the Bank tab. Bank rows
     // (fromBank:true) survive the wipe — they represent manual setup work that
     // a re-run of credit import must not destroy.
@@ -261,24 +301,25 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     let ins      = s.ins.filter(r => !(r.fromCredit && !r.fromBank))
     let annual   = s.annual.filter(r => !(r.fromCredit && !r.fromBank))
 
-    Object.entries(totals).forEach(([cat, totalAmt]) => {
-      if (totalAmt <= 0) return
-      if (SKIP_CATEGORIES.has(cat)) return
+    // Variable — one row per category (unchanged semantics).
+    Object.entries(variableCategoryTotals).forEach(([cat, total]) => {
+      if (total > 0) variable = mergeRows(variable, cat, Math.round(total))
+    })
 
-      if (VAR_CATEGORIES.has(cat)) {
-        variable = mergeRows(variable, cat, Math.round(totalAmt))
-      } else if (ANNUAL_CATEGORIES.has(cat)) {
-        // Annual categories are lumpy (vacation, gifts) — use the actual total
-        // spent as the yearly figure (the panel shows ÷12 for the monthly).
-        // Do NOT annualize a monthly average, which over-inflates a one-off spend.
-        annual = mergeAnnual(annual, cat, Math.round(totalAmt))
-      } else if (FIXED_CATEGORIES.has(cat)) {
-        fixed = mergeRows(fixed, cat, Math.round(totalAmt / m))
-      } else if (INSURANCE_CATEGORIES.has(cat)) {
-        ins = mergeRows(ins, cat, Math.round(totalAmt / m))
-      } else if (SUB_CATEGORIES.has(cat)) {
-        sub = mergeRows(sub, cat, Math.round(totalAmt / m))
-      }
+    // Annual — one row per category, full-year sum (unchanged semantics).
+    // Annual categories are lumpy (vacation, gifts) — use the actual total
+    // spent as the yearly figure (the panel shows ÷12 for the monthly).
+    Object.entries(annualCategoryTotals).forEach(([cat, total]) => {
+      if (total > 0) annual = mergeAnnual(annual, cat, Math.round(total))
+    })
+
+    // Fixed / sub / ins — NEW: one row per merchant, monthly amount = total / m.
+    merchantBuckets.forEach(({ sectionType, displayName, total }) => {
+      if (total <= 0) return
+      const amount = Math.round(total / m)
+      if (sectionType === 'fixed')    fixed = mergeRows(fixed, displayName, amount)
+      else if (sectionType === 'sub') sub   = mergeRows(sub,   displayName, amount)
+      else if (sectionType === 'ins') ins   = mergeRows(ins,   displayName, amount)
     })
 
     const sortMR = (rows: MappingRow[]) => [...rows].sort((a, b) => b.amount - a.amount)
