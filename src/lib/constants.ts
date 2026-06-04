@@ -73,6 +73,7 @@ export const FIXED_CATEGORIES = new Set([
   'קופת חולים', 'משכנתא', 'שכר דירה',
   'ארנונה', 'דמי ניהול בניין', 'החזר הלוואות', 'הוצאות בית', 'מיסים',
   'חשמל', 'גז', 'מים', 'ועד בית', 'ביוב', 'אינטרנט קווי',
+  'עמלות בנק ואשראי',  // recurring monthly card/account fees — fixed cost, not a subscription
 ])
 
 export const INSURANCE_CATEGORIES = new Set([
@@ -80,7 +81,7 @@ export const INSURANCE_CATEGORIES = new Set([
 ])
 
 export const SUB_CATEGORIES = new Set([
-  'חדר כושר', 'עמלות בנק ואשראי',
+  'חדר כושר',
   'מנויים',  // new catch-all for streaming / telcos / SaaS / digital subs — populated by BUSINESS_DB
   'נטפליקס', 'ספוטיפיי', 'אפל', 'גוגל',  // legacy brand categories kept for back-compat with old saved snapshots
 ])
