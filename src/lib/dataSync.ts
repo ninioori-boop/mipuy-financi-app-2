@@ -7,8 +7,10 @@
  * snapshot and hydrating stores back from that snapshot.
  *
  * Only data fields are persisted — never actions/methods.
- * Ephemeral stores (bankStore raw rows, creditStore.transactions, sync UI state)
- * are intentionally excluded.
+ * Ephemeral stores (bankStore raw rows, sync UI state) are intentionally
+ * excluded. creditStore.transactions WAS ephemeral but is now persisted —
+ * the mapping tab's per-row breakdown reads from creditStore, so without
+ * persistence the breakdown vanished on every refresh.
  */
 
 import { useMonthlyStore } from '@/stores/monthlyStore'
@@ -19,6 +21,7 @@ import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
 import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
+import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
 
@@ -57,8 +60,10 @@ export interface Snapshot {
     long:   ReturnType<typeof useGoalsStore.getState>['long']
   }
   credit: {
-    learnedDB:    Record<string, string>
-    reportMonths: number
+    learnedDB:         Record<string, string>
+    reportMonths:      number
+    transactions:      Transaction[]    // persisted so the mapping breakdown survives refresh
+    uploadedFileNames: string[]         // file chips shown above the credit table — kept in sync with `transactions`
   }
   meetings: {
     meetings: ReturnType<typeof useMeetingsStore.getState>['meetings']
@@ -125,7 +130,12 @@ export function collectSnapshot(): Snapshot {
       creditScore:      p.creditScore,
     },
     goals: { short: g.short, medium: g.medium, long: g.long },
-    credit: { learnedDB: c.learnedDB, reportMonths: c.reportMonths },
+    credit: {
+      learnedDB:         c.learnedDB,
+      reportMonths:      c.reportMonths,
+      transactions:      c.transactions,
+      uploadedFileNames: c.uploadedFileNames,
+    },
     meetings: { meetings: mt.meetings },
     business: {
       businessType: b.businessType,
@@ -256,12 +266,17 @@ export function applySnapshot(raw: unknown): void {
     })
   }
 
-  // credit (only learnedDB + reportMonths — transactions stay ephemeral)
+  // credit — learnedDB, reportMonths, plus the credit transactions and the
+  // uploaded-file-name chips. Snapshots saved before transactions were
+  // persisted simply lack the field; the Array.isArray guard skips them and
+  // creditStore keeps its default (empty array).
   if (isObject(raw.credit)) {
     const c = raw.credit as Partial<Snapshot['credit']>
     useCreditStore.setState({
       ...(isObject(c.learnedDB)              ? { learnedDB: c.learnedDB as Record<string, string> } : {}),
       ...(typeof c.reportMonths === 'number' ? { reportMonths: c.reportMonths }                     : {}),
+      ...(Array.isArray(c.transactions)      ? { transactions: c.transactions }                     : {}),
+      ...(Array.isArray(c.uploadedFileNames) ? { uploadedFileNames: c.uploadedFileNames }           : {}),
     })
   }
 

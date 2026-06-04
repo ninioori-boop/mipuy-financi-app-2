@@ -82,6 +82,19 @@ function populateAllStores() {
   useCreditStore.setState({
     learnedDB: { 'shufersal': 'מזון לבית', 'paz': 'דלק וחניה' },
     reportMonths: 6,
+    transactions: [
+      {
+        id: 'tx1', desc: 'SHUFERSAL', amount: 412, originalAmount: null,
+        category: 'מזון לבית', source: 'visa.xlsx', notes: '', date: '2026-05-12',
+        installment: null, isStandingOrder: false, isRefund: false,
+      },
+      {
+        id: 'tx2', desc: 'NETFLIX.COM', amount: 63, originalAmount: null,
+        category: 'מנויים', source: 'visa.xlsx', notes: '', date: '2026-05-15',
+        installment: null, isStandingOrder: false, isRefund: false,
+      },
+    ],
+    uploadedFileNames: ['visa.xlsx', 'mastercard.xlsx'],
   })
 
   useMeetingsStore.setState({
