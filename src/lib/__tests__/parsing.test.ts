@@ -64,8 +64,8 @@ describe('categorize', () => {
   it('categorizes שופרסל → מזון לבית', () => {
     expect(categorize('שופרסל')).toBe('מזון לבית')
   })
-  it('categorizes netflix → תקשורת', () => {
-    expect(categorize('netflix')).toBe('תקשורת')
+  it('categorizes netflix → מנויים', () => {
+    expect(categorize('netflix')).toBe('מנויים')
   })
   it('categorizes unknown → שונות', () => {
     expect(categorize('חנות לא ידועה xyz99')).toBe('שונות')
