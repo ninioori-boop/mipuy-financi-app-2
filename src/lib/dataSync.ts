@@ -193,19 +193,50 @@ export function applySnapshot(raw: unknown): void {
     })
   }
 
-  // mapping
+  // mapping — load + dedup IDs.
+  // Older snapshots may contain rows with duplicate ids (the previous uid
+  // implementation was a counter that reset to 0 on each page load and could
+  // collide with snapshot ids). Duplicate React keys cause the row-delete
+  // bug where clicking ✕ removes the wrong row and the panel "gets stuck".
+  // Re-issue a fresh id whenever we encounter a duplicate during load.
   if (isObject(raw.mapping)) {
     const m = raw.mapping as Partial<Snapshot['mapping']>
+
+    function freshId(): string { return 'r' + Math.random().toString(36).slice(2, 11) }
+    function dedupRows<T extends { id: string }>(rows: T[] | undefined): T[] | undefined {
+      if (!Array.isArray(rows)) return undefined
+      const seen = new Set<string>()
+      return rows.map(r => {
+        if (!r.id || seen.has(r.id)) {
+          const newId = freshId()
+          seen.add(newId)
+          return { ...r, id: newId }
+        }
+        seen.add(r.id)
+        return r
+      })
+    }
+
+    const income       = dedupRows(m.income as Snapshot['mapping']['income']        | undefined)
+    const fixed        = dedupRows(m.fixed as Snapshot['mapping']['fixed']          | undefined)
+    const sub          = dedupRows(m.sub as Snapshot['mapping']['sub']              | undefined)
+    const ins          = dedupRows(m.ins as Snapshot['mapping']['ins']              | undefined)
+    const variable     = dedupRows(m.variable as Snapshot['mapping']['variable']    | undefined)
+    const annual       = dedupRows(m.annual as Snapshot['mapping']['annual']        | undefined)
+    const debts        = dedupRows(m.debts as Snapshot['mapping']['debts']          | undefined)
+    const installments = dedupRows(m.installments as Snapshot['mapping']['installments'] | undefined)
+    const savings      = dedupRows(m.savings as Snapshot['mapping']['savings']      | undefined)
+
     useMappingStore.setState({
-      ...(Array.isArray(m.income)       ? { income: m.income }             : {}),
-      ...(Array.isArray(m.fixed)        ? { fixed: m.fixed }               : {}),
-      ...(Array.isArray(m.sub)          ? { sub: m.sub }                   : {}),
-      ...(Array.isArray(m.ins)          ? { ins: m.ins }                   : {}),
-      ...(Array.isArray(m.variable)     ? { variable: m.variable }         : {}),
-      ...(Array.isArray(m.annual)       ? { annual: m.annual }             : {}),
-      ...(Array.isArray(m.debts)        ? { debts: m.debts }               : {}),
-      ...(Array.isArray(m.installments) ? { installments: m.installments } : {}),
-      ...(Array.isArray(m.savings)      ? { savings: m.savings }           : {}),
+      ...(income       ? { income }       : {}),
+      ...(fixed        ? { fixed }        : {}),
+      ...(sub          ? { sub }          : {}),
+      ...(ins          ? { ins }          : {}),
+      ...(variable     ? { variable }     : {}),
+      ...(annual       ? { annual }       : {}),
+      ...(debts        ? { debts }        : {}),
+      ...(installments ? { installments } : {}),
+      ...(savings      ? { savings }      : {}),
       ...(typeof m.varMonths === 'number'  ? { varMonths: m.varMonths }       : {}),
       ...(typeof m.creditImported === 'boolean' ? { creditImported: m.creditImported } : {}),
       ...(typeof m.bufferPct === 'number' ? { bufferPct: m.bufferPct }         : {}),

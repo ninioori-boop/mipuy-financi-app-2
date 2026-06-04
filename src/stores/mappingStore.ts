@@ -53,8 +53,12 @@ export interface SavingRow {
 
 export type SimpleSection = 'income' | 'fixed' | 'sub' | 'ins'
 
-let _seq = 0
-function uid(): string { return `r${++_seq}` }
+// Random-enough id. Used to be a counter (`r${++_seq}`), but that reset to
+// zero on every page reload — and then collided with IDs already present in
+// the loaded Firestore snapshot. Two rows ending up with the same id makes
+// React render them with the same key, which causes the symptom where a
+// delete click removes the wrong row and the UI gets stuck.
+function uid(): string { return 'r' + Math.random().toString(36).slice(2, 11) }
 
 function makeRows(names: string[]): MappingRow[] {
   return names.map(name => ({ id: uid(), name, amount: 0 }))

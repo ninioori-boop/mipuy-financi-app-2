@@ -173,4 +173,44 @@ describe('DataSync — snapshot round-trip', () => {
     expect(snap.monthly.months).toEqual({})
     expect(snap.credit.reportMonths).toBe(3)          // default
   })
+
+  it('applySnapshot re-issues duplicate mapping row IDs (heals the row-delete-stuck bug)', () => {
+    // Simulate an old snapshot saved while the counter-uid was producing
+    // colliding ids. Both variable rows share id="r1"; React would render
+    // both with the same key, and deleting either via filter(r => r.id !== 'r1')
+    // would remove BOTH — appearing to the user as "deleted the wrong row".
+    applySnapshot({
+      mapping: {
+        variable: [
+          { id: 'r1', name: 'food',    amount: 1000 },
+          { id: 'r1', name: 'transit', amount: 500 },   // duplicate id!
+          { id: 'r2', name: 'pharma',  amount: 200 },
+        ],
+        fixed: [
+          { id: 'r1', name: 'rent',    amount: 3000 },  // ALSO 'r1' — different section
+          { id: 'r1', name: 'arnona',  amount: 400 },   // duplicate id within fixed too
+        ],
+      },
+    })
+
+    const snap = collectSnapshot()
+    const varIds   = snap.mapping.variable.map(r => r.id)
+    const fixedIds = snap.mapping.fixed.map(r => r.id)
+
+    // IDs are unique WITHIN each section (sufficient — React keys are scoped
+    // to a parent's children list, so the same id appearing in two different
+    // section components is fine; collisions within a single list are what
+    // cause the row-delete-stuck bug).
+    expect(new Set(varIds).size).toBe(varIds.length)
+    expect(new Set(fixedIds).size).toBe(fixedIds.length)
+
+    // No row has an empty / missing id
+    expect([...varIds, ...fixedIds].every(id => typeof id === 'string' && id.length > 0)).toBe(true)
+
+    // Counts and content preserved — only duplicate IDs are healed
+    expect(snap.mapping.variable).toHaveLength(3)
+    expect(snap.mapping.fixed).toHaveLength(2)
+    expect(snap.mapping.variable.find(r => r.name === 'food')?.amount).toBe(1000)
+    expect(snap.mapping.variable.find(r => r.name === 'transit')?.amount).toBe(500)
+  })
 })
