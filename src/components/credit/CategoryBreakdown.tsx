@@ -4,6 +4,27 @@ import { useState } from 'react'
 import type { Transaction } from '@/types/transaction'
 import { ALL_CATEGORIES, CATEGORY_ICONS } from '@/lib/constants'
 
+// Per-device persistence for the open-category state in CategoryBreakdown.
+// Local-only on purpose (not synced via Firestore): expansion is purely a
+// UX preference, and bouncing it through the snapshot would create chatty
+// writes on every accordion click. localStorage is enough — the advisor
+// can refresh / close / reopen the credit tab and the same category stays
+// expanded so they can keep walking the client through the same line item.
+const OPEN_CATEGORY_STORAGE_KEY = 'credit-breakdown-open-category'
+
+function readStoredOpenCategory(): string | null {
+  if (typeof window === 'undefined') return null
+  try { return window.localStorage.getItem(OPEN_CATEGORY_STORAGE_KEY) } catch { return null }
+}
+
+function writeStoredOpenCategory(cat: string | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (cat === null) window.localStorage.removeItem(OPEN_CATEGORY_STORAGE_KEY)
+    else window.localStorage.setItem(OPEN_CATEGORY_STORAGE_KEY, cat)
+  } catch { /* quota / disabled storage — non-fatal */ }
+}
+
 interface TxEntry { t: Transaction; idx: number }
 
 interface CategoryGroup {
@@ -41,7 +62,15 @@ interface Props {
 }
 
 export function CategoryBreakdown({ transactions, onCategoryChange, onDescChange, onAmountChange, onDelete }: Props) {
-  const [openCategory, setOpenCategory] = useState<string | null>(null)
+  // Lazy initializer runs once on first render. CategoryBreakdown is only
+  // rendered inside the parent's `hasResults && (...)` block — which is
+  // always client-side (creditStore hydrates from Firestore post-auth), so
+  // it's safe to touch localStorage here without an SSR/hydration mismatch.
+  const [openCategory, setOpenCategoryState] = useState<string | null>(readStoredOpenCategory)
+  const setOpenCategory = (cat: string | null) => {
+    setOpenCategoryState(cat)
+    writeStoredOpenCategory(cat)
+  }
   const [editingDesc, setEditingDesc] = useState<{ idx: number; value: string } | null>(null)
   const [editingAmount, setEditingAmount] = useState<{ idx: number; value: string } | null>(null)
   const [editingCat, setEditingCat] = useState<number | null>(null)
