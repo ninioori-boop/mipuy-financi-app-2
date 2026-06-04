@@ -1,7 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
 import type { Transaction } from '@/types/transaction'
+import { useMappingStore } from '@/stores/mappingStore'
+
+type MappingSection = 'fixed' | 'sub' | 'ins'
 
 interface PatternItem {
   desc: string
@@ -12,11 +16,18 @@ interface PatternItem {
   progress?: number
 }
 
+interface SendAction {
+  label:         string             // text on the button
+  targetLabel:   string             // human-readable target ("מנויים", "קבועות")
+  target:        MappingSection
+}
+
 interface Section {
-  icon: string
-  title: string
-  color: string
-  items: PatternItem[]
+  icon:        string
+  title:       string
+  color:       string
+  items:       PatternItem[]
+  sendAction?: SendAction            // when present, each item gets a "send to mapping" button
 }
 
 function detectPatterns(txs: Transaction[]) {
@@ -63,7 +74,16 @@ function fmt(n: number) {
   return '₪' + n.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
-function SectionBlock({ icon, title, color, items }: Section) {
+function itemKey(item: PatternItem): string {
+  return `${item.desc}|${Math.round(item.amount * 10)}`
+}
+
+function SectionBlock({
+  icon, title, color, items, sendAction, sentItems, onSend,
+}: Section & {
+  sentItems: Set<string>
+  onSend:    (item: PatternItem, target: MappingSection, targetLabel: string) => void
+}) {
   const [open, setOpen] = useState(false)
   return (
     <div className="border border-line rounded-lg overflow-hidden">
@@ -81,23 +101,42 @@ function SectionBlock({ icon, title, color, items }: Section) {
 
       {open && (
         <div className="divide-y divide-line">
-          {items.map((item, i) => (
-            <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{item.desc}</div>
-                {item.meta && <div className="text-xs text-muted-txt">{item.meta}</div>}
-                {item.progress !== undefined && (
-                  <div className="mt-1 h-1 bg-surface rounded-full overflow-hidden">
-                    <div className="h-full bg-gold rounded-full" style={{ width: `${item.progress}%` }} />
-                  </div>
+          {items.map((item, i) => {
+            const key   = itemKey(item)
+            const sent  = sentItems.has(key)
+            return (
+              <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{item.desc}</div>
+                  {item.meta && <div className="text-xs text-muted-txt">{item.meta}</div>}
+                  {item.progress !== undefined && (
+                    <div className="mt-1 h-1 bg-surface rounded-full overflow-hidden">
+                      <div className="h-full bg-gold rounded-full" style={{ width: `${item.progress}%` }} />
+                    </div>
+                  )}
+                </div>
+                <span className="font-medium text-gold">{fmt(item.amount)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${item.tagColor}`}>
+                  {item.tag}
+                </span>
+                {sendAction && (
+                  sent ? (
+                    <span className="text-xs px-2 py-0.5 rounded-lg border border-green-400/30 bg-green-400/10 text-green-400 whitespace-nowrap">
+                      ✓ נשלח
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onSend(item, sendAction.target, sendAction.targetLabel)}
+                      className="text-xs px-2.5 py-1 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/25 transition-colors whitespace-nowrap"
+                      title={`שלח ל-${sendAction.targetLabel} במיפוי`}
+                    >
+                      {sendAction.label}
+                    </button>
+                  )
                 )}
               </div>
-              <span className="font-medium text-gold">{fmt(item.amount)}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${item.tagColor}`}>
-                {item.tag}
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -106,6 +145,18 @@ function SectionBlock({ icon, title, color, items }: Section) {
 
 export function SmartPatterns({ transactions }: { transactions: Transaction[] }) {
   const p = detectPatterns(transactions)
+  const importFromBank = useMappingStore(s => s.importFromBank)
+  const [sentItems, setSentItems] = useState<Set<string>>(new Set())
+
+  function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
+    importFromBank([{ name: item.desc, amount: Math.round(item.amount), section: target }])
+    setSentItems(prev => {
+      const next = new Set(prev)
+      next.add(itemKey(item))
+      return next
+    })
+    toast.success(`✅ "${item.desc}" נשלח ל${targetLabel} במיפוי`)
+  }
 
   const sections: Section[] = [
     {
@@ -117,6 +168,7 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         meta: t.date,
         tag: 'הו"ק', tagColor: 'border-blue-400/50 text-blue-300',
       })),
+      sendAction: { label: '🗂 שלח לקבועות', targetLabel: 'קבועות', target: 'fixed' as const },
     },
     {
       icon: '📅',
@@ -143,6 +195,7 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         meta: `מופיע ${r.count} פעמים`,
         tag: 'חוזר', tagColor: 'border-purple-400/50 text-purple-300',
       })),
+      sendAction: { label: '🗂 שלח למנויים', targetLabel: 'מנויים', target: 'sub' as const },
     },
     {
       icon: '↩️',
@@ -164,7 +217,9 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         🔍 ניתוח חכם
       </div>
       <div className="space-y-2">
-        {sections.map((s, i) => <SectionBlock key={i} {...s} />)}
+        {sections.map((s, i) => (
+          <SectionBlock key={i} {...s} sentItems={sentItems} onSend={handleSend} />
+        ))}
       </div>
     </div>
   )
