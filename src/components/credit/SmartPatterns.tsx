@@ -16,18 +16,18 @@ interface PatternItem {
   progress?: number
 }
 
-interface SendAction {
-  label:         string             // text on the button
-  targetLabel:   string             // human-readable target ("מנויים", "קבועות")
+interface SendOption {
+  label:         string             // button text, e.g. "קבועות"
   target:        MappingSection
+  buttonClass:   string             // tailwind classes for the button color
 }
 
 interface Section {
-  icon:        string
-  title:       string
-  color:       string
-  items:       PatternItem[]
-  sendAction?: SendAction            // when present, each item gets a "send to mapping" button
+  icon:         string
+  title:        string
+  color:        string
+  items:        PatternItem[]
+  sendActions?: SendOption[]         // when present, each item gets one button per option
 }
 
 function detectPatterns(txs: Transaction[]) {
@@ -79,9 +79,9 @@ function itemKey(item: PatternItem): string {
 }
 
 function SectionBlock({
-  icon, title, color, items, sendAction, sentItems, onSend,
+  icon, title, color, items, sendActions, sentItems, onSend,
 }: Section & {
-  sentItems: Set<string>
+  sentItems: Map<string, string>     // itemKey → targetLabel of the section it was sent to
   onSend:    (item: PatternItem, target: MappingSection, targetLabel: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -102,10 +102,10 @@ function SectionBlock({
       {open && (
         <div className="divide-y divide-line">
           {items.map((item, i) => {
-            const key   = itemKey(item)
-            const sent  = sentItems.has(key)
+            const key      = itemKey(item)
+            const sentTo   = sentItems.get(key)
             return (
-              <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+              <div key={i} className="px-4 py-2.5 flex items-center gap-2 text-sm flex-wrap">
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{item.desc}</div>
                   {item.meta && <div className="text-xs text-muted-txt">{item.meta}</div>}
@@ -119,19 +119,25 @@ function SectionBlock({
                 <span className={`text-xs px-2 py-0.5 rounded-full border ${item.tagColor}`}>
                   {item.tag}
                 </span>
-                {sendAction && (
-                  sent ? (
+                {sendActions && (
+                  sentTo ? (
                     <span className="text-xs px-2 py-0.5 rounded-lg border border-green-400/30 bg-green-400/10 text-green-400 whitespace-nowrap">
-                      ✓ נשלח
+                      ✓ נשלח ל{sentTo}
                     </span>
                   ) : (
-                    <button
-                      onClick={() => onSend(item, sendAction.target, sendAction.targetLabel)}
-                      className="text-xs px-2.5 py-1 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/25 transition-colors whitespace-nowrap"
-                      title={`שלח ל-${sendAction.targetLabel} במיפוי`}
-                    >
-                      {sendAction.label}
-                    </button>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-xs text-muted-txt">→</span>
+                      {sendActions.map(action => (
+                        <button
+                          key={action.target}
+                          onClick={() => onSend(item, action.target, action.label)}
+                          className={`text-xs px-2 py-0.5 rounded-lg border transition-colors whitespace-nowrap ${action.buttonClass}`}
+                          title={`שלח ל${action.label} במיפוי`}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
                   )
                 )}
               </div>
@@ -146,17 +152,24 @@ function SectionBlock({
 export function SmartPatterns({ transactions }: { transactions: Transaction[] }) {
   const p = detectPatterns(transactions)
   const importFromBank = useMappingStore(s => s.importFromBank)
-  const [sentItems, setSentItems] = useState<Set<string>>(new Set())
+  const [sentItems, setSentItems] = useState<Map<string, string>>(new Map())
 
   function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
     importFromBank([{ name: item.desc, amount: Math.round(item.amount), section: target }])
     setSentItems(prev => {
-      const next = new Set(prev)
-      next.add(itemKey(item))
+      const next = new Map(prev)
+      next.set(itemKey(item), targetLabel)
       return next
     })
     toast.success(`✅ "${item.desc}" נשלח ל${targetLabel} במיפוי`)
   }
+
+  // Three colored chip styles for the multi-target send picker
+  // (used by both "standing orders" and "recurring" sections — the same item
+  // can legitimately be a fixed cost, a subscription, or an insurance payment)
+  const fixedBtn = 'border-blue-400/40 bg-blue-400/10 text-blue-300 hover:bg-blue-400/25'
+  const subBtn   = 'border-purple-400/40 bg-purple-400/10 text-purple-300 hover:bg-purple-400/25'
+  const insBtn   = 'border-orange-400/40 bg-orange-400/10 text-orange-300 hover:bg-orange-400/25'
 
   const sections: Section[] = [
     {
@@ -168,7 +181,11 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         meta: t.date,
         tag: 'הו"ק', tagColor: 'border-blue-400/50 text-blue-300',
       })),
-      sendAction: { label: '🗂 שלח לקבועות', targetLabel: 'קבועות', target: 'fixed' as const },
+      sendActions: [
+        { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
+        { label: 'מנויים', target: 'sub'   as const, buttonClass: subBtn   },
+        { label: 'ביטוחים', target: 'ins'  as const, buttonClass: insBtn   },
+      ],
     },
     {
       icon: '📅',
@@ -195,7 +212,11 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         meta: `מופיע ${r.count} פעמים`,
         tag: 'חוזר', tagColor: 'border-purple-400/50 text-purple-300',
       })),
-      sendAction: { label: '🗂 שלח למנויים', targetLabel: 'מנויים', target: 'sub' as const },
+      sendActions: [
+        { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
+        { label: 'מנויים', target: 'sub'   as const, buttonClass: subBtn   },
+        { label: 'ביטוחים', target: 'ins'  as const, buttonClass: insBtn   },
+      ],
     },
     {
       icon: '↩️',
