@@ -9,7 +9,7 @@ type MappingSection = 'fixed' | 'sub' | 'ins'
 
 interface PatternItem {
   desc:      string
-  amount:    number             // single-charge amount (== the user's expected monthly cost)
+  amount:    number             // displayed amount (avg charge for recurring; single charge for standing orders)
   meta:      string
   tag:       string
   tagColor:  string
@@ -19,6 +19,7 @@ interface PatternItem {
   // total reduces and accounting stays clean).
   category?: string             // source category (auto-categorized)
   count?:    number             // how many times this merchant charged in the report
+  total?:    number             // exact sum across all charges; preferred over amount × count when present
 }
 
 interface SendOption {
@@ -52,25 +53,26 @@ function detectPatterns(txs: Transaction[]) {
     }
   }
 
-  const recurring: { desc: string; amount: number; count: number; category: string }[] = []
-  const seen = new Set<string>()
+  // Group all charges from the same merchant (regardless of amount). The old
+  // "bucket by exact amount" logic missed merchants with varying prices (e.g.
+  // APPLE.COM/BILL ITUNES with charges of 130/120/120 was reported as "2
+  // times at 120" — losing the 130). One row per merchant now, with the
+  // average charge as the display amount and the exact period total
+  // available for downstream subtract-from-category math.
+  const recurring: { desc: string; amount: number; count: number; total: number; category: string }[] = []
   for (const [, group] of Object.entries(merchantMap)) {
     if (group.length < 2) continue
-    const buckets: Record<number, Transaction[]> = {}
-    for (const t of group) {
-      const k = Math.round(t.amount * 10)
-      if (!buckets[k]) buckets[k] = []
-      buckets[k].push(t)
-    }
-    for (const [, bucket] of Object.entries(buckets)) {
-      if (bucket.length < 2) continue
-      const uid = group[0].desc + '|' + Math.round(group[0].amount * 10)
-      if (!seen.has(uid)) {
-        seen.add(uid)
-        recurring.push({ desc: group[0].desc, amount: group[0].amount, count: bucket.length, category: group[0].category })
-      }
-    }
+    const total = group.reduce((s, t) => s + t.amount, 0)
+    recurring.push({
+      desc:     group[0].desc,
+      amount:   Math.round(total / group.length),
+      count:    group.length,
+      total:    Math.round(total),
+      category: group[0].category,
+    })
   }
+  // Show the biggest spenders first so the coach scans the relevant ones fast
+  recurring.sort((a, b) => b.total - a.total)
 
   return { standingOrders, installments, refunds, recurring }
 }
@@ -160,9 +162,14 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
   const [sentItems, setSentItems] = useState<Map<string, string>>(new Map())
 
   function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
-    const amount       = Math.round(item.amount)
-    const subtractFrom = item.category && item.count
-      ? { category: item.category, amount: Math.round(item.amount * item.count) }
+    const amount = Math.round(item.amount)
+    // Prefer the exact period total when detectPatterns supplied one (variable-
+    // amount merchants like Apple iTunes). Fall back to amount × count for
+    // standing orders where the single-charge amount IS monthly and count=1.
+    const subtractTotal = item.total
+      ?? (item.count ? Math.round(item.amount * item.count) : amount)
+    const subtractFrom  = item.category
+      ? { category: item.category, amount: subtractTotal }
       : undefined
     importFromBank([{ name: item.desc, amount, section: target, subtractFrom }])
     setSentItems(prev => {
@@ -219,11 +226,13 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
       title: 'חוזרים / מנויים אפשריים',
       color: 'bg-purple-500/20 text-purple-300',
       items: p.recurring.map(r => ({
-        desc: r.desc, amount: r.amount,
-        meta: `מופיע ${r.count} פעמים`,
-        tag: 'חוזר', tagColor: 'border-purple-400/50 text-purple-300',
+        desc:   r.desc,
+        amount: r.amount,
+        meta:   `${r.count} חיובים · סה"כ ${fmt(r.total)}`,
+        tag:    'חוזר', tagColor: 'border-purple-400/50 text-purple-300',
         category: r.category,
-        count: r.count,
+        count:    r.count,
+        total:    r.total,
       })),
       sendActions: [
         { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },

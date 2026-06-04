@@ -36,16 +36,16 @@ describe('importFromCredit — one row per category (no per-merchant split)', ()
     // consolidated row "תקשורת 153" — splitting happens manually via
     // SmartPatterns, not automatically here.
     const txns: Transaction[] = [
-      makeTxn('Netflix',  50, 'תקשורת'),
-      makeTxn('ChatGPT',  73, 'תקשורת'),
-      makeTxn('Spotify',  30, 'תקשורת'),
+      makeTxn('Netflix',  50, 'חדר כושר'),
+      makeTxn('ChatGPT',  73, 'חדר כושר'),
+      makeTxn('Spotify',  30, 'חדר כושר'),
     ]
     useMappingStore.getState().importFromCredit(txns, 1)
 
     const sub = useMappingStore.getState().sub
     const fromCredit = sub.filter(r => r.fromCredit && !r.fromBank)
     expect(fromCredit).toHaveLength(1)
-    expect(fromCredit[0].name).toBe('תקשורת')
+    expect(fromCredit[0].name).toBe('חדר כושר')
     expect(fromCredit[0].amount).toBe(153)
   })
 })
@@ -58,7 +58,7 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
     useMappingStore.setState(s => ({
       sub: [...s.sub, {
         id: 'cat-row',
-        name: 'תקשורת',
+        name: 'חדר כושר',
         amount: 1400,
         fromCredit: true,
       }],
@@ -70,11 +70,11 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
       name: 'סלקום',
       amount: 300,             // monthly cost-basis added to subs
       section: 'sub',
-      subtractFrom: { category: 'תקשורת', amount: 900 }, // 300 × 3 removed from source
+      subtractFrom: { category: 'חדר כושר', amount: 900 }, // 300 × 3 removed from source
     }])
 
     const sub = useMappingStore.getState().sub
-    const tikshoret = sub.find(r => r.name === 'תקשורת')
+    const tikshoret = sub.find(r => r.name === 'חדר כושר')
     const cellcom   = sub.find(r => r.name === 'סלקום')
     expect(tikshoret, 'תקשורת row must still exist with the reduced amount').toBeDefined()
     expect(tikshoret!.amount).toBe(500)                  // 1400 - 900 = 500
@@ -87,7 +87,7 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
     useMappingStore.setState(s => ({
       sub: [...s.sub, {
         id: 'sub-cat-row',
-        name: 'תקשורת',
+        name: 'חדר כושר',
         amount: 500,
         fromCredit: true,
       }],
@@ -97,12 +97,12 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
       name: 'אינטרנט ביתי',
       amount: 100,
       section: 'fixed',
-      subtractFrom: { category: 'תקשורת', amount: 300 },
+      subtractFrom: { category: 'חדר כושר', amount: 300 },
     }])
 
     const sub   = useMappingStore.getState().sub
     const fixed = useMappingStore.getState().fixed
-    expect(sub.find(r => r.name === 'תקשורת')!.amount).toBe(200)    // 500 - 300
+    expect(sub.find(r => r.name === 'חדר כושר')!.amount).toBe(200)    // 500 - 300
     expect(fixed.find(r => r.name === 'אינטרנט ביתי')!.amount).toBe(100)
   })
 
@@ -110,7 +110,7 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
     useMappingStore.setState(s => ({
       sub: [...s.sub, {
         id: 'cat-row',
-        name: 'תקשורת',
+        name: 'חדר כושר',
         amount: 300,
         fromCredit: true,
       }],
@@ -120,11 +120,11 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
       name: 'סלקום',
       amount: 300,
       section: 'sub',
-      subtractFrom: { category: 'תקשורת', amount: 300 },   // exactly equal — wipes the row
+      subtractFrom: { category: 'חדר כושר', amount: 300 },   // exactly equal — wipes the row
     }])
 
     const sub = useMappingStore.getState().sub
-    expect(sub.find(r => r.name === 'תקשורת'), 'category row gone after full carve-out').toBeUndefined()
+    expect(sub.find(r => r.name === 'חדר כושר'), 'category row gone after full carve-out').toBeUndefined()
     expect(sub.find(r => r.name === 'סלקום')!.amount).toBe(300)
   })
 
@@ -134,7 +134,7 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
       name: 'סלקום',
       amount: 300,
       section: 'sub',
-      subtractFrom: { category: 'תקשורת', amount: 900 },
+      subtractFrom: { category: 'חדר כושר', amount: 900 },
     }])
 
     const sub = useMappingStore.getState().sub

@@ -61,6 +61,8 @@ export const VAR_CATEGORIES = new Set([
   'ביט ללא מעקב', 'מזומן ללא מעקב', 'מתנות', 'עוזרת בית', 'סיגריות',
   'צעצועים', 'כלי בית', 'ריהוט והבית', 'תרומות',
   'ציוד עסקי/משרדי', 'חומרי בניין',
+  'תקשורת',  // moved from SUB — covers iTunes / Google Play / variable digital purchases;
+             // true monthly telcos (Cellcom, Bezeq) can still be carved out via SmartPatterns
 ])
 
 export const ANNUAL_CATEGORIES = new Set([
@@ -78,7 +80,7 @@ export const INSURANCE_CATEGORIES = new Set([
 ])
 
 export const SUB_CATEGORIES = new Set([
-  'תקשורת', 'חדר כושר', 'עמלות בנק ואשראי',
+  'חדר כושר', 'עמלות בנק ואשראי',
   'נטפליקס', 'ספוטיפיי', 'אפל', 'גוגל',
 ])
 
