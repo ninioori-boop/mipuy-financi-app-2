@@ -319,20 +319,22 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         let sub      = mergePlan(m.sub,      mappingSub,   del.sub)
         let ins      = mergePlan(m.ins,      mappingIns,   del.ins)
 
-        // Step 2: fill actual from catSums. Existing rows get their actual filled
-        // (never blocked — the spending is real). A category with spending but no
-        // row is added as actual-only (plan 0, manual — NOT fromMapping, since it
-        // has no mapping counterpart for the sync to manage), unless the user
-        // deleted that name in this month.
-        function fillActual(rows: BudgetRow[], cats: Set<string>, deletedNames: string[]): BudgetRow[] {
+        // Step 2: fill actual from catSums. ACTUAL is real spending from the
+        // imported report and is NEVER suppressed — not even for a category the
+        // user deleted in this month. (Gating this on deletedFromMapping was a
+        // bug: deleting the variable rows before importing made the imported
+        // spending vanish entirely.) A category with spending but no row is added
+        // as actual-only — note this brings back the ROW but with plan 0, so a
+        // deleted budget line shows its real spending without resurrecting its
+        // old mapping plan amount.
+        function fillActual(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
           const names = new Set(rows.map(r => r.name))
-          const deleted = new Set(deletedNames)
           const updated = rows.map(r => {
             const s = catSums[r.name]
             return (s !== undefined && cats.has(r.name)) ? { ...r, actual: Math.round(s) } : r
           })
           Object.entries(catSums).forEach(([cat, sum]) => {
-            if (cats.has(cat) && !names.has(cat) && !deleted.has(cat) && sum > 0)
+            if (cats.has(cat) && !names.has(cat) && sum > 0)
               updated.push({ id: uid(), name: cat, plan: 0, actual: Math.round(sum) })
           })
           return updated
@@ -340,10 +342,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // Annual categories (e.g. חופשה וטיול) have no dedicated monthly section;
         // fold them into variable expenses so the amount isn't silently dropped.
         const variableCats = new Set([...VAR_CATEGORIES, ...ANNUAL_CATEGORIES])
-        fixed    = fillActual(fixed,    FIXED_CATEGORIES,     del.fixed)
-        variable = fillActual(variable, variableCats,         del.variable)
-        sub      = fillActual(sub,      SUB_CATEGORIES,       del.sub)
-        ins      = fillActual(ins,      INSURANCE_CATEGORIES, del.ins)
+        fixed    = fillActual(fixed,    FIXED_CATEGORIES)
+        variable = fillActual(variable, variableCats)
+        sub      = fillActual(sub,      SUB_CATEGORIES)
+        ins      = fillActual(ins,      INSURANCE_CATEGORIES)
 
         // Step 3: merge installments / debts / savings from mapping into the
         // month's own sections. Skip rows already present in the month by name

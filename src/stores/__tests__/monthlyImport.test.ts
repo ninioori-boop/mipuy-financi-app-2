@@ -479,7 +479,7 @@ describe('applyImport — respects monthly deletions (import brings actual, not 
   // so the mapping sync genuinely adds it as a fresh fromMapping row.
   const VAR_CAT = 'מזון לבית'
 
-  it('a mapping row deleted in the month does NOT come back when a report is imported', () => {
+  it('a deleted mapping row does not resurrect its mapping PLAN, but imported actual still shows', () => {
     const store = useMonthlyStore.getState()
     store.initMonth('jan')
 
@@ -491,11 +491,16 @@ describe('applyImport — respects monthly deletions (import brings actual, not 
     store.deleteRow('jan', 'variable', id)
     expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)).toBeUndefined()
 
-    // User imports a credit report: mapping STILL has the row AND the report has
-    // spending in that category. Neither the plan re-seed nor the actual-add may
-    // resurrect the row the user removed.
+    // User imports a credit report with spending in that category, while mapping
+    // STILL has the row. The mapping PLAN (1500) must NOT come back — but the
+    // report's real spending (900) MUST show. (Regression guard: deleting the
+    // variable rows before importing once swallowed the imported actuals.)
     store.applyImport('jan', { [VAR_CAT]: 900 }, [], [{ name: VAR_CAT, amount: 1500 }], [], [], [], [], [], 1)
-    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)).toBeUndefined()
+
+    const row = useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)
+    expect(row, 'imported actual spending must not be swallowed').toBeDefined()
+    expect(row!.actual).toBe(900)   // real spending shows
+    expect(row!.plan).toBe(0)       // mapping plan (1500) NOT resurrected
   })
 
   it('a kept-and-edited row is not duplicated and keeps the user plan; only actual is filled', () => {
