@@ -37,6 +37,7 @@ function populateAllStores() {
         installments: [{ id: 'inst1', name: 'TV',   total: 6000, monthly: 500, current: 1, totalPay: 12 }],
         debts:        [{ id: 'd1',   name: 'loan',  remaining: 5000, monthly: 250, months: 20 }],
         savings:      [{ id: 'sv1',  name: 'emergency', monthly: 500, accumulated: 6000 }],
+        osh:          { d2: 1200, d10: 800, d15: 1500, d20: 600, d30: 2000 },
         deletedFromMapping: {
           fixed: ['old-fixed-row'], variable: [], sub: [], ins: [],
           installments: ['stale-installment'], debts: [], savings: [],

@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useMonthlyStore, OSH_POINTS } from '@/stores/monthlyStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import { BudgetSection } from '@/components/monthly/BudgetSection'
@@ -19,7 +19,7 @@ export default function MonthlyPage() {
   const { months, initMonth, syncFromMapping, setYear, addRow, updateRow, deleteRow,
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
-          addSavingRow, updateSavingRow, deleteSavingRow } = useMonthlyStore()
+          addSavingRow, updateSavingRow, deleteSavingRow, updateOsh } = useMonthlyStore()
 
   // Initialize the month and immediately mirror mapping (all 4 budget sections
   // + installments/debts/savings). The sync uses fromMapping:true so subsequent
@@ -97,6 +97,11 @@ export default function MonthlyPage() {
       alerts.push({ level: 'med', msg: `הכנסה נמוכה מהתכנון ב-${fmt(bIncome - aIncome)}` })
     }
   }
+
+  // ── עו"ש: change from start of month ──
+  // Non-zero balances in day order; delta = last filled − first filled.
+  const oshFilled = OSH_POINTS.map(p => data.osh?.[p.key] ?? 0).filter(v => v !== 0)
+  const oshDelta  = oshFilled.length >= 2 ? oshFilled[oshFilled.length - 1] - oshFilled[0] : null
 
 
   return (
@@ -300,6 +305,34 @@ export default function MonthlyPage() {
           {data.savings.length === 0 && <p className="text-xs text-muted-txt py-2">אין הפרשות חיסכון</p>}
         </div>
         <button onClick={() => addSavingRow(monthId)} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף חיסכון</button>
+      </div>
+
+      {/* עו"ש — יתרה לאורך החודש */}
+      <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-1">
+          <h2 className="font-semibold text-txt">🏧 יתרת עו&quot;ש לאורך החודש</h2>
+          {oshDelta !== null && (
+            <span className={`text-sm font-bold ${oshDelta >= 0 ? 'text-green-400' : 'text-expense'}`}>
+              {oshDelta >= 0 ? '▲' : '▼'} {fmt(Math.abs(oshDelta))}
+              <span className="text-xs font-normal text-muted-txt"> שינוי מתחילת החודש</span>
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+          {OSH_POINTS.map(p => (
+            <div key={p.key} className="bg-surface border border-line rounded-xl p-2.5 space-y-1.5">
+              <div className="text-xs text-muted-txt font-medium text-center">{p.day} לחודש</div>
+              <input
+                type="number"
+                value={data.osh?.[p.key] || ''}
+                onChange={e => updateOsh(monthId, p.key, parseFloat(e.target.value) || 0)}
+                placeholder="₪"
+                style={{ direction: 'ltr' }}
+                className="w-full rounded-lg border border-line bg-surface2 px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-center tabular-nums"
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Summary — bottom */}

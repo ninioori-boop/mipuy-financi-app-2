@@ -40,6 +40,28 @@ export interface SavingRow {
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
 }
 
+// Checking-account (עו"ש) balance snapshots at 5 fixed days in the month.
+export interface OshBalances {
+  d2:  number
+  d10: number
+  d15: number
+  d20: number
+  d30: number
+}
+
+// Ordered list driving the UI table and the start-of-month delta. Keys map 1:1
+// to OshBalances; `day` is the calendar day shown to the user.
+export const OSH_POINTS = [
+  { key: 'd2'  as const, day: 2  },
+  { key: 'd10' as const, day: 10 },
+  { key: 'd15' as const, day: 15 },
+  { key: 'd20' as const, day: 20 },
+  { key: 'd30' as const, day: 30 },
+]
+export type OshDay = keyof OshBalances
+
+const EMPTY_OSH: OshBalances = { d2: 0, d10: 0, d15: 0, d20: 0, d30: 0 }
+
 export interface MonthData {
   year: number
   income: BudgetRow[]
@@ -50,6 +72,7 @@ export interface MonthData {
   installments: InstRow[]
   debts: DebtRow[]
   savings: SavingRow[]
+  osh: OshBalances
   // Names of fromMapping rows the user deleted in this month. syncFromMapping
   // checks this so a deletion isn't undone on the next sync run. Per-section
   // because the same name could legitimately exist in multiple sections.
@@ -80,6 +103,7 @@ function makeDefaultMonth(): MonthData {
     installments: [],
     debts:        [],
     savings:      [],
+    osh:          { ...EMPTY_OSH },
     deletedFromMapping: {
       fixed: [], variable: [], sub: [], ins: [],
       installments: [], debts: [], savings: [],
@@ -92,6 +116,7 @@ interface MonthlyState {
 
   initMonth:  (monthId: string) => void
   setYear:    (monthId: string, year: number) => void
+  updateOsh:  (monthId: string, day: OshDay, value: number) => void
 
   addRow:    (monthId: string, section: SimpleSection, name?: string) => void
   updateRow: (monthId: string, section: SimpleSection, id: string, field: 'name' | 'plan' | 'actual', value: string | number) => void
@@ -168,6 +193,12 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     },
 
     setYear: (monthId, year) => updateMonth(monthId, m => ({ ...m, year })),
+
+    updateOsh: (monthId, day, value) =>
+      updateMonth(monthId, m => ({
+        ...m,
+        osh: { ...(m.osh ?? EMPTY_OSH), [day]: value },
+      })),
 
     addRow: (monthId, section, name = '') =>
       updateMonth(monthId, m => ({

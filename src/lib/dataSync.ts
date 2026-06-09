@@ -173,8 +173,19 @@ export function applySnapshot(raw: unknown): void {
     for (const [id, m] of Object.entries(raw.monthly.months as Record<string, unknown>)) {
       if (!isObject(m)) continue
       const dm = (m.deletedFromMapping ?? {}) as Record<string, unknown>
+      // osh (checking-account snapshots) was added later — months saved before it
+      // existed need the field injected so the monthly tab can rely on it.
+      const osh = (m.osh ?? {}) as Record<string, unknown>
+      const num = (v: unknown) => (typeof v === 'number' ? v : 0)
       migrated[id] = {
         ...m,
+        osh: {
+          d2:  num(osh.d2),
+          d10: num(osh.d10),
+          d15: num(osh.d15),
+          d20: num(osh.d20),
+          d30: num(osh.d30),
+        },
         deletedFromMapping: {
           fixed:        Array.isArray(dm.fixed)        ? dm.fixed        : [],
           variable:     Array.isArray(dm.variable)     ? dm.variable     : [],
