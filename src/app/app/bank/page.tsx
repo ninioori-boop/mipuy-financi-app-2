@@ -7,6 +7,7 @@ import { useBankStore } from '@/stores/bankStore'
 import { parseExcelFile } from '@/lib/parseExcel'
 import { normalizeForLookup } from '@/lib/categorize'
 import { FileDropzone } from '@/components/credit/FileDropzone'
+import { detectCols, classifyRow, type Dir } from '@/lib/bankParse'
 
 type BankSection = 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
 
@@ -23,6 +24,7 @@ interface BankTxn {
   amount:  number
   date:    string | null
   origIdx: number
+  dir:     Dir
 }
 
 interface BankGroup {
@@ -48,19 +50,6 @@ function guessDesc(row: unknown[]): string {
   return ''
 }
 
-// nums[0]=balance, nums[1]=debit/credit amount — same heuristic as before
-function guessAmount(row: unknown[]): number {
-  const nums: number[] = []
-  for (const c of [...row].reverse()) {
-    if (c instanceof Date) continue
-    const raw = typeof c === 'number' ? c : parseFloat(String(c).replace(/,/g, ''))
-    if (!isNaN(raw) && Math.abs(raw) > 0 && Math.abs(raw) < 1_000_000) {
-      nums.push(Math.round(Math.abs(raw)))
-    }
-  }
-  return nums[1] ?? nums[0] ?? 0
-}
-
 function guessDate(row: unknown[]): string | null {
   for (const c of row) {
     if (c instanceof Date) return (c as Date).toLocaleDateString('he-IL')
@@ -74,6 +63,9 @@ function isTransaction(r: unknown[]): boolean {
   const filled    = r.filter(c => c !== null && c !== undefined && c !== '').length
   return hasDate && hasNumber && filled >= 3
 }
+
+const txNoun = (n: number, dir: Dir) =>
+  dir === 'in' ? (n === 1 ? 'זיכוי' : 'זיכויים') : (n === 1 ? 'חיוב' : 'חיובים')
 
 // Group transactions by normalized merchant name. Already-sent rows are
 // skipped so a group shrinks as the user sends parts of it.
@@ -104,6 +96,9 @@ export default function BankPage() {
   const [activeKey, setActiveKey]       = useState<string | null>(null)
   const [picker, setPicker]             = useState<PickerState>({ desc: '', amount: 0 })
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
+  // Per-transaction manual direction override (keyed by original row index), so
+  // the user can flip a whole group if auto-detection got the direction wrong.
+  const [dirOverride, setDirOverride]   = useState<Map<number, Dir>>(new Map())
 
   const { importFromBank } = useMappingStore()
 
@@ -116,6 +111,7 @@ export default function BankPage() {
       setData(rows, file.name)
       setActiveKey(null)
       setExpandedKeys(new Set())
+      setDirOverride(new Map())
     } catch (e) {
       toast.error('שגיאה בפענוח הקובץ: ' + (e as Error).message)
     } finally {
@@ -130,19 +126,29 @@ export default function BankPage() {
       ? i : best
   , 0)
 
-  // Extract all transactions then group them
+  const cols = detectCols(rawRows[headerIdx] ?? [])
+
+  // Extract all transactions (with direction), then group each direction apart.
   const allTxns: BankTxn[] = rawRows
     .map((r, i) => ({ r, origIdx: i }))
     .filter(({ origIdx, r }) => origIdx !== headerIdx && isTransaction(r))
-    .map(({ r, origIdx }) => ({
-      desc:    guessDesc(r),
-      amount:  guessAmount(r),
-      date:    guessDate(r),
-      origIdx,
-    }))
+    .map(({ r, origIdx }) => {
+      const { amount, dir } = classifyRow(r, cols)
+      return {
+        desc:    guessDesc(r),
+        amount,
+        date:    guessDate(r),
+        origIdx,
+        dir:     dirOverride.get(origIdx) ?? dir,
+      }
+    })
+
+  const outTxns = allTxns.filter(t => t.dir === 'out')
+  const inTxns  = allTxns.filter(t => t.dir === 'in')
 
   const totalTxCount = allTxns.length
-  const groups       = groupByMerchant(allTxns, sentRows)
+  const outGroups    = groupByMerchant(outTxns, sentRows)
+  const inGroups     = groupByMerchant(inTxns, sentRows)
   const sentCount    = sentRows.size
 
   // Metadata strings (account name, period, balance — for the info banner)
@@ -170,6 +176,16 @@ export default function BankPage() {
     })
   }
 
+  function flipGroup(g: BankGroup, currentDir: Dir) {
+    const target: Dir = currentDir === 'in' ? 'out' : 'in'
+    setDirOverride(prev => {
+      const next = new Map(prev)
+      for (const t of g.txns) next.set(t.origIdx, target)
+      return next
+    })
+    if (activeKey === g.key) setActiveKey(null)
+  }
+
   function sendGroup(g: BankGroup, section: BankSection) {
     const { desc, amount } = picker
     if (!desc.trim() && amount === 0) { toast.error('הזן תיאור או סכום'); return }
@@ -185,7 +201,7 @@ export default function BankPage() {
     const secLabel = SECTIONS.find(s => s.id === section)?.label ?? section
     const divNote  = divisor > 1 ? ` (${amount} ÷ ${divisor} = ${monthlyAmount})` : ''
     toast.success(
-      `✅ "${desc.trim() || g.displayName}" (${g.count} ${g.count === 1 ? 'חיוב' : 'חיובים'}) נשלח ל${secLabel}${divNote}`
+      `✅ "${desc.trim() || g.displayName}" (${g.count} ${txNoun(g.count, 'out')}) נשלח ל${secLabel}${divNote}`
     )
   }
 
@@ -200,7 +216,7 @@ export default function BankPage() {
       <div className="rounded-xl border border-line bg-surface2 p-6">
         <h1 className="text-2xl font-bold text-gold mb-1">🏦 דוח עו&quot;ש</h1>
         <p className="text-muted-txt text-sm">
-          העלה קובץ בנק · המערכת מקבצת אוטומטית לפי שם העסק · בחר מה להעביר ולאיזה סעיף
+          העלה קובץ בנק · המערכת מפרידה בין חיובים לזיכויים שנכנסו ומקבצת לפי שם · בחר מה להעביר ולאיזה סעיף
         </p>
       </div>
 
@@ -237,12 +253,14 @@ export default function BankPage() {
             <span>·</span>
             <span>{totalTxCount} עסקאות</span>
             <span>·</span>
-            <span>{groups.length} קבוצות פתוחות</span>
+            <span className="text-expense">💸 {outTxns.length} חיובים</span>
+            <span>·</span>
+            <span className="text-green-400">💰 {inTxns.length} נכנסו</span>
             {sentCount > 0 && (
               <><span>·</span><span className="text-green-400">✓ {sentCount} נשלחו</span></>
             )}
             <button
-              onClick={() => { reset(); setActiveKey(null); setExpandedKeys(new Set()) }}
+              onClick={() => { reset(); setActiveKey(null); setExpandedKeys(new Set()); setDirOverride(new Map()) }}
               className="mr-auto text-xs px-2.5 py-1 rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
             >
               🗑 נקה והתחל מחדש
@@ -267,43 +285,52 @@ export default function BankPage() {
         </div>
       )}
 
-      {/* Groups */}
-      {groups.length > 0 && (
+      {/* ── חיובים (יציאות) ── */}
+      {outGroups.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="font-semibold text-txt">📋 קבוצות עסקאות</h2>
-            <span className="text-xs text-muted-txt">מסודרות לפי סכום יורד · לחץ קבוצה לבחירת סעיף</span>
+            <h2 className="font-semibold text-txt">💸 חיובים (יציאות מהחשבון)</h2>
+            <span className="text-xs text-muted-txt">מסודרים לפי סכום יורד · לחץ קבוצה לבחירת סעיף</span>
           </div>
 
-          {groups.map(g => {
+          {outGroups.map(g => {
             const isOpen     = activeKey === g.key
             const isExpanded = expandedKeys.has(g.key)
             return (
               <div key={g.key}
                 className={`rounded-xl border ${isOpen ? 'border-gold/60 bg-gold/5' : 'border-line bg-surface2'} transition-colors`}>
 
-                {/* Summary header (clickable to open picker) */}
-                <button
-                  onClick={() => openGroup(g)}
-                  className="w-full p-4 flex items-center gap-3 hover:bg-gold/5 transition-colors text-right"
-                  dir="rtl"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-txt truncate">{g.displayName}</div>
-                    <div className="text-xs text-muted-txt mt-0.5">
-                      {g.count} {g.count === 1 ? 'חיוב' : 'חיובים'} · ממוצע {Math.round(g.totalAmount / g.count).toLocaleString('he-IL')} ₪
+                {/* Summary header */}
+                <div className="flex items-stretch">
+                  <button
+                    onClick={() => openGroup(g)}
+                    className="flex-1 p-4 flex items-center gap-3 hover:bg-gold/5 transition-colors text-right min-w-0"
+                    dir="rtl"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-txt truncate">{g.displayName}</div>
+                      <div className="text-xs text-muted-txt mt-0.5">
+                        {g.count} {txNoun(g.count, 'out')} · ממוצע {Math.round(g.totalAmount / g.count).toLocaleString('he-IL')} ₪
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-left shrink-0">
-                    <div className="text-lg font-bold text-gold tabular-nums">
-                      {g.totalAmount.toLocaleString('he-IL')} ₪
+                    <div className="text-left shrink-0">
+                      <div className="text-lg font-bold text-gold tabular-nums">
+                        {g.totalAmount.toLocaleString('he-IL')} ₪
+                      </div>
+                      <div className="text-[10px] text-muted-txt">סה&quot;כ בקבוצה</div>
                     </div>
-                    <div className="text-[10px] text-muted-txt">סה&quot;כ בקבוצה</div>
-                  </div>
-                  <span className="text-gold text-xl shrink-0 w-5 text-center">{isOpen ? '−' : '+'}</span>
-                </button>
+                    <span className="text-gold text-xl shrink-0 w-5 text-center">{isOpen ? '−' : '+'}</span>
+                  </button>
+                  <button
+                    onClick={() => flipGroup(g, 'out')}
+                    title="זה בעצם זיכוי / כסף שנכנס — העבר לקבוצת הנכנסים"
+                    className="px-3 border-s border-line text-muted-txt hover:text-green-400 hover:bg-green-400/5 transition-colors text-sm shrink-0"
+                  >
+                    ⇄
+                  </button>
+                </div>
 
-                {/* Picker — opens inside the card when group is active */}
+                {/* Picker */}
                 {isOpen && (
                   <div className="border-t border-gold/30 p-4 space-y-3 bg-surface" dir="rtl">
                     <div className="flex items-center gap-3 flex-wrap">
@@ -367,10 +394,68 @@ export default function BankPage() {
         </div>
       )}
 
+      {/* ── זיכויים / העברות שנכנסו ── */}
+      {inGroups.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="font-semibold text-green-400">💰 זיכויים / העברות שנכנסו</h2>
+            <span className="text-xs text-muted-txt">כסף שנכנס לחשבון — מופרד מההוצאות. אם משהו סווג בטעות, לחץ ⇄</span>
+          </div>
+
+          {inGroups.map(g => {
+            const isExpanded = expandedKeys.has(g.key)
+            return (
+              <div key={g.key} className="rounded-xl border border-green-400/30 bg-green-400/5">
+                <div className="flex items-stretch">
+                  <button
+                    onClick={() => toggleExpanded(g.key)}
+                    className="flex-1 p-4 flex items-center gap-3 hover:bg-green-400/5 transition-colors text-right min-w-0"
+                    dir="rtl"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-txt truncate">{g.displayName}</div>
+                      <div className="text-xs text-muted-txt mt-0.5">
+                        {g.count} {txNoun(g.count, 'in')} · ממוצע {Math.round(g.totalAmount / g.count).toLocaleString('he-IL')} ₪
+                      </div>
+                    </div>
+                    <div className="text-left shrink-0">
+                      <div className="text-lg font-bold text-green-400 tabular-nums">
+                        +{g.totalAmount.toLocaleString('he-IL')} ₪
+                      </div>
+                      <div className="text-[10px] text-muted-txt">נכנס לחשבון</div>
+                    </div>
+                    <span className="text-green-400 text-xl shrink-0 w-5 text-center">{isExpanded ? '−' : '+'}</span>
+                  </button>
+                  <button
+                    onClick={() => flipGroup(g, 'in')}
+                    title="זה בעצם חיוב / כסף שיצא — העבר לקבוצת החיובים"
+                    className="px-3 border-s border-green-400/20 text-muted-txt hover:text-expense hover:bg-expense/5 transition-colors text-sm shrink-0"
+                  >
+                    ⇄
+                  </button>
+                </div>
+
+                {isExpanded && (
+                  <div className="border-t border-green-400/20 p-4 space-y-1.5 max-h-64 overflow-y-auto" dir="rtl">
+                    {g.txns.map(t => (
+                      <div key={t.origIdx} className="flex items-center justify-between gap-3 text-xs px-2 py-1 rounded bg-surface2/50">
+                        <span className="text-muted-txt truncate flex-1">{t.desc}</span>
+                        {t.date && <span className="text-[10px] text-muted-txt shrink-0">{t.date}</span>}
+                        <span className="tabular-nums text-green-400 shrink-0">+{t.amount.toLocaleString('he-IL')} ₪</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* All-sent confirmation */}
-      {sentCount > 0 && groups.length === 0 && rawRows.length > 0 && (
+      {sentCount > 0 && outGroups.length === 0 && rawRows.length > 0 && (
         <div className="rounded-xl border border-green-400/30 bg-green-400/5 p-4 text-sm text-green-400 text-center">
-          ✓ כל {sentCount} העסקאות נשלחו למיפוי. סיימת!
+          ✓ כל {sentCount} החיובים נשלחו למיפוי. סיימת!
         </div>
       )}
 
