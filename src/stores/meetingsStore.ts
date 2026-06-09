@@ -29,6 +29,7 @@ export interface Meeting {
   type: MeetingType
   date: string           // YYYY-MM-DD
   title: string
+  prepNotes: string      // נקודות לקראת הפגישה — מה שעלה ליועץ מהמיפוי (פגישת מיפוי בלבד)
   summary: string        // מה היה בפגישה
   actionItems: string    // מסקנות מהפגישה
   nextSteps: string      // משימות לפגישה הבאה
@@ -55,6 +56,7 @@ export const useMeetingsStore = create<MeetingsState>((set) => ({
       type,
       date: today(),
       title: `סיכום ${MEETING_LABELS[type]}`,
+      prepNotes: '',
       summary: MEETING_TEMPLATES[type],
       actionItems: '',
       nextSteps: '',

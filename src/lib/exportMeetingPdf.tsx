@@ -96,6 +96,15 @@ function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
           <Text style={s.title}>{meeting.title || `סיכום ${MEETING_LABELS[meeting.type]}`}</Text>
         </View>
 
+        {meeting.type === 'mapping' && (meeting.prepNotes ?? '').trim().length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>נקודות לקראת הפגישה</Text>
+            <View style={s.blockBox}>
+              <Text style={s.body}>{meeting.prepNotes}</Text>
+            </View>
+          </>
+        )}
+
         <Text style={s.sectionTitle}>מה היה בפגישה</Text>
         <View style={s.blockBox}>
           <Text style={s.body}>{meeting.summary || '—'}</Text>
