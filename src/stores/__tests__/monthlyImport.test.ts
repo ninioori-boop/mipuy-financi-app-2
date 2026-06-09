@@ -471,3 +471,60 @@ describe('syncFromMapping — user deletions in monthly persist across syncs', (
     expect(useMonthlyStore.getState().months['mar'].deletedFromMapping.fixed).not.toContain('manual-fixed-row')
   })
 })
+
+describe('applyImport — respects monthly deletions (import brings actual, not resurrected plan)', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  // 'מזון לבית' is a real VAR category that is NOT a default monthly row,
+  // so the mapping sync genuinely adds it as a fresh fromMapping row.
+  const VAR_CAT = 'מזון לבית'
+
+  it('a mapping row deleted in the month does NOT come back when a report is imported', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan')
+
+    // Mapping seeds the row into the month (fromMapping:true), like the auto-sync.
+    store.syncFromMapping([], [{ name: VAR_CAT, amount: 1500 }], [], [], [], [], [], 1, 'jan')
+    const id = useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)!.id
+
+    // User deletes it in the monthly tab.
+    store.deleteRow('jan', 'variable', id)
+    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)).toBeUndefined()
+
+    // User imports a credit report: mapping STILL has the row AND the report has
+    // spending in that category. Neither the plan re-seed nor the actual-add may
+    // resurrect the row the user removed.
+    store.applyImport('jan', { [VAR_CAT]: 900 }, [], [{ name: VAR_CAT, amount: 1500 }], [], [], [], [], [], 1)
+    expect(useMonthlyStore.getState().months['jan'].variable.find(r => r.name === VAR_CAT)).toBeUndefined()
+  })
+
+  it('a kept-and-edited row is not duplicated and keeps the user plan; only actual is filled', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('feb')
+
+    store.syncFromMapping([], [{ name: VAR_CAT, amount: 1500 }], [], [], [], [], [], 1, 'feb')
+    const row = useMonthlyStore.getState().months['feb'].variable.find(r => r.name === VAR_CAT)!
+    // User edits the plan in monthly (this clears fromMapping → row becomes manual).
+    store.updateRow('feb', 'variable', row.id, 'plan', 2000)
+
+    store.applyImport('feb', { [VAR_CAT]: 900 }, [], [{ name: VAR_CAT, amount: 1500 }], [], [], [], [], [], 1)
+
+    const after = useMonthlyStore.getState().months['feb'].variable.filter(r => r.name === VAR_CAT)
+    expect(after).toHaveLength(1)      // not duplicated by the import
+    expect(after[0].plan).toBe(2000)   // user's edited plan preserved (not reset to mapping's 1500)
+    expect(after[0].actual).toBe(900)  // actual from the report filled in
+  })
+
+  it('a deleted installment is not resurrected by import', () => {
+    const store = useMonthlyStore.getState()
+    store.initMonth('mar')
+    const inst = [{ name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }]
+
+    store.syncFromMapping([], [], [], [], inst, [], [], 1, 'mar')
+    const id = useMonthlyStore.getState().months['mar'].installments.find(r => r.name === 'TV')!.id
+    store.deleteInstRow('mar', id)
+
+    store.applyImport('mar', {}, [], [], [], [], inst, [], [], 1)
+    expect(useMonthlyStore.getState().months['mar'].installments.find(r => r.name === 'TV')).toBeUndefined()
+  })
+})

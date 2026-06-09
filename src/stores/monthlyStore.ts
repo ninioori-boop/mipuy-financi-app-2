@@ -299,29 +299,40 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
 
     applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths) => {
       updateMonth(monthId, m => {
-        // Step 1: merge mapping plan rows (skip rows already present by name)
-        function mergePlan(rows: BudgetRow[], src: { name: string; amount: number }[]): BudgetRow[] {
+        const del = m.deletedFromMapping
+        // Step 1: merge mapping plan rows. Skip rows already present by name OR
+        // ones the user deleted in this month (deletedFromMapping) — otherwise an
+        // import would resurrect rows the user intentionally removed. Rows that
+        // do come in are tagged fromMapping:true so they integrate with the
+        // mapping→monthly auto-sync (and stay re-deletable).
+        function mergePlan(rows: BudgetRow[], src: { name: string; amount: number }[], deletedNames: string[]): BudgetRow[] {
           const names = new Set(rows.map(r => r.name))
+          const deleted = new Set(deletedNames)
           const added = src
-            .filter(s => !names.has(s.name) && s.amount > 0)
-            .map(s => ({ id: uid(), name: s.name, plan: s.amount, actual: 0 }))
+            .filter(s => !names.has(s.name) && !deleted.has(s.name) && s.amount > 0)
+            .map(s => ({ id: uid(), name: s.name, plan: s.amount, actual: 0, fromMapping: true }))
           return [...rows, ...added]
         }
         const varMonthly = mappingVariable.map(s => ({ name: s.name, amount: Math.round(s.amount / Math.max(1, varMonths)) }))
-        let fixed    = mergePlan(m.fixed,    mappingFixed)
-        let variable = mergePlan(m.variable, varMonthly)
-        let sub      = mergePlan(m.sub,      mappingSub)
-        let ins      = mergePlan(m.ins,      mappingIns)
+        let fixed    = mergePlan(m.fixed,    mappingFixed, del.fixed)
+        let variable = mergePlan(m.variable, varMonthly,   del.variable)
+        let sub      = mergePlan(m.sub,      mappingSub,   del.sub)
+        let ins      = mergePlan(m.ins,      mappingIns,   del.ins)
 
-        // Step 2: fill actual from catSums
-        function fillActual(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
+        // Step 2: fill actual from catSums. Existing rows get their actual filled
+        // (never blocked — the spending is real). A category with spending but no
+        // row is added as actual-only (plan 0, manual — NOT fromMapping, since it
+        // has no mapping counterpart for the sync to manage), unless the user
+        // deleted that name in this month.
+        function fillActual(rows: BudgetRow[], cats: Set<string>, deletedNames: string[]): BudgetRow[] {
           const names = new Set(rows.map(r => r.name))
+          const deleted = new Set(deletedNames)
           const updated = rows.map(r => {
             const s = catSums[r.name]
             return (s !== undefined && cats.has(r.name)) ? { ...r, actual: Math.round(s) } : r
           })
           Object.entries(catSums).forEach(([cat, sum]) => {
-            if (cats.has(cat) && !names.has(cat) && sum > 0)
+            if (cats.has(cat) && !names.has(cat) && !deleted.has(cat) && sum > 0)
               updated.push({ id: uid(), name: cat, plan: 0, actual: Math.round(sum) })
           })
           return updated
@@ -329,21 +340,25 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // Annual categories (e.g. חופשה וטיול) have no dedicated monthly section;
         // fold them into variable expenses so the amount isn't silently dropped.
         const variableCats = new Set([...VAR_CATEGORIES, ...ANNUAL_CATEGORIES])
-        fixed    = fillActual(fixed,    FIXED_CATEGORIES)
-        variable = fillActual(variable, variableCats)
-        sub      = fillActual(sub,      SUB_CATEGORIES)
-        ins      = fillActual(ins,      INSURANCE_CATEGORIES)
+        fixed    = fillActual(fixed,    FIXED_CATEGORIES,     del.fixed)
+        variable = fillActual(variable, variableCats,         del.variable)
+        sub      = fillActual(sub,      SUB_CATEGORIES,       del.sub)
+        ins      = fillActual(ins,      INSURANCE_CATEGORIES, del.ins)
 
         // Step 3: merge installments / debts / savings from mapping into the
         // month's own sections. Skip rows already present in the month by name
         // (so re-running the import doesn't duplicate). Annual-plan rows from
         // the mapping intentionally stay only in the mapping/annual view — they
         // are not pushed per-month.
+        // Same discipline as the budget sections: skip names the user deleted in
+        // this month, and tag carried rows fromMapping:true so the auto-sync owns
+        // them and re-deletion sticks.
         const namesIn = <T extends { name: string }>(rows: T[]) => new Set(rows.map(r => r.name))
 
         const instNames = namesIn(m.installments)
+        const instDeleted = new Set(del.installments)
         const newInstallments: InstRow[] = mappingInstallments
-          .filter(i => !instNames.has(i.name) && (i.monthlyPayment > 0 || i.totalAmount > 0))
+          .filter(i => !instNames.has(i.name) && !instDeleted.has(i.name) && (i.monthlyPayment > 0 || i.totalAmount > 0))
           .map(i => ({
             id: uid(),
             name: i.name,
@@ -351,29 +366,34 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
             monthly:  Math.round(i.monthlyPayment),
             current:  i.paidCount,
             totalPay: i.totalCount,
+            fromMapping: true,
           }))
         const installments = [...m.installments, ...newInstallments]
 
         const debtNames = namesIn(m.debts)
+        const debtDeleted = new Set(del.debts)
         const newDebts: DebtRow[] = mappingDebts
-          .filter(d => !debtNames.has(d.name) && (d.monthlyPayment > 0 || d.remainingBalance > 0))
+          .filter(d => !debtNames.has(d.name) && !debtDeleted.has(d.name) && (d.monthlyPayment > 0 || d.remainingBalance > 0))
           .map(d => ({
             id: uid(),
             name: d.name,
             remaining: Math.round(d.remainingBalance),
             monthly:   Math.round(d.monthlyPayment),
             months:    d.remainingMonths,
+            fromMapping: true,
           }))
         const debts = [...m.debts, ...newDebts]
 
         const savNames = namesIn(m.savings)
+        const savDeleted = new Set(del.savings)
         const newSavings: SavingRow[] = mappingSavings
-          .filter(s => !savNames.has(s.name) && (s.monthlyContribution > 0 || s.accumulated > 0))
+          .filter(s => !savNames.has(s.name) && !savDeleted.has(s.name) && (s.monthlyContribution > 0 || s.accumulated > 0))
           .map(s => ({
             id: uid(),
             name: s.name,
             monthly:     Math.round(s.monthlyContribution),
             accumulated: Math.round(s.accumulated),
+            fromMapping: true,
           }))
         const savings = [...m.savings, ...newSavings]
 
