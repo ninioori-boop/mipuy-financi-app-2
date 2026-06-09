@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim()!,
@@ -12,6 +13,23 @@ const firebaseConfig = {
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+
+// App Check — attests that requests come from the real app, so Firestore and the
+// API routes can reject scripted/forged traffic even when it carries a valid auth
+// token. No-op until NEXT_PUBLIC_RECAPTCHA_SITE_KEY is set (task 0.4 registers the
+// key) and only runs in the browser. Enforcement is enabled separately in the
+// Firebase console (tasks 1.3 / 1.9), so adding this now cannot break anything live.
+if (typeof window !== "undefined") {
+  const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY?.trim();
+  const w = window as unknown as { __appCheckStarted?: boolean };
+  if (siteKey && !w.__appCheckStarted) {
+    w.__appCheckStarted = true;
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(siteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  }
+}
 
 export const auth = getAuth(app);
 export const db   = getFirestore(app);

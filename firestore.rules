@@ -2,21 +2,23 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── User data ─────────────────────────────────────────────────────
-    // Every authenticated user reads and writes only their own document.
+    // ── User data — owner-only AND invite-only ────────────────────────
+    // The owner reads/writes only their own document, AND their email must exist
+    // in the `allowlist` collection. All 24 current users were seeded into the
+    // allowlist (scripts/seed-allowlist.ts), so none are affected. A new, non-
+    // invited email can create an auth account but cannot read/write any data —
+    // so the app is unusable for them until the advisor adds their email.
+    // (exists() runs with rule privileges, so `allowlist` stays private below.)
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
     }
 
     // ── Shared category-learning DB ───────────────────────────────────
-    // Cross-account merchant→category memory written by saveLearnedEntry.
-    // Locked down so that:
-    //   - reads remain open to any authenticated user (everyone benefits
-    //     from the shared pool),
-    //   - writes can only add or update keys inside `db`, never remove
-    //     existing keys and never replace the doc with an arbitrary shape.
-    // This blocks both a full-wipe attack (setDoc(.., {})) and a partial
-    // key-deletion attack (updateDoc with FieldValue.delete()).
+    // Cross-account merchant→category memory. Reads open to any signed-in user;
+    // writes can only add/update keys inside `db`, never remove keys or replace
+    // the doc with an arbitrary shape (blocks full-wipe and key-deletion attacks).
     match /shared/learnedDB {
       allow read: if request.auth != null;
       allow create: if request.auth != null
@@ -29,9 +31,8 @@ service cloud.firestore {
     }
 
     // ── Everything else: blocked ──────────────────────────────────────
-    // The advisor / invites / maps feature is not wired into the app's
-    // UI, so its collections do not need rules. The catch-all denies
-    // access to any other path.
+    // Includes `allowlist` (advisor-managed via console/admin only) and the
+    // unused advisor/invites/maps collections.
     match /{document=**} {
       allow read, write: if false;
     }

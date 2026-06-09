@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# firebase admin / client export script
+service-account-key.json
+clients.md
+clients.html
+.export-clients.log
