@@ -15,6 +15,7 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
+import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 
@@ -105,6 +106,13 @@ function populateAllStores() {
       actionItems: 'review docs', nextSteps: 'budget plan',
       createdAt: 1717200000000,
     }],
+  })
+
+  useExpenseLogStore.setState({
+    entries: [
+      { id: 'e1', date: '2026-06-03', amount: 45,  category: 'מזון לבית',          note: 'מכולת',  createdAt: 1717400000000 },
+      { id: 'e2', date: '2026-06-05', amount: 120, category: 'אוכל בחוץ ובילויים', note: '',        createdAt: 1717500000000 },
+    ],
   })
 
   useBusinessStore.setState({

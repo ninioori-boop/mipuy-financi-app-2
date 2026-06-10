@@ -21,6 +21,7 @@ import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
 import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
+import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -68,6 +69,9 @@ export interface Snapshot {
   meetings: {
     meetings: ReturnType<typeof useMeetingsStore.getState>['meetings']
   }
+  expenseLog: {
+    entries: ReturnType<typeof useExpenseLogStore.getState>['entries']
+  }
   business: {
     businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
     revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
@@ -109,6 +113,7 @@ export function collectSnapshot(): Snapshot {
   const g = useGoalsStore.getState()
   const c = useCreditStore.getState()
   const mt = useMeetingsStore.getState()
+  const el = useExpenseLogStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
 
@@ -137,6 +142,7 @@ export function collectSnapshot(): Snapshot {
       uploadedFileNames: c.uploadedFileNames,
     },
     meetings: { meetings: mt.meetings },
+    expenseLog: { entries: el.entries },
     business: {
       businessType: b.businessType,
       revenue: b.revenue, cogs: b.cogs, opex: b.opex,
@@ -298,6 +304,11 @@ export function applySnapshot(raw: unknown): void {
     })
   }
 
+  // expenseLog (standalone real-time expense journal)
+  if (isObject(raw.expenseLog) && Array.isArray(raw.expenseLog.entries)) {
+    useExpenseLogStore.setState({ entries: raw.expenseLog.entries as ExpenseEntry[] })
+  }
+
   // business
   if (isObject(raw.business)) {
     const b = raw.business as Partial<Snapshot['business']>
@@ -364,6 +375,7 @@ export function resetAllStores(): void {
     isLoading: false, loadingMessage: '',
   })
   useMeetingsStore.setState({ meetings: [] })
+  useExpenseLogStore.setState({ entries: [] })
   useBusinessStore.setState({
     businessType: DEFAULT_BUSINESS.businessType,
     revenue: [], cogs: [], opex: [],
