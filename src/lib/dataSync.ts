@@ -192,6 +192,8 @@ export function applySnapshot(raw: unknown): void {
           d20: num(osh.d20),
           d30: num(osh.d30),
         },
+        // expense-log snapshot transferred into the month (added later)
+        logged: Array.isArray(m.logged) ? m.logged : [],
         deletedFromMapping: {
           fixed:        Array.isArray(dm.fixed)        ? dm.fixed        : [],
           variable:     Array.isArray(dm.variable)     ? dm.variable     : [],

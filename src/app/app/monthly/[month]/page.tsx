@@ -335,6 +335,29 @@ export default function MonthlyPage() {
         </div>
       </div>
 
+      {/* תיעוד הוצאות (מהיומן) — סעיף עצמאי, מנותק לגמרי מהייבוא ומהתכנון‑מול‑ביצוע */}
+      {(data.logged?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-1">
+            <h2 className="font-semibold text-txt">🧾 תיעוד הוצאות (מהיומן)</h2>
+            <span className="text-sm font-bold text-expense tabular-nums">
+              {fmt(data.logged.reduce((s, r) => s + r.amount, 0))}
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-txt -mt-1">
+            סיכום מהטאב &quot;תיעוד הוצאות&quot;. מוצג בנפרד ואינו משפיע על התכנון/ביצוע או על נתוני הייבוא.
+          </p>
+          <div className="space-y-1">
+            {[...data.logged].sort((a, b) => b.amount - a.amount).map((r, i) => (
+              <div key={`${r.name}-${i}`} className="flex items-center justify-between gap-3 text-sm px-2 py-1.5 rounded bg-surface/50">
+                <span className="text-txt truncate">{r.name}</span>
+                <span className="tabular-nums text-txt shrink-0">{fmt(r.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Summary — bottom */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
         <h2 className="font-semibold text-txt">📊 סיכום {monthName}</h2>

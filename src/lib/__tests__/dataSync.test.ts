@@ -39,6 +39,7 @@ function populateAllStores() {
         debts:        [{ id: 'd1',   name: 'loan',  remaining: 5000, monthly: 250, months: 20 }],
         savings:      [{ id: 'sv1',  name: 'emergency', monthly: 500, accumulated: 6000 }],
         osh:          { d2: 1200, d10: 800, d15: 1500, d20: 600, d30: 2000 },
+        logged:       [{ name: 'מזון לבית', amount: 320 }, { name: 'דלק וחניה', amount: 210 }],
         deletedFromMapping: {
           fixed: ['old-fixed-row'], variable: [], sub: [], ins: [],
           installments: ['stale-installment'], debts: [], savings: [],

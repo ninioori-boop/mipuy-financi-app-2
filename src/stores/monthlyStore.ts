@@ -73,6 +73,10 @@ export interface MonthData {
   debts: DebtRow[]
   savings: SavingRow[]
   osh: OshBalances
+  // Snapshot of the standalone expense-log totals transferred into this month.
+  // Display-only and ISOLATED: applyImport / syncFromMapping never read or write
+  // it, so the expense-log and the import flow can never affect each other.
+  logged: { name: string; amount: number }[]
   // Names of fromMapping rows the user deleted in this month. syncFromMapping
   // checks this so a deletion isn't undone on the next sync run. Per-section
   // because the same name could legitimately exist in multiple sections.
@@ -104,6 +108,7 @@ function makeDefaultMonth(): MonthData {
     debts:        [],
     savings:      [],
     osh:          { ...EMPTY_OSH },
+    logged:       [],
     deletedFromMapping: {
       fixed: [], variable: [], sub: [], ins: [],
       installments: [], debts: [], savings: [],
@@ -117,6 +122,8 @@ interface MonthlyState {
   initMonth:  (monthId: string) => void
   setYear:    (monthId: string, year: number) => void
   updateOsh:  (monthId: string, day: OshDay, value: number) => void
+  // Replace this month's expense-log snapshot (from the תיעוד הוצאות tab).
+  applyExpenseLog: (monthId: string, items: { name: string; amount: number }[]) => void
 
   addRow:    (monthId: string, section: SimpleSection, name?: string) => void
   updateRow: (monthId: string, section: SimpleSection, id: string, field: 'name' | 'plan' | 'actual', value: string | number) => void
@@ -198,6 +205,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       updateMonth(monthId, m => ({
         ...m,
         osh: { ...(m.osh ?? EMPTY_OSH), [day]: value },
+      })),
+
+    // Standalone path: writes ONLY to `logged`. Import/sync don't touch this
+    // field, so the two transfer flows stay fully independent.
+    applyExpenseLog: (monthId, items) =>
+      updateMonth(monthId, m => ({
+        ...m,
+        logged: items.map(i => ({ name: i.name, amount: Math.round(i.amount) })),
       })),
 
     addRow: (monthId, section, name = '') =>

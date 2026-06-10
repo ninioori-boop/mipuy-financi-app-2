@@ -1,9 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
-import { ALL_CATEGORIES, CATEGORY_ICONS } from '@/lib/constants'
+import { useMonthlyStore } from '@/stores/monthlyStore'
+import { ALL_CATEGORIES, CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
 
 function today() {
   const d = new Date()
@@ -35,7 +37,9 @@ const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
 export default function ExpensesPage() {
+  const router = useRouter()
   const { entries, add, remove } = useExpenseLogStore()
+  const { initMonth, applyExpenseLog } = useMonthlyStore()
 
   const [selMonth, setSelMonth] = useState(currentMonth())
   const [amount, setAmount]     = useState('')
@@ -71,6 +75,19 @@ export default function ExpensesPage() {
     for (const e of monthEntries) map.set(e.category, (map.get(e.category) ?? 0) + e.amount)
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [monthEntries])
+
+  // Map the viewed YYYY-MM to a monthly-tab month (jan..dec, year-agnostic).
+  const targetMonth = MONTHS_LIST[parseInt(selMonth.slice(5, 7), 10) - 1]
+
+  function transferToMonthly() {
+    if (monthEntries.length === 0) { toast.error('אין רישומים להעברה בחודש זה'); return }
+    if (!targetMonth) { toast.error('חודש לא תקין'); return }
+    initMonth(targetMonth.id)
+    applyExpenseLog(targetMonth.id, catTotals.map(([name, amount]) => ({ name, amount })))
+    toast.success(`✅ הסיכום הועבר ל${targetMonth.name} בטאב החודשי (${fmt(monthTotal)})`, {
+      action: { label: 'פתח חודשי', onClick: () => router.push(`/app/monthly/${targetMonth.id}`) },
+    })
+  }
 
   // Group entries by day for the list.
   const byDay = useMemo(() => {
@@ -150,23 +167,38 @@ export default function ExpensesPage() {
         />
       </div>
 
-      {/* Month switcher + total */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
-            className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">›</button>
-          <span className="text-sm font-semibold text-txt min-w-[120px] text-center">{monthLabel(selMonth)}</span>
-          <button onClick={() => setSelMonth(shiftMonth(selMonth, 1))}
-            className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">‹</button>
-          {selMonth !== currentMonth() && (
-            <button onClick={() => setSelMonth(currentMonth())}
-              className="text-xs text-gold/80 hover:text-gold transition-colors ms-1">חזרה לחודש הנוכחי</button>
-          )}
+      {/* Month switcher + total + transfer */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">›</button>
+            <span className="text-sm font-semibold text-txt min-w-[120px] text-center">{monthLabel(selMonth)}</span>
+            <button onClick={() => setSelMonth(shiftMonth(selMonth, 1))}
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">‹</button>
+            {selMonth !== currentMonth() && (
+              <button onClick={() => setSelMonth(currentMonth())}
+                className="text-xs text-gold/80 hover:text-gold transition-colors ms-1">חזרה לחודש הנוכחי</button>
+            )}
+          </div>
+          <div className="text-left">
+            <div className="text-[11px] text-muted-txt">סה&quot;כ החודש</div>
+            <div className="text-xl font-black text-expense tabular-nums">{fmt(monthTotal)}</div>
+            <div className="text-[11px] text-muted-txt">{monthEntries.length} רישומים</div>
+          </div>
         </div>
-        <div className="text-left">
-          <div className="text-[11px] text-muted-txt">סה&quot;כ החודש</div>
-          <div className="text-xl font-black text-expense tabular-nums">{fmt(monthTotal)}</div>
-          <div className="text-[11px] text-muted-txt">{monthEntries.length} רישומים</div>
+
+        <div className="flex items-center justify-between gap-2 flex-wrap border-t border-line pt-3">
+          <span className="text-[11px] text-muted-txt">
+            מעביר את סיכום היומן ל{targetMonth?.name ?? '—'} בטאב החודשי — כסעיף נפרד, בלי להשפיע על הייבוא.
+          </span>
+          <button
+            onClick={transferToMonthly}
+            disabled={monthEntries.length === 0}
+            className="text-sm bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-4 py-1.5 font-semibold transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ⬆ העבר ל{targetMonth?.name ?? ''} בחודשי
+          </button>
         </div>
       </div>
 
