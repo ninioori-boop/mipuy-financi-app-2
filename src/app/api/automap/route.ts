@@ -10,6 +10,9 @@ const WINDOW_MS   = 86_400_000 // 24 hours
 
 // The client's data summary can be large (transaction lines + free text).
 const MAX_MESSAGE_LEN = 40_000
+// Multimodal payload (text + base64 images/PDFs). Kept under the serverless
+// request-body limit; the client also downscales images and caps total size.
+const MAX_CONTENT_LEN = 4_000_000
 
 function isUserLimited(uid: string): boolean {
   const now   = Date.now()
@@ -59,15 +62,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'גוף הבקשה לא תקין' }, { status: 400 })
   }
   // `system` from the client is intentionally ignored — the prompt is server-owned.
-  const { message } = body as Record<string, unknown>
-  if (typeof message !== 'string' || !message.trim()) {
-    return NextResponse.json({ error: 'חסר message' }, { status: 400 })
+  // Accept EITHER a plain `message` string OR a multimodal `content` array
+  // (text + base64 image/PDF blocks). The array shape is passed through to
+  // Anthropic as-is so Claude can read uploaded documents directly.
+  const { message, content } = body as Record<string, unknown>
+  let userContent: unknown
+  if (Array.isArray(content) && content.length > 0) {
+    const size = JSON.stringify(content).length
+    if (size > MAX_CONTENT_LEN) {
+      return NextResponse.json({ error: 'הקבצים גדולים מדי — הקטן/הסר חלק והעלה שוב' }, { status: 400 })
+    }
+    userContent = content
+    console.log(`[automap] uid=${uid} contentBytes=${size} blocks=${content.length}`)
+  } else if (typeof message === 'string' && message.trim()) {
+    if (message.length > MAX_MESSAGE_LEN) {
+      return NextResponse.json({ error: 'הבקשה גדולה מדי' }, { status: 400 })
+    }
+    userContent = message
+    console.log(`[automap] uid=${uid} msgLen=${message.length}`)
+  } else {
+    return NextResponse.json({ error: 'חסר תוכן (טקסט או קבצים)' }, { status: 400 })
   }
-  if (message.length > MAX_MESSAGE_LEN) {
-    return NextResponse.json({ error: 'הבקשה גדולה מדי' }, { status: 400 })
-  }
-
-  console.log(`[automap] uid=${uid} msgLen=${message.length}`)
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -80,7 +95,7 @@ export async function POST(req: NextRequest) {
       model:      'claude-sonnet-4-6',
       max_tokens: 8000,
       system:     AUTOMAP_SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: message }],
+      messages:   [{ role: 'user', content: userContent }],
     }),
   })
 

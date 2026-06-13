@@ -12,7 +12,6 @@ import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
 import { parseGeneratedMapping, type GeneratedMapping } from '@/lib/autoMap'
-import { FileDropzone } from '@/components/credit/FileDropzone'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -20,6 +19,43 @@ const mkId = () => Math.random().toString(36).slice(2)
 
 // Experimental advisor-only tool. Anyone else is redirected away even on a direct URL.
 const ADVISOR_EMAIL = 'ninioori@gmail.com'
+
+// Non-Excel documents (PDF / images) sent to Claude as base64 blocks so it reads
+// them directly — no OCR of our own.
+type AttachedDoc = { id: string; name: string; kind: 'image' | 'pdf'; mediaType: string; data: string }
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload  = () => resolve(r.result as string)
+    r.onerror = () => reject(new Error('שגיאה בקריאת הקובץ'))
+    r.readAsDataURL(file)
+  })
+}
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload  = () => resolve(img)
+    img.onerror = () => reject(new Error('שגיאה בטעינת התמונה'))
+    img.src = src
+  })
+}
+// Downscale + JPEG so large photos fit under the request-size cap.
+async function imageToJpegBase64(file: File, maxDim = 1500, quality = 0.7): Promise<string> {
+  const img = await loadImage(await readAsDataURL(file))
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w; canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas לא נתמך')
+  ctx.drawImage(img, 0, 0, w, h)
+  return canvas.toDataURL('image/jpeg', quality).split(',')[1] ?? ''
+}
+async function fileToBase64(file: File): Promise<string> {
+  return (await readAsDataURL(file)).split(',')[1] ?? ''
+}
 
 type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins' | 'variable'
 const SIMPLE_SECTIONS: { key: SimpleKey; label: string; icon: string }[] = [
@@ -56,23 +92,41 @@ export default function AutoMapPage() {
 
   const [txns, setTxns]           = useState<Transaction[]>([])
   const [fileNames, setFileNames] = useState<string[]>([])
+  const [docs, setDocs]           = useState<AttachedDoc[]>([])
   const [isParsing, setIsParsing] = useState(false)
   const [isGenerating, setIsGen]  = useState(false)
 
+  // Route each file by type: Excel → parsed transactions (cheap/local);
+  // PDF + images → base64 blocks the AI reads directly.
   const handleFiles = useCallback(async (files: File[]) => {
     setIsParsing(true)
     try {
       const learned = useCreditStore.getState().mergedLearnedDB()
       const all: Transaction[] = []
       const names: string[] = []
+      const newDocs: AttachedDoc[] = []
       for (const file of files) {
-        const rows = await parseExcelFile(file)
-        all.push(...extractTransactions(rows, file.name, learned))
-        names.push(file.name)
+        const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
+        const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+        const isImage = file.type.startsWith('image/')
+        if (isExcel) {
+          const rows = await parseExcelFile(file)
+          all.push(...extractTransactions(rows, file.name, learned))
+          names.push(file.name)
+        } else if (isImage) {
+          newDocs.push({ id: mkId(), name: file.name, kind: 'image', mediaType: 'image/jpeg', data: await imageToJpegBase64(file) })
+        } else if (isPdf) {
+          newDocs.push({ id: mkId(), name: file.name, kind: 'pdf', mediaType: 'application/pdf', data: await fileToBase64(file) })
+        } else {
+          toast.warning(`סוג קובץ לא נתמך: ${file.name}`)
+        }
       }
-      setTxns(prev => [...prev, ...all])
-      setFileNames(prev => [...prev, ...names])
-      toast.success(`נקראו ${all.length} עסקאות מ‑${files.length} קבצים`)
+      if (all.length)     { setTxns(prev => [...prev, ...all]); setFileNames(prev => [...prev, ...names]) }
+      if (newDocs.length) setDocs(prev => [...prev, ...newDocs])
+      const parts: string[] = []
+      if (all.length)     parts.push(`${all.length} עסקאות`)
+      if (newDocs.length) parts.push(`${newDocs.length} מסמכים`)
+      toast.success(`נקלטו ${parts.join(' · ') || 'קבצים'}`)
     } catch (e) {
       toast.error('שגיאה בפענוח: ' + (e as Error).message)
     } finally {
@@ -91,6 +145,21 @@ export default function AutoMapPage() {
     }
     return [...map.entries()].sort((a, b) => b[1].sum - a[1].sum)
   })()
+
+  const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
+  const tooBig    = docsBytes > 3_800_000
+
+  // Build the multimodal user content: a text block + one image/document block
+  // per attached file, passed straight to Claude.
+  function buildContent(): unknown[] {
+    const blocks: unknown[] = [{ type: 'text', text: buildMessage() }]
+    for (const d of docs) {
+      blocks.push(d.kind === 'image'
+        ? { type: 'image',    source: { type: 'base64', media_type: d.mediaType, data: d.data } }
+        : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.data } })
+    }
+    return blocks
+  }
 
   function buildMessage(): string {
     const lines: string[] = []
@@ -111,16 +180,17 @@ export default function AutoMapPage() {
   }
 
   async function generate() {
-    if (!txns.length && !contextText.trim()) {
-      toast.error('העלה קובץ או הזן נתונים בטקסט קודם')
+    if (!txns.length && !contextText.trim() && !docs.length) {
+      toast.error('העלה קובץ/מסמך או הזן נתונים בטקסט קודם')
       return
     }
+    if (tooBig) { toast.error('הקבצים גדולים מדי — הסר חלק או הקטן תמונות'); return }
     setIsGen(true)
     try {
       const res = await fetchWithRetry('/api/automap', {
         method: 'POST',
         headers: await aiHeaders(),
-        body: JSON.stringify({ message: buildMessage() }),
+        body: JSON.stringify(docs.length ? { content: buildContent() } : { message: buildMessage() }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -200,7 +270,7 @@ export default function AutoMapPage() {
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6">
         <h1 className="text-2xl font-bold text-gold mb-1">🧪 מיפוי אוטומטי (ניסיוני)</h1>
         <p className="text-muted-txt text-sm">
-          מעבדה עצמאית: מזינים את נתוני הלקוח, ה‑AI מנתח ובונה מיפוי שלם לפי עקרונות הכלכלן של הבית.
+          מעבדה עצמאית: מזינים את נתוני הלקוח (Excel · PDF · תמונות · טקסט), ה‑AI קורא הכל ובונה תמונת מצב — מיפוי שלם לפי עקרונות הכלכלן של הבית.
           <strong className="text-txt"> מנותק מהמערכת</strong> — שום דבר לא נשמר למיפוי הרגיל עד שתלחץ "העתק למיפוי".
         </p>
       </div>
@@ -208,15 +278,44 @@ export default function AutoMapPage() {
       {/* Inputs */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
         <div className="text-sm font-semibold text-txt">1️⃣ נתונים</div>
-        <FileDropzone onFiles={handleFiles} isLoading={isParsing} />
+
+        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
+          <input
+            type="file"
+            multiple
+            accept=".xlsx,.xls,.csv,.pdf,image/*"
+            className="hidden"
+            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
+          />
+          <span className="text-2xl">📎</span>
+          <span className="text-sm text-txt">העלה קבצים</span>
+          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונות / צילומי מסך</span>
+        </label>
+        {isParsing && (
+          <div className="text-xs text-muted-txt flex items-center gap-2">
+            <span className="size-3 animate-spin rounded-full border-2 border-gold border-t-transparent" /> מעבד קבצים…
+          </div>
+        )}
+
         {fileNames.length > 0 && (
           <div className="text-xs text-muted-txt flex items-center gap-2 flex-wrap">
-            <span>📄 {fileNames.join(', ')}</span>
-            <span>·</span>
-            <span>{txns.length} עסקאות · {catTotals.length} קטגוריות</span>
+            <span>📊 {fileNames.join(', ')} · {txns.length} עסקאות · {catTotals.length} קטגוריות</span>
             <button onClick={() => { setTxns([]); setFileNames([]) }}
-              className="me-auto text-xs px-2 py-0.5 rounded border border-line hover:text-expense hover:border-expense/40 transition-colors">נקה קבצים</button>
+              className="me-auto text-xs px-2 py-0.5 rounded border border-line hover:text-expense hover:border-expense/40 transition-colors">נקה</button>
           </div>
+        )}
+        {docs.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {docs.map(d => (
+              <span key={d.id} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs text-txt">
+                {d.kind === 'pdf' ? '📕' : '🖼️'} <span className="max-w-[160px] truncate">{d.name}</span>
+                <button onClick={() => setDocs(prev => prev.filter(x => x.id !== d.id))} className="text-muted-txt hover:text-expense">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {tooBig && (
+          <div className="text-xs text-expense">הקבצים גדולים מדי ({(docsBytes / 1_000_000).toFixed(1)}MB) — הסר חלק או הקטן תמונות לפני יצירה.</div>
         )}
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -239,7 +338,7 @@ export default function AutoMapPage() {
             {isGenerating ? '🤖 מנתח…' : '🤖 צור מיפוי'}
           </button>
           {result && (
-            <button onClick={() => { if (confirm('לאפס את המעבדה (קלט ותוצאה)?')) { reset(); setTxns([]); setFileNames([]) } }}
+            <button onClick={() => { if (confirm('לאפס את המעבדה (קלט ותוצאה)?')) { reset(); setTxns([]); setFileNames([]); setDocs([]) } }}
               className="text-xs text-muted-txt hover:text-expense transition-colors">אפס מעבדה</button>
           )}
         </div>
