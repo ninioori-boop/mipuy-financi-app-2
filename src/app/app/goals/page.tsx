@@ -105,7 +105,7 @@ export default function GoalsPage() {
               </div>
               <div className="text-3xl sm:text-4xl font-black text-gold tabular-nums">{fmt(savingsBudget.budget)}<span className="text-xs font-normal text-muted-txt me-2">/חודש</span></div>
             </div>
-            <div className="text-right space-y-0.5">
+            <div className="text-end space-y-0.5">
               <div className="text-xs text-muted-txt">מוקצה ליעדים</div>
               <div className={`text-xl font-bold tabular-nums ${isOver ? 'text-expense' : 'text-txt'}`}>{fmt(allocated)}</div>
               <div className="text-xs text-muted-txt">
@@ -157,7 +157,7 @@ export default function GoalsPage() {
             { label: 'יעדים פעילים',           val: activeGoals.length, color: 'text-txt' },
             { label: 'סך נדרש',                 val: fmt(totalReq),      color: 'text-txt' },
             { label: 'הפרשה חודשית נדרשת',      val: fmt(totalMo),       color: 'text-gold' },
-            { label: 'יעדים שהושגו',             val: doneCount,          color: 'text-green-400' },
+            { label: 'יעדים שהושגו',             val: doneCount,          color: 'text-income' },
           ].map(({ label, val, color }) => (
             <div key={label} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4">
               <div className="text-xs text-muted-txt mb-1">{label}</div>
@@ -250,7 +250,7 @@ export default function GoalsPage() {
                     {row.required > 0 && (
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
-                          <span className={`font-bold ${isDone ? 'text-green-400' : pct > 0 ? 'text-gold' : 'text-muted-txt'}`}>
+                          <span className={`font-bold ${isDone ? 'text-income' : pct > 0 ? 'text-gold' : 'text-muted-txt'}`}>
                             {isDone ? '✓ הושג' : `${pct}%`}
                           </span>
                           {moMonths !== null && !isDone && (

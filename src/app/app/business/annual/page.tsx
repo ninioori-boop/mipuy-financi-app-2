@@ -44,7 +44,7 @@ function SectionPanel({
 
       <div className="hidden sm:flex items-center gap-2 px-1 text-xs text-muted-txt font-medium">
         <span className="flex-1">{colName}</span>
-        <span className="w-28 text-left">₪ לשנה (לפני מע&quot;מ)</span>
+        <span className="w-28 text-end">₪ לשנה (לפני מע&quot;מ)</span>
         {showVat && <span className="w-14 text-center">מע&quot;מ</span>}
         <span className="w-9" />
       </div>
@@ -221,7 +221,7 @@ export default function BusinessAnnualPage() {
                   key={t.id}
                   onClick={() => store.setBusinessType(t.id)}
                   className={[
-                    'text-right rounded-xl border p-3 transition-all',
+                    'text-start rounded-xl border p-3 transition-all',
                     active ? 'border-gold bg-gold/15 ring-2 ring-gold/30' : 'border-line bg-surface hover:bg-surface3',
                   ].join(' ')}
                 >

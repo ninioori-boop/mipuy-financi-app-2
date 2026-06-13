@@ -237,7 +237,7 @@ export default function BankPage() {
               className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors text-base font-bold">−</button>
             <input type="number" value={reportMonths} min={1} max={24}
               onChange={e => setReportMonths(parseInt(e.target.value) || 1)}
-              className="w-12 text-center bg-bg border border-gold rounded-lg text-gold font-bold text-base py-1 focus:outline-none"
+              className="w-12 text-center bg-surface border border-gold rounded-lg text-gold font-bold text-base py-1 focus:outline-none"
               style={{ direction: 'ltr' }} />
             <button onClick={() => handleMonthsChange(1)}
               className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors text-base font-bold">+</button>
@@ -255,13 +255,13 @@ export default function BankPage() {
             <span>·</span>
             <span className="text-expense">💸 {outTxns.length} חיובים</span>
             <span>·</span>
-            <span className="text-green-400">💰 {inTxns.length} נכנסו</span>
+            <span className="text-income">💰 {inTxns.length} נכנסו</span>
             {sentCount > 0 && (
-              <><span>·</span><span className="text-green-400">✓ {sentCount} נשלחו</span></>
+              <><span>·</span><span className="text-income">✓ {sentCount} נשלחו</span></>
             )}
             <button
               onClick={() => { reset(); setActiveKey(null); setExpandedKeys(new Set()); setDirOverride(new Map()) }}
-              className="mr-auto text-xs px-2.5 py-1 rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
+              className="me-auto text-xs px-2.5 py-1 rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
             >
               🗑 נקה והתחל מחדש
             </button>
@@ -324,7 +324,7 @@ export default function BankPage() {
                   <button
                     onClick={() => flipGroup(g, 'out')}
                     title="זה בעצם זיכוי / כסף שנכנס — העבר לקבוצת הנכנסים"
-                    className="px-3 border-s border-line text-muted-txt hover:text-green-400 hover:bg-green-400/5 transition-colors text-sm shrink-0"
+                    className="px-3 border-s border-line text-muted-txt hover:text-income hover:bg-income/5 transition-colors text-sm shrink-0"
                   >
                     ⇄
                   </button>
@@ -398,18 +398,18 @@ export default function BankPage() {
       {inGroups.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="font-semibold text-green-400">💰 זיכויים / העברות שנכנסו</h2>
+            <h2 className="font-semibold text-income">💰 זיכויים / העברות שנכנסו</h2>
             <span className="text-xs text-muted-txt">כסף שנכנס לחשבון — מופרד מההוצאות. אם משהו סווג בטעות, לחץ ⇄</span>
           </div>
 
           {inGroups.map(g => {
             const isExpanded = expandedKeys.has(g.key)
             return (
-              <div key={g.key} className="rounded-xl border border-green-400/30 bg-green-400/5">
+              <div key={g.key} className="rounded-xl border border-income/30 bg-income/5">
                 <div className="flex items-stretch">
                   <button
                     onClick={() => toggleExpanded(g.key)}
-                    className="flex-1 p-4 flex items-center gap-3 hover:bg-green-400/5 transition-colors text-right min-w-0"
+                    className="flex-1 p-4 flex items-center gap-3 hover:bg-income/5 transition-colors text-right min-w-0"
                     dir="rtl"
                   >
                     <div className="flex-1 min-w-0">
@@ -419,29 +419,29 @@ export default function BankPage() {
                       </div>
                     </div>
                     <div className="text-left shrink-0">
-                      <div className="text-lg font-bold text-green-400 tabular-nums">
+                      <div className="text-lg font-bold text-income tabular-nums">
                         +{g.totalAmount.toLocaleString('he-IL')} ₪
                       </div>
                       <div className="text-[10px] text-muted-txt">נכנס לחשבון</div>
                     </div>
-                    <span className="text-green-400 text-xl shrink-0 w-5 text-center">{isExpanded ? '−' : '+'}</span>
+                    <span className="text-income text-xl shrink-0 w-5 text-center">{isExpanded ? '−' : '+'}</span>
                   </button>
                   <button
                     onClick={() => flipGroup(g, 'in')}
                     title="זה בעצם חיוב / כסף שיצא — העבר לקבוצת החיובים"
-                    className="px-3 border-s border-green-400/20 text-muted-txt hover:text-expense hover:bg-expense/5 transition-colors text-sm shrink-0"
+                    className="px-3 border-s border-income/20 text-muted-txt hover:text-expense hover:bg-expense/5 transition-colors text-sm shrink-0"
                   >
                     ⇄
                   </button>
                 </div>
 
                 {isExpanded && (
-                  <div className="border-t border-green-400/20 p-4 space-y-1.5 max-h-64 overflow-y-auto" dir="rtl">
+                  <div className="border-t border-income/20 p-4 space-y-1.5 max-h-64 overflow-y-auto" dir="rtl">
                     {g.txns.map(t => (
                       <div key={t.origIdx} className="flex items-center justify-between gap-3 text-xs px-2 py-1 rounded bg-surface2/50">
                         <span className="text-muted-txt truncate flex-1">{t.desc}</span>
                         {t.date && <span className="text-[10px] text-muted-txt shrink-0">{t.date}</span>}
-                        <span className="tabular-nums text-green-400 shrink-0">+{t.amount.toLocaleString('he-IL')} ₪</span>
+                        <span className="tabular-nums text-income shrink-0">+{t.amount.toLocaleString('he-IL')} ₪</span>
                       </div>
                     ))}
                   </div>
@@ -454,7 +454,7 @@ export default function BankPage() {
 
       {/* All-sent confirmation */}
       {sentCount > 0 && outGroups.length === 0 && rawRows.length > 0 && (
-        <div className="rounded-xl border border-green-400/30 bg-green-400/5 p-4 text-sm text-green-400 text-center">
+        <div className="rounded-xl border border-income/30 bg-income/5 p-4 text-sm text-income text-center">
           ✓ כל {sentCount} החיובים נשלחו למיפוי. סיימת!
         </div>
       )}

@@ -216,7 +216,7 @@ export default function CheckingPage() {
             </div>
           </div>
           {!isNegative && (
-            <div className="text-right shrink-0">
+            <div className="text-end shrink-0">
               <div className="text-[10px] sm:text-xs text-muted-txt">בשנה</div>
               <div className="text-lg sm:text-2xl font-bold text-gold tabular-nums">{fmt(surplus * 12)}</div>
             </div>
@@ -250,7 +250,7 @@ export default function CheckingPage() {
                   key={p.id}
                   onClick={() => applyPreset(p)}
                   className={[
-                    'text-right rounded-xl border p-3 transition-all',
+                    'text-start rounded-xl border p-3 transition-all',
                     isActive
                       ? 'border-gold bg-gold/15 ring-2 ring-gold/30'
                       : 'border-line bg-surface hover:bg-surface3 active:bg-surface3',

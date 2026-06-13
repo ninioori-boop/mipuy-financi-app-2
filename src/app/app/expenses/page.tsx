@@ -181,7 +181,7 @@ export default function ExpensesPage() {
                 className="text-xs text-gold/80 hover:text-gold transition-colors ms-1">חזרה לחודש הנוכחי</button>
             )}
           </div>
-          <div className="text-left">
+          <div className="text-end">
             <div className="text-[11px] text-muted-txt">סה&quot;כ החודש</div>
             <div className="text-xl font-black text-expense tabular-nums">{fmt(monthTotal)}</div>
             <div className="text-[11px] text-muted-txt">{monthEntries.length} רישומים</div>

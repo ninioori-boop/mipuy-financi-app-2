@@ -147,7 +147,7 @@ export default function MeetingsPage() {
                 <div className="p-4 flex items-start justify-between gap-3 flex-wrap">
                   <button
                     onClick={() => setOpenId(isOpen ? null : m.id)}
-                    className="flex-1 min-w-0 text-right"
+                    className="flex-1 min-w-0 text-start"
                   >
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full bg-surface border border-line ${TYPE_COLOR[m.type]}`}>
