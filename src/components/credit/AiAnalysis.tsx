@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import type { Transaction } from '@/types/transaction'
 import { CATEGORY_ICONS } from '@/lib/constants'
-import { getAuthHeader } from '@/lib/getAuthToken'
+import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 
 interface Props {
@@ -75,7 +75,7 @@ ${lines.join('\n')}
     try {
       const res = await fetchWithRetry('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
+        headers: await aiHeaders(),
         body: JSON.stringify({ system: SYSTEM_PROMPT, message }),
       })
 

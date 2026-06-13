@@ -1,0 +1,39 @@
+// ════════════════════════════════════════════════════════════════════
+// גיבוי כללי Firestore החיים — נכון ל-2026-06-13
+// ════════════════════════════════════════════════════════════════════
+// אלה הכללים שהיו פרוסים בקונסולה לפני הוספת תקרת learnedDB (size <= 20000).
+// זו גרסת ה-invite-only שעובדת ומאומתת (24/24 משתמשים, אפס נעילה).
+//
+// 🔧 אם משהו משתבש אחרי שינוי כללים — שחזור:
+//    1. console.firebase.google.com → finance-machine-a36e9
+//    2. Build → Firestore Database → לשונית Rules
+//    3. Ctrl+A → Delete → הדבק את הבלוק שלמטה (בלי שורות ההערה //)
+//    4. Publish
+// ════════════════════════════════════════════════════════════════════
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+    }
+
+    match /shared/learnedDB {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map;
+      allow update: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map
+        && request.resource.data.db.keys().hasAll(resource.data.db.keys());
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

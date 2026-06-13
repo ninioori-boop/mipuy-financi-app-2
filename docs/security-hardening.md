@@ -7,12 +7,13 @@
 > עיקרון עבודה: כל משימה המסומנת ⚠️ נוגעת בתשתית חיה (כללים / persistence / קוד מול
 > לקוח). לא תבוצע ללא אישור מפורש, וה‑diff יוצג לפני פריסה.
 
-## ✅ סטטוס (2026-06-07)
-**הושלם (קוד, אפס סיכון למערכת החיה):** 0.2 firebase.json+.firebaserc · 0.3 git clean · 0.5 App Check מחווט (env-gated) · 1.8 system צד-שרת + cap 24K · 1.11 לוג per-uid · 1.4/1.5 אודיט קריאה/כתיבה (תקין, ללא שינוי) · 2.4 runbook · 2.6 אודיט תלויות.
+## ✅ סטטוס (2026-06-13)
+**הושלם (קוד, אפס סיכון למערכת החיה):** 0.2 firebase.json+.firebaserc · 0.3 git clean · 0.5 App Check מחווט (env-gated) · 1.8 system צד-שרת + cap 24K · 1.11 לוג per-uid · 1.4/1.5 אודיט קריאה/כתיבה (תקין, ללא שינוי — אפס onSnapshot, debounce 2s + dedup + cap 900KB) · 1.9 App Check על AI routes (gated מאחורי APP_CHECK_ENFORCE) · 2.4 runbook · 2.6 אודיט תלויות.
+**הושלם (קונסולה, חי):** 1.16 גידור הרשמה — **invite-only פעיל** (allowlist + כללים; 24/24 משתמשים נזרעו, אפס נעילה) · 1.2 תקרת `shared/learnedDB` (size <= 20000, פורסם 2026-06-13). גיבוי הכללים הקודמים: `firestore.rules.backup-2026-06-13`.
 **אומת:** 0.1 — כללים חיים == ריפו; תעבורה זעירה (~25 reads/יום); Anonymous auth כבוי.
-**ממתין לך (קונסולה):** 1.10 תקרת Anthropic · 0.6 התראות תקציב · 0.4 רישום App Check (בלי Enforce!).
-**ממתין להחלטה:** 1.13 email_verified (אחרי בדיקת משתמשים) · 1.6/1.7 rate-limit עמיד (החלטת תשתית) · 1.1/1.2 הידוק כללים (ערך שולי — אופציונלי).
-**מוקפא:** App Check enforcement (1.3/1.9) — ישבור את orimipuy.com עד שתצויד.
+**ממתין לך (קונסולה):** 1.10 תקרת Anthropic · 0.6 התראות תקציב · 0.4 רישום App Check (בלי Enforce!) · 1.14 הגנות Auth (anti-enumeration + reCAPTCHA) · 1.15 Authorized Domains.
+**הוחלט לדלג:** 1.1 הידוק `users/{uid}` — האפליקציה הישנה כותבת צורות מרובות (`data`/`meta`/`role`/setUserProfile חופשי) וכללים לא יכולים למדוד בייטים; ה-cap 900KB כבר בצד-לקוח · 1.13 email_verified · 1.6/1.7 rate-limit עמיד (Anthropic ממילא חוסם עלות קשיח).
+**מוקפא:** App Check enforcement על Firestore (1.3) — ישבור את orimipuy.com עד שתצויד.
 
 ---
 

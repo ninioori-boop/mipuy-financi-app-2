@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react'
 import { toast } from 'sonner'
-import { getAuthHeader } from '@/lib/getAuthToken'
+import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
@@ -105,7 +105,7 @@ export default function CreditPage() {
 
           const res = await fetchWithRetry('/api/categorize', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
+            headers: await aiHeaders(),
             body: JSON.stringify({ system: SYSTEM_PROMPT, message: `סווג את העסקאות הבאות:\n${lines}` }),
           })
 

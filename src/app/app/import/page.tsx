@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { getAuthHeader } from '@/lib/getAuthToken'
+import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
@@ -125,7 +125,7 @@ export default function ImportPage() {
           const lines = batch.map(({ t }) => `${t.desc} | ₪${t.amount.toFixed(2)}`).join('\n')
           const res = await fetchWithRetry('/api/categorize', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthHeader() },
+            headers: await aiHeaders(),
             body: JSON.stringify({ system: SYSTEM_PROMPT, message: `סווג את העסקאות הבאות:\n${lines}` }),
           })
           if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error ?? `שגיאת API ${res.status}`) }

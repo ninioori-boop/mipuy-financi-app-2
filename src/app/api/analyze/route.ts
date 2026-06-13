@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
+import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
 
 // Per-user rate limit: 2 analyses per day
 const userLimitMap = new Map<string, { count: number; start: number }>()
@@ -49,6 +50,17 @@ export async function POST(req: NextRequest) {
     uid = result.uid
   } catch {
     return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
+  }
+
+  // App Check (gated): ensures the request comes from the real app, not a script.
+  // No-op until APP_CHECK_ENFORCE=true (flip on only after reCAPTCHA is registered
+  // and the App Check console shows real traffic is verified).
+  if (process.env.APP_CHECK_ENFORCE === 'true') {
+    try {
+      await verifyAppCheckToken(req.headers.get('x-firebase-appcheck') ?? '')
+    } catch {
+      return NextResponse.json({ error: 'בקשה לא מאומתת (App Check)' }, { status: 401 })
+    }
   }
 
   if (isUserLimited(uid)) {
