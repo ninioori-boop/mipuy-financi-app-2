@@ -44,7 +44,7 @@ function numInput(
   return (
     <input
       type="number" value={value || ''} min={0}
-      onChange={e => onChange(parseFloat(e.target.value) || 0)}
+      onChange={e => onChange(Math.max(0, parseFloat(e.target.value) || 0))}
       placeholder={placeholder} style={{ direction: 'ltr' }}
       className={`rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums w-full ${cls}`}
     />

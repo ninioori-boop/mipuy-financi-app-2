@@ -99,7 +99,7 @@ function NumInput({ label, value, onChange, min = 0, step = 1, suffix }: {
       <label className="text-xs font-semibold text-muted-txt">{label}{suffix ? ` (${suffix})` : ''}</label>
       <input
         type="number" value={value} min={min} step={step}
-        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        onChange={e => onChange(Math.max(min, parseFloat(e.target.value) || 0))}
         style={{ direction: 'ltr' }}
         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 tabular-nums text-left"
       />
@@ -201,11 +201,17 @@ export default function LoansPage() {
       {/* Results KPIs */}
       {table.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {method === 'spitzer' ? (
+          {method === 'spitzer' && indexMode !== 'indexed' ? (
             <div className="rounded-xl border border-gold/30 bg-gold/5 p-4">
               <div className="text-xs text-muted-txt mb-1">תשלום חודשי</div>
               <div className="text-2xl font-black text-gold">{fmt(firstPayment, 2)}</div>
               <div className="text-xs text-muted-txt mt-0.5">קבוע לאורך כל התקופה</div>
+            </div>
+          ) : method === 'spitzer' ? (
+            <div className="rounded-xl border border-gold/30 bg-gold/5 p-4">
+              <div className="text-xs text-muted-txt mb-1">תשלום ראשון / אחרון</div>
+              <div className="text-xl font-black text-gold">{fmt(firstPayment, 2)}</div>
+              <div className="text-xs text-muted-txt mt-0.5">↑ עולה עד {fmt(lastPayment, 2)} (צמוד מדד)</div>
             </div>
           ) : (
             <div className="rounded-xl border border-gold/30 bg-gold/5 p-4">

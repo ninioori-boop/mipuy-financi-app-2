@@ -16,7 +16,6 @@ interface CreditState {
 
   setTransactions: (txns: Transaction[], fileNames: string[]) => void
   updateCategory: (idx: number, category: string) => void
-  applyAiCategory: (idx: number, category: string) => void
   applyAiCategoryById: (id: string, category: string) => void
   learn: (desc: string, category: string) => void
   setSharedLearnedDB: (db: Record<string, string>) => void
@@ -68,24 +67,12 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     get().learn(target.desc, category)
   },
 
-  // AI-assigned category — remember locally so future uploads in THIS account skip
-  // re-asking the AI, but never write AI guesses to the shared pool (avoids
-  // propagating a wrong guess to every client).
-  applyAiCategory: (idx, category) => {
-    const txns = [...get().transactions]
-    if (!txns[idx]) return
-    const key = normalizeForLookup(txns[idx].desc)
-    txns[idx] = { ...txns[idx], category }
-    set({
-      transactions: txns,
-      learnedDB: { ...get().learnedDB, [key]: category },
-    })
-  },
-
-  // Same as applyAiCategory but looks up the row by its stable id. Used by the
-  // AI batch loop so a delete that lands between batch creation and result
-  // application can't shift indices and assign a category to the wrong row.
-  // If the row was deleted (id no longer exists), this is a silent no-op.
+  // AI-assigned category — looks up the row by its stable id, so a delete that
+  // lands between batch creation and result application can't shift indices and
+  // assign a category to the wrong row. Remembered locally so future uploads in
+  // THIS account skip re-asking the AI, but AI guesses are never written to the
+  // shared pool (avoids propagating a wrong guess to every client). If the row
+  // was deleted (id no longer exists), this is a silent no-op.
   applyAiCategoryById: (id, category) => {
     const txns = get().transactions
     const target = txns.find(t => t.id === id)
@@ -121,5 +108,5 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     set({ reportMonths: Math.max(1, Math.min(24, months)) }),
 
   reset: () =>
-    set({ transactions: [], uploadedFileNames: [], isLoading: false, loadingMessage: '' }),
+    set({ transactions: [], uploadedFileNames: [], learnedDB: {}, isLoading: false, loadingMessage: '' }),
 }))
