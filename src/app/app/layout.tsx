@@ -8,8 +8,11 @@ import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
 
-type TabItem  = { href: string; emoji: string; label: string }
+type TabItem  = { href: string; emoji: string; label: string; advisorOnly?: boolean }
 type TabGroup = { title: string; items: TabItem[] }
+
+// The advisor account — experimental tools are shown only to this user, never to clients.
+const ADVISOR_EMAIL = 'ninioori@gmail.com'
 
 const groups: TabGroup[] = [
   {
@@ -58,6 +61,12 @@ const groups: TabGroup[] = [
       { href: '/app/meetings', emoji: '📝', label: 'פגישות' },
     ],
   },
+  {
+    title: 'מעבדה',
+    items: [
+      { href: '/app/automap', emoji: '🧪', label: 'מיפוי AI', advisorOnly: true },
+    ],
+  },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -79,9 +88,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false)
   }, [pathname])
 
+  const isAdvisor = user?.email === ADVISOR_EMAIL
+  const visibleGroups = groups
+    .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
+    .filter(g => g.items.length > 0)
+
   const navList = (
     <nav className="flex flex-col gap-0.5 p-3">
-      {groups.map((g, gi) => (
+      {visibleGroups.map((g, gi) => (
         <div key={gi} className="space-y-0.5">
           {g.title && (
             <div className="px-3 pt-3 pb-1.5 text-[10px] font-bold text-muted-txt/70 uppercase tracking-wider">
