@@ -19,6 +19,9 @@ const HORIZONS: { id: GoalHorizon; label: string; sub: string; accent: string; b
 function monthsUntil(targetDate: string): number | null {
   if (!targetDate) return null
   const [y, m] = targetDate.split('-').map(Number)
+  // Guard against malformed/legacy dates (e.g. "2026" or "") that would
+  // otherwise yield NaN and surface as "NaN חודשים נותרו".
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return null
   const now = new Date()
   return Math.max(0, (y - now.getFullYear()) * 12 + (m - now.getMonth() - 1))
 }
@@ -27,8 +30,9 @@ function autoMonthly(row: GoalRow): number {
   if (row.monthly > 0) return row.monthly
   const remaining = Math.max(0, row.required - row.current)
   const months    = monthsUntil(row.targetDate)
-  if (months && months > 0) return Math.ceil(remaining / months)
-  return 0
+  if (months === null) return 0                 // no target date — can't auto-plan
+  if (months <= 0) return Math.ceil(remaining)  // due this month / overdue — need the full remaining now
+  return Math.ceil(remaining / months)
 }
 
 function numInput(
