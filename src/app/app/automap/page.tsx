@@ -110,7 +110,7 @@ export default function AutoMapPage() {
         const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
         const isImage = file.type.startsWith('image/')
         if (isExcel) {
-          const rows = await parseExcelFile(file)
+          const rows = await parseExcelFile(file, { allSheets: true })
           all.push(...extractTransactions(rows, file.name, learned))
           names.push(file.name)
         } else if (isImage) {

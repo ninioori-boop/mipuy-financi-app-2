@@ -70,7 +70,7 @@ export default function ImportPage() {
       const allTxns: Transaction[] = []
       const names: string[] = []
       for (const file of files) {
-        const rows = await parseExcelFile(file)
+        const rows = await parseExcelFile(file, { allSheets: true })
         const txns = extractTransactions(rows, file.name, useCreditStore.getState().mergedLearnedDB())
         allTxns.push(...txns)
         names.push(file.name)

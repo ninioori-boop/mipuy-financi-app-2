@@ -163,3 +163,49 @@ describe('extractTransactions', () => {
     expect(txns).toEqual([])
   })
 })
+
+// ── extractTransactions — Isracard/Max "פירוט עבור הכרטיסים" format ───────────
+describe('extractTransactions — Isracard/Max multi-section format', () => {
+  const headerArea = [
+    'שם כרטיס', 'תאריך', 'חיוב לתאריך', 'שם בית עסק',
+    'סכום קנייה', 'סכום חיוב בש"ח', 'אסמכתא', 'תיאור סוג עסקת אשראי',
+  ]
+
+  it('finds the header even when a long summary block precedes it', () => {
+    const summary = Array.from({ length: 22 }, (_, i) => [`סיכום ${i}`, '', '', '', '', '', '', ''])
+    const rows: unknown[][] = [
+      ...summary,
+      ['פירוט עבור הכרטיסים בארץ'],
+      ['מספר חשבון 366135-719-12', 'תאריך הפקה', '14.06.2026'],
+      headerArea,
+      ['7014', new Date('2026-06-02'), '', 'סאני סמסונג', '42.90', '42.90', '13637599', 'עסקה רגילה'],
+      ['7014', new Date('2026-06-03'), '', 'סופר פארם',   '52.00', '52.00', '84896024', 'הוראת קבע'],
+    ]
+    const txns = extractTransactions(rows, 'isracard.xlsx')
+    expect(txns).toHaveLength(2)
+    expect(txns[0].desc).toBe('סאני סמסונג')
+    expect(txns[0].amount).toBe(42.9)
+    // 'הוראת קבע' lives in the "תיאור סוג עסקת אשראי" column → standing order detected.
+    expect(txns[1].isStandingOrder).toBe(true)
+  })
+
+  it('reads a second section (בחו"ל) whose columns are shifted', () => {
+    const headerAbroad = [
+      '', 'שם כרטיס', 'תאריך', 'חיוב לתאריך', 'שם בית עסק',
+      'סכום קנייה', 'סכום חיוב בש"ח', 'מטבע מקורי', 'אסמכתא',
+    ]
+    const rows: unknown[][] = [
+      ['פירוט עבור הכרטיסים בארץ'],
+      headerArea,
+      ['7014', new Date('2026-06-02'), '', 'שופרסל', '250', '250', '111', 'עסקה רגילה'],
+      [],
+      ['פירוט עבור הכרטיסים בחו"ל'],
+      headerAbroad,
+      ['', '7014', new Date('2026-06-10'), '', 'GOOGLE', '7.90', '7.90', 'ILS', '5300'],
+    ]
+    const txns = extractTransactions(rows, 'isracard.xlsx')
+    expect(txns.map(t => t.desc)).toEqual(['שופרסל', 'GOOGLE'])
+    // The shifted-column row resolved via the second section's own header.
+    expect(txns.find(t => t.desc === 'GOOGLE')?.amount).toBe(7.9)
+  })
+})

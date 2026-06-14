@@ -5,7 +5,7 @@ export function detectColumns(headerRow: unknown[]): ColumnMap {
   let descCol = -1, chargeAmountCol = -1, transactionAmountCol = -1, amountCol = -1, notesCol = -1, dateCol = -1
 
   const descKeywords    = ['שם בית עסק', 'שם בית העסק', 'בית עסק', 'שם העסק', 'תיאור', 'פרטים', 'תיאור עסקה']
-  const notesKeywords   = ['פירוט נוסף', 'הערות', 'הערה', 'פרטים נוספים', 'תשלומים', 'מידע נוסף']
+  const notesKeywords   = ['פירוט נוסף', 'הערות', 'הערה', 'פרטים נוספים', 'תשלומים', 'מידע נוסף', 'סוג עסקת אשראי']
   const dateKeywords    = ['תאריך רכישה', 'תאריך עסקה', 'תאריך', 'date']
 
   headerRow.forEach((cell, i) => {
@@ -77,7 +77,9 @@ export function extractTransactions(
   let headerRowIdx = -1
   let descCol = -1, amountCol = -1, transactionAmountCol = -1, notesCol = -1, dateCol = -1
 
-  for (let r = 0; r < Math.min(15, rows.length); r++) {
+  // Scan the WHOLE sheet — Israeli card statements (Isracard/Max) often start
+  // with a summary block, so the real header can be well past row 15.
+  for (let r = 0; r < rows.length; r++) {
     const row = rows[r]
     if (!row || !row.length) continue
     const detected = detectColumns(row)
@@ -94,7 +96,7 @@ export function extractTransactions(
 
   // Fallback: look for Hebrew text + numeric pair
   if (headerRowIdx === -1) {
-    for (let r = 0; r < Math.min(20, rows.length); r++) {
+    for (let r = 0; r < rows.length; r++) {
       const row = rows[r]
       if (!row) continue
       let dCol = -1
@@ -119,23 +121,38 @@ export function extractTransactions(
   const transactions: Transaction[] = []
   const SKIP_PATTERNS = ['סה"כ', 'סהכ', 'לחיוב', '===', 'TOTAL FOR']
 
+  // Current column map — re-synced whenever a new section header appears mid-sheet.
+  // Multi-card statements stack "בארץ" then "בחו"ל" (the latter has an extra
+  // "מטבע מקורי" column), so each section must be read with its own columns.
+  let curDesc = descCol, curAmount = amountCol, curTxAmount = transactionAmountCol
+  let curNotes = notesCol, curDate = dateCol
+
   for (let r = Math.max(0, headerRowIdx + 1); r < rows.length; r++) {
     const row = rows[r]
     if (!row || !row.length) continue
-    const desc   = String(row[descCol] ?? '').trim()
-    const amount = parseAmount(row[amountCol])
+
+    // A new section header → re-sync columns and skip the header row itself.
+    const reDetect = detectColumns(row)
+    if (reDetect.descCol !== -1 && reDetect.amountCol !== -1) {
+      curDesc = reDetect.descCol; curAmount = reDetect.amountCol
+      curTxAmount = reDetect.transactionAmountCol; curNotes = reDetect.notesCol; curDate = reDetect.dateCol
+      continue
+    }
+
+    const desc   = String(row[curDesc] ?? '').trim()
+    const amount = parseAmount(row[curAmount])
     if (!desc || isNaN(amount) || amount === 0) continue
     if (SKIP_PATTERNS.some(p => desc.includes(p))) continue
 
-    const notes = notesCol !== -1 ? String(row[notesCol] ?? '').trim() : ''
-    const dateRaw = dateCol !== -1 ? row[dateCol] : null
+    const notes = curNotes !== -1 ? String(row[curNotes] ?? '').trim() : ''
+    const dateRaw = curDate !== -1 ? row[curDate] : null
     const dateStr = dateRaw ? String(dateRaw).substring(0, 10) : ''
     const installment = extractInstallmentInfo(notes)
     const standingOrder = isStandingOrderDesc(desc) || isStandingOrderDesc(notes)
     const isRefund = amount < 0
 
-    const originalAmount = (installment && transactionAmountCol !== -1)
-      ? Math.abs(parseAmount(row[transactionAmountCol]) ?? 0)
+    const originalAmount = (installment && curTxAmount !== -1)
+      ? Math.abs(parseAmount(row[curTxAmount]) ?? 0)
       : null
 
     transactions.push({

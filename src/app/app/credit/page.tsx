@@ -53,7 +53,7 @@ export default function CreditPage() {
       const allTxns: ReturnType<typeof extractTransactions> = []
       const fileNames: string[] = []
       for (const file of files) {
-        const rows = await parseExcelFile(file)
+        const rows = await parseExcelFile(file, { allSheets: true })
         const txns = extractTransactions(rows, file.name, useCreditStore.getState().mergedLearnedDB())
         allTxns.push(...txns)
         fileNames.push(file.name)
