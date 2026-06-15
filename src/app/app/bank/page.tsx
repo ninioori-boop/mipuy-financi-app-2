@@ -6,7 +6,9 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useBankStore } from '@/stores/bankStore'
 import { parseExcelFile } from '@/lib/parseExcel'
 import { normalizeForLookup } from '@/lib/categorize'
-import { FileDropzone } from '@/components/credit/FileDropzone'
+import { aiHeaders } from '@/lib/getAuthToken'
+import { fetchWithRetry } from '@/lib/fetchWithRetry'
+import { fileToBase64, imageToJpegBase64 } from '@/lib/fileEncoding'
 import { detectCols, classifyRow, type Dir } from '@/lib/bankParse'
 
 type BankSection = 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
@@ -88,6 +90,41 @@ function groupByMerchant(txns: BankTxn[], sentRows: Set<number>): BankGroup[] {
 
 interface PickerState { desc: string; amount: number }
 
+// ── PDF / image bank statements (read by AI) ──
+// The AI route returns structured transactions; we turn them into the SAME
+// row shape the Excel pipeline produces (header + חובה/זכות columns), so the
+// existing grouping, direction detection and send-to-mapping work unchanged.
+type AiTxn = { date: string; desc: string; amount: number; dir: string }
+
+function parseBankTxns(text: string): AiTxn[] {
+  const m = text.match(/\{[\s\S]*\}/)
+  if (!m) return []
+  let parsed: unknown
+  try { parsed = JSON.parse(m[0].replace(/,\s*([}\]])/g, '$1')) } catch { return [] }
+  const arr = (parsed as { transactions?: unknown }).transactions
+  if (!Array.isArray(arr)) return []
+  return arr
+    .map((o) => {
+      const r = (o ?? {}) as Record<string, unknown>
+      return { date: String(r.date ?? ''), desc: String(r.desc ?? ''), amount: Number(r.amount) || 0, dir: String(r.dir ?? 'out') }
+    })
+    .filter((t) => t.amount > 0)
+}
+
+function bankRowsFromTxns(txns: AiTxn[]): unknown[][] {
+  // Columns the bank pipeline understands: date | desc | חובה (out) | זכות (in).
+  const rows: unknown[][] = [['תאריך', 'תיאור', 'חובה', 'זכות']]
+  for (const t of txns) {
+    const amt = Math.abs(t.amount)
+    if (!amt) continue
+    const parsed = t.date ? new Date(t.date) : null
+    const dateCell = parsed && !isNaN(parsed.getTime()) ? parsed : new Date()
+    const isIn = t.dir.toLowerCase() === 'in'
+    rows.push([dateCell, t.desc.trim() || 'תנועה', isIn ? '' : amt, isIn ? amt : ''])
+  }
+  return rows
+}
+
 export default function BankPage() {
   const { rawRows, fileName, sentRows: sentArr, reportMonths, setData, markSent, setReportMonths, reset } = useBankStore()
   const sentRows = new Set(sentArr)
@@ -107,8 +144,33 @@ export default function BankPage() {
     if (!file) return
     setIsLoading(true)
     try {
-      const rows = await parseExcelFile(file)
-      setData(rows, file.name)
+      const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+      const isImage = file.type.startsWith('image/')
+      if (isPdf || isImage) {
+        // Read the statement with AI → structured transactions → synthetic rows.
+        const data = isImage ? await imageToJpegBase64(file) : await fileToBase64(file)
+        const block = isImage
+          ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
+          : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+        const content: unknown[] = [{ type: 'text', text: 'חלץ את כל התנועות מדוח הבנק המצורף.' }, block]
+        const res = await fetchWithRetry('/api/bank-statement', {
+          method: 'POST',
+          headers: await aiHeaders(),
+          body: JSON.stringify({ content }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
+        }
+        const json = await res.json()
+        const txns = parseBankTxns((json as { text?: string }).text ?? '')
+        if (!txns.length) throw new Error('לא זוהו תנועות בקובץ')
+        setData(bankRowsFromTxns(txns), file.name)
+        toast.success(`נקראו ${txns.length} תנועות מהדוח`)
+      } else {
+        const rows = await parseExcelFile(file)
+        setData(rows, file.name)
+      }
       setActiveKey(null)
       setExpandedKeys(new Set())
       setDirOverride(new Map())
@@ -216,13 +278,23 @@ export default function BankPage() {
       <div className="rounded-xl border border-line bg-surface2 p-6">
         <h1 className="text-2xl font-bold text-gold mb-1">🏦 דוח עו&quot;ש</h1>
         <p className="text-muted-txt text-sm">
-          העלה קובץ בנק · המערכת מפרידה בין חיובים לזיכויים שנכנסו ומקבצת לפי שם · בחר מה להעביר ולאיזה סעיף
+          העלה דוח בנק (Excel · PDF · תמונה) · המערכת מפרידה בין חיובים לזיכויים שנכנסו ומקבצת לפי שם · בחר מה להעביר ולאיזה סעיף
         </p>
       </div>
 
       {/* Upload + months selector */}
       <div className="rounded-xl border border-line bg-surface2 p-6 space-y-4">
-        <FileDropzone onFiles={handleFiles} isLoading={isLoading} />
+        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
+          <input
+            type="file"
+            accept=".xlsx,.xls,.pdf,image/*"
+            className="hidden"
+            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
+          />
+          <span className="text-2xl">📂</span>
+          <span className="text-sm text-txt">העלה דוח בנק</span>
+          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונה / צילום</span>
+        </label>
 
         <div className="flex items-center gap-4 bg-surface border border-line rounded-xl px-4 py-3 flex-wrap">
           <span className="text-lg">📅</span>
