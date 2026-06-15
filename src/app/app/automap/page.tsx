@@ -148,6 +148,14 @@ export default function AutoMapPage() {
   // and by how much. The advisor confirms or cancels with full context.
   const [showCopyPreview, setShowCopyPreview] = useState(false)
 
+  // Smart-merge vs full-replace toggle inside the preview panel.
+  // 'merge' (the default): keep all existing mapping rows, add only result
+  //   rows whose normalized name doesn't already exist in the section.
+  //   Safe to run against a live client without wiping manual edits.
+  // 'replace' (legacy / explicit): wipe and overwrite with the result, as
+  //   the original copyToMapping did. Useful for fresh clients.
+  const [copyMode, setCopyMode] = useState<'merge' | 'replace'>('merge')
+
   // Route each file by type: Excel → parsed transactions (cheap/local);
   // PDF + images → base64 blocks the AI reads directly.
   // parseStatus is updated per-file so the user sees ✓/⏳/✗ next to each one
@@ -378,44 +386,118 @@ export default function AutoMapPage() {
     updateResult({ [key]: rows } as Partial<GeneratedMapping>)
   }
 
+  // Pre-fill the context textarea from the client's existing mapping rows.
+  // Useful when re-running the lab on an active client — the AI sees what's
+  // already mapped and focuses on extracting only the NEW / DIFFERENT items
+  // from the uploaded reports instead of re-deriving everything from scratch.
+  // Appends to whatever the advisor has already typed (doesn't wipe).
+  function prefillFromMapping() {
+    const m = useMappingStore.getState()
+    const lines: string[] = ['=== המיפוי הקיים של הלקוח ===']
+
+    const simpleSummary = (rows: { name: string; amount: number }[]): string =>
+      rows.map(r => `${r.name} ${Math.round(r.amount)}`).join(', ')
+    const annualSummary = (rows: { name: string; annualAmount: number }[]): string =>
+      rows.map(r => `${r.name} ${Math.round(r.annualAmount)}/שנה`).join(', ')
+
+    if (m.income.length)       lines.push(`הכנסות: ${simpleSummary(m.income)}`)
+    if (m.fixed.length)        lines.push(`קבועות: ${simpleSummary(m.fixed)}`)
+    if (m.variable.length)     lines.push(`משתנות: ${simpleSummary(m.variable)}`)
+    if (m.sub.length)          lines.push(`מנויים: ${simpleSummary(m.sub)}`)
+    if (m.ins.length)          lines.push(`ביטוחים: ${simpleSummary(m.ins)}`)
+    if (m.annual.length)       lines.push(`שנתיות: ${annualSummary(m.annual)}`)
+    if (m.debts.length)        lines.push(`חובות: ${m.debts.map(d => `${d.name} — יתרה ${Math.round(d.remainingBalance)}, חודשי ${Math.round(d.monthlyPayment)}`).join('; ')}`)
+    if (m.installments.length) lines.push(`תשלומים: ${m.installments.map(i => `${i.name} — ${Math.round(i.monthlyPayment)} × ${i.paidCount}/${i.totalCount}`).join('; ')}`)
+    if (m.savings.length)      lines.push(`חיסכון: ${m.savings.map(s => `${s.name} — ${Math.round(s.monthlyContribution)}/חודש`).join('; ')}`)
+
+    if (lines.length === 1) {
+      toast.warning('המיפוי הקיים ריק — אין מה לטעון')
+      return
+    }
+    lines.push('=== עדכן/הוסף לפי הנתונים החדשים שמועלים ===')
+
+    const summary = lines.join('\n')
+    const newContext = contextText.trim() ? `${contextText.trim()}\n\n${summary}` : summary
+    setContextText(newContext)
+    toast.success('📥 המיפוי הקיים נטען לקונטקסט')
+  }
+
+  // Normalized name comparison — trim + lowercase. Used by smart-merge to
+  // decide whether a generated row already exists in mappingStore.
+  function normName(s: string): string { return s.trim().toLowerCase() }
+
+  // Filter result rows to those whose name doesn't already appear in the
+  // existing section (matched by normName). Used in 'merge' mode below.
+  function newRowsOnly<T extends { name: string }>(newRows: T[], existing: { name: string }[]): T[] {
+    const seen = new Set(existing.map(r => normName(r.name)))
+    return newRows.filter(r => !seen.has(normName(r.name)))
+  }
+
   // Actual copy. Wrapped in a confirm step (the preview panel) so the user
   // sees exactly what they're about to overwrite before committing.
+  // In 'merge' mode (default): preserves all existing mapping rows and adds
+  // only result rows whose name doesn't already exist. Safe on live clients.
+  // In 'replace' mode: wipes the mapping and overwrites with the result.
   function doCopyToMapping() {
     if (!result) return
-    useMappingStore.setState({
-      income:   result.income.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
-      fixed:    result.fixed.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
-      sub:      result.sub.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
-      ins:      result.ins.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
-      variable: result.variable.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
-      annual:   result.annual.map(r => ({ id: mkId(), name: r.name, annualAmount: Math.round(r.annualAmount) })),
-      debts:    result.debts.map(r => ({ id: mkId(), name: r.name, originalBalance: Math.round(r.originalBalance), remainingBalance: Math.round(r.remainingBalance), interestRate: r.interestRate, remainingMonths: Math.round(r.remainingMonths), monthlyPayment: Math.round(r.monthlyPayment) })),
-      installments: result.installments.map(r => ({ id: mkId(), name: r.name, totalAmount: Math.round(r.totalAmount), monthlyPayment: Math.round(r.monthlyPayment), paidCount: Math.round(r.paidCount), totalCount: Math.round(r.totalCount) })),
-      savings:  result.savings.map(r => ({ id: mkId(), name: r.name, monthlyContribution: Math.round(r.monthlyContribution), accumulated: Math.round(r.accumulated), feeBalance: r.feeBalance, feeDeposit: r.feeDeposit })),
-      varMonths: 1,
-    })
+    const existing = useMappingStore.getState()
+
+    if (copyMode === 'replace') {
+      useMappingStore.setState({
+        income:   result.income.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
+        fixed:    result.fixed.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
+        sub:      result.sub.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
+        ins:      result.ins.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
+        variable: result.variable.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
+        annual:   result.annual.map(r => ({ id: mkId(), name: r.name, annualAmount: Math.round(r.annualAmount) })),
+        debts:    result.debts.map(r => ({ id: mkId(), name: r.name, originalBalance: Math.round(r.originalBalance), remainingBalance: Math.round(r.remainingBalance), interestRate: r.interestRate, remainingMonths: Math.round(r.remainingMonths), monthlyPayment: Math.round(r.monthlyPayment) })),
+        installments: result.installments.map(r => ({ id: mkId(), name: r.name, totalAmount: Math.round(r.totalAmount), monthlyPayment: Math.round(r.monthlyPayment), paidCount: Math.round(r.paidCount), totalCount: Math.round(r.totalCount) })),
+        savings:  result.savings.map(r => ({ id: mkId(), name: r.name, monthlyContribution: Math.round(r.monthlyContribution), accumulated: Math.round(r.accumulated), feeBalance: r.feeBalance, feeDeposit: r.feeDeposit })),
+        varMonths: 1,
+      })
+    } else {
+      // merge mode: existing rows untouched, new rows appended where the
+      // normalized name doesn't already exist in the section.
+      useMappingStore.setState({
+        income:   [...existing.income,       ...newRowsOnly(result.income,       existing.income).map(r       => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
+        fixed:    [...existing.fixed,        ...newRowsOnly(result.fixed,        existing.fixed).map(r        => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
+        sub:      [...existing.sub,          ...newRowsOnly(result.sub,          existing.sub).map(r          => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
+        ins:      [...existing.ins,          ...newRowsOnly(result.ins,          existing.ins).map(r          => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
+        variable: [...existing.variable,     ...newRowsOnly(result.variable,     existing.variable).map(r     => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
+        annual:   [...existing.annual,       ...newRowsOnly(result.annual,       existing.annual).map(r       => ({ id: mkId(), name: r.name, annualAmount: Math.round(r.annualAmount) }))],
+        debts:    [...existing.debts,        ...newRowsOnly(result.debts,        existing.debts).map(r        => ({ id: mkId(), name: r.name, originalBalance: Math.round(r.originalBalance), remainingBalance: Math.round(r.remainingBalance), interestRate: r.interestRate, remainingMonths: Math.round(r.remainingMonths), monthlyPayment: Math.round(r.monthlyPayment) }))],
+        installments: [...existing.installments, ...newRowsOnly(result.installments, existing.installments).map(r => ({ id: mkId(), name: r.name, totalAmount: Math.round(r.totalAmount), monthlyPayment: Math.round(r.monthlyPayment), paidCount: Math.round(r.paidCount), totalCount: Math.round(r.totalCount) }))],
+        savings:  [...existing.savings,      ...newRowsOnly(result.savings,      existing.savings).map(r      => ({ id: mkId(), name: r.name, monthlyContribution: Math.round(r.monthlyContribution), accumulated: Math.round(r.accumulated), feeBalance: r.feeBalance, feeDeposit: r.feeDeposit }))],
+        // varMonths preserved in merge mode — advisor's existing setting stays
+      })
+    }
+
     setShowCopyPreview(false)
-    toast.success('📋 הועתק למיפוי הרגיל', {
+    toast.success(copyMode === 'replace' ? '📋 הועתק למיפוי (החלפה מלאה)' : '🔀 מוזג למיפוי — שורות קיימות נשמרו', {
       action: { label: 'פתח מיפוי', onClick: () => router.push('/app/mapping') },
     })
   }
 
   // Per-section before/after counts for the copy preview panel. Read from
   // mappingStore + result; safe to call without a result (returns nulls).
+  // The "next" column depends on copyMode — in merge mode we only count the
+  // rows that would actually be added (skipping name duplicates).
   function copyDiff() {
     if (!result) return null
     const m = useMappingStore.getState()
     const len = (a: unknown): number => Array.isArray(a) ? a.length : 0
+    const nextFor = <T extends { name: string }>(newRows: T[], existing: { name: string }[]): number =>
+      copyMode === 'replace' ? newRows.length : existing.length + newRowsOnly(newRows, existing).length
     return [
-      { key: 'income',       label: '💰 הכנסות',         current: len(m.income),       next: len(result.income) },
-      { key: 'fixed',        label: '📌 הוצאות קבועות',  current: len(m.fixed),        next: len(result.fixed) },
-      { key: 'variable',     label: '🛒 הוצאות משתנות',  current: len(m.variable),     next: len(result.variable) },
-      { key: 'sub',          label: '🔄 מנויים',         current: len(m.sub),          next: len(result.sub) },
-      { key: 'ins',          label: '🛡️ ביטוחים',        current: len(m.ins),          next: len(result.ins) },
-      { key: 'annual',       label: '📆 שנתיות',         current: len(m.annual),       next: len(result.annual) },
-      { key: 'debts',        label: '💳 חובות',          current: len(m.debts),        next: len(result.debts) },
-      { key: 'installments', label: '🛍️ תשלומים',        current: len(m.installments), next: len(result.installments) },
-      { key: 'savings',      label: '🏦 חיסכון',         current: len(m.savings),      next: len(result.savings) },
+      { key: 'income',       label: '💰 הכנסות',         current: len(m.income),       next: nextFor(result.income,       m.income) },
+      { key: 'fixed',        label: '📌 הוצאות קבועות',  current: len(m.fixed),        next: nextFor(result.fixed,        m.fixed) },
+      { key: 'variable',     label: '🛒 הוצאות משתנות',  current: len(m.variable),     next: nextFor(result.variable,     m.variable) },
+      { key: 'sub',          label: '🔄 מנויים',         current: len(m.sub),          next: nextFor(result.sub,          m.sub) },
+      { key: 'ins',          label: '🛡️ ביטוחים',        current: len(m.ins),          next: nextFor(result.ins,          m.ins) },
+      { key: 'annual',       label: '📆 שנתיות',         current: len(m.annual),       next: nextFor(result.annual,       m.annual) },
+      { key: 'debts',        label: '💳 חובות',          current: len(m.debts),        next: nextFor(result.debts,        m.debts) },
+      { key: 'installments', label: '🛍️ תשלומים',        current: len(m.installments), next: nextFor(result.installments, m.installments) },
+      { key: 'savings',      label: '🏦 חיסכון',         current: len(m.savings),      next: nextFor(result.savings,      m.savings) },
     ]
   }
 
@@ -573,7 +655,17 @@ export default function AutoMapPage() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs text-muted-txt">נתונים נוספים (טקסט חופשי) — הכנסות, הלוואות, נכסים, חיסכון, מצב משפחתי…</label>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className="text-xs text-muted-txt">נתונים נוספים (טקסט חופשי) — הכנסות, הלוואות, נכסים, חיסכון, מצב משפחתי…</label>
+            <button
+              type="button"
+              onClick={prefillFromMapping}
+              className="text-xs px-2.5 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors whitespace-nowrap"
+              title="טוען את המיפוי הקיים של הלקוח כקונטקסט — ה‑AI יראה אותו וידע מה כבר קיים"
+            >
+              📥 טען מהמיפוי הקיים
+            </button>
+          </div>
           <textarea value={contextText} onChange={e => setContextText(e.target.value)} rows={5}
             placeholder={'לדוגמה:\nמשכורת נטו 18,000\nמשכנתא: יתרה 800,000, החזר 4,500, נותרו 22 שנה\nקרן חירום 30,000, מפקידים 1,000 לחודש'}
             className={`${inputCls} w-full leading-relaxed`} />
@@ -621,8 +713,29 @@ export default function AutoMapPage() {
               return (
                 <div className="rounded-lg border-2 border-gold/40 bg-gold/5 p-3 sm:p-4 space-y-3">
                   <div className="text-sm font-semibold text-gold">📋 השוואה לפני העתקה</div>
+
+                  {/* Mode toggle — merge (safe, keeps existing rows) vs
+                      replace (legacy, wipes mapping). Default is merge. */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-muted-txt">אופן ההעתקה:</span>
+                    <button
+                      onClick={() => setCopyMode('merge')}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${copyMode === 'merge' ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                    >
+                      🔀 מיזוג חכם
+                    </button>
+                    <button
+                      onClick={() => setCopyMode('replace')}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${copyMode === 'replace' ? 'border-expense bg-expense/10 text-expense font-semibold' : 'border-line bg-surface text-muted-txt hover:border-expense/40'}`}
+                    >
+                      ♻️ החלפה מלאה
+                    </button>
+                  </div>
+
                   <div className="text-xs text-muted-txt">
-                    זה יחליף את המיפוי הנוכחי שלך בתוצאת ה-AI. בדוק שמספרים בעמודה "אחרי" הגיוניים — הם יהפכו לערכים החדשים במיפוי.
+                    {copyMode === 'merge'
+                      ? 'מיזוג: שורות קיימות במיפוי נשארות. רק שורות חדשות (לפי שם) יתווספו. עריכות ידניות לא ידרסו.'
+                      : 'החלפה: כל המיפוי הנוכחי יימחק ויוחלף בתוצאת ה‑AI. עריכות ידניות יאבדו.'}
                   </div>
                   <div className="rounded-lg overflow-hidden border border-line">
                     <table className="w-full text-xs">
