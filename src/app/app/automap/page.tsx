@@ -148,6 +148,10 @@ export default function AutoMapPage() {
   // and by how much. The advisor confirms or cancels with full context.
   const [showCopyPreview, setShowCopyPreview] = useState(false)
 
+  // Tracks which variable-category group is currently expanded to show its
+  // underlying credit transactions. Null = all collapsed. One at a time.
+  const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
+
   // Smart-merge vs full-replace toggle inside the preview panel.
   // 'merge' (the default): keep all existing mapping rows, add only result
   //   rows whose normalized name doesn't already exist in the section.
@@ -803,10 +807,113 @@ export default function AutoMapPage() {
             )}
           </div>
 
-          {/* Simple sections — always rendered after a result exists so the
-              advisor can add manual rows to ANY section (not just ones the
-              AI happened to populate). */}
-          {SIMPLE_SECTIONS.map(({ key, label, icon }) => (
+          {/* Variable section — special grouped render with txns drill-down.
+              The AI returns sub-rows per merchant type ("סופרמרקטים 1800",
+              "פירות וירקות 400") and tags each with its parent ALL_CATEGORIES
+              entry ("מזון לבית"). We bucket the rows by category, show one
+              card per category with all its sub-rows, and let the advisor
+              expand the underlying credit transactions that fed each group
+              — exactly what's needed to walk a client through "where did my
+              money go in food this month". */}
+          {(() => {
+            const variableRows = result.variable.map((r, i) => ({ ...r, _idx: i }))
+            type VarGroup = { category: string; rows: typeof variableRows }
+            const groupsMap = new Map<string, VarGroup>()
+            for (const r of variableRows) {
+              const cat = r.category?.trim() || 'ללא קטגוריה'
+              const g = groupsMap.get(cat) ?? { category: cat, rows: [] }
+              g.rows.push(r)
+              groupsMap.set(cat, g)
+            }
+            const groups = [...groupsMap.values()].sort((a, b) =>
+              b.rows.reduce((s, r) => s + r.amount, 0) - a.rows.reduce((s, r) => s + r.amount, 0))
+
+            return (
+              <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-txt">🛒 הוצאות משתנות</h3>
+                  <span className="text-xs text-muted-txt tabular-nums">{fmt(result.variable.reduce((s, r) => s + r.amount, 0))}</span>
+                </div>
+
+                {groups.length === 0 && (
+                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
+                )}
+
+                {groups.map(g => {
+                  const groupTotal = g.rows.reduce((s, r) => s + r.amount, 0)
+                  const matchingTxns = txns.filter(t => !t.isRefund && t.category === g.category)
+                  const isOpen = openCategoryTxns === g.category
+                  return (
+                    <div key={g.category} className="rounded-lg border border-line/60 bg-surface/40 p-2.5 space-y-2">
+                      {/* Category header */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-gold">{g.category}</span>
+                        <span className="text-[10px] text-muted-txt tabular-nums">{g.rows.length} שורות · {fmt(groupTotal)}</span>
+                      </div>
+
+                      {/* Sub-rows */}
+                      {g.rows.map(r => (
+                        <div key={r._idx} className="flex items-center gap-2 group flex-wrap">
+                          <input value={r.name} onChange={e => editSimple('variable', r._idx, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                          <RowMetaChip confidence={r.confidence} source={r.source} />
+                          <input type="number" value={r.amount || ''} onChange={e => editSimple('variable', r._idx, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
+                          <button onClick={() => delRow('variable', r._idx)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
+                        </div>
+                      ))}
+
+                      {/* Expandable underlying transactions from the local Excel parse.
+                          Shown only when there ARE matching txns for this category. */}
+                      {matchingTxns.length > 0 && (
+                        <>
+                          <button
+                            onClick={() => setOpenCategoryTxns(isOpen ? null : g.category)}
+                            className="w-full text-start text-[11px] px-2 py-1 rounded border border-line bg-surface hover:border-gold/40 hover:text-gold transition-colors flex items-center justify-between gap-2"
+                          >
+                            <span>📊 פירוט: {matchingTxns.length} עסקאות מהדוחות</span>
+                            <span>{isOpen ? '▲' : '▶'}</span>
+                          </button>
+                          {isOpen && (
+                            <div className="rounded-lg border border-line overflow-x-auto">
+                              <table className="w-full text-[11px]">
+                                <thead className="bg-surface2 border-b border-line">
+                                  <tr>
+                                    <th className="text-start px-2 py-1 font-medium text-muted-txt">תיאור</th>
+                                    <th className="text-start px-2 py-1 font-medium text-muted-txt whitespace-nowrap">תאריך</th>
+                                    <th className="text-end px-2 py-1 font-medium text-muted-txt">סכום</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-line/50">
+                                  {[...matchingTxns].sort((a, b) => b.amount - a.amount).map((t, i) => (
+                                    <tr key={i} className="hover:bg-surface2/40">
+                                      <td className="px-2 py-1 max-w-[200px] truncate text-txt">{t.desc}</td>
+                                      <td className="px-2 py-1 text-muted-txt whitespace-nowrap">{t.date}</td>
+                                      <td className="px-2 py-1 text-end font-medium text-gold tabular-nums whitespace-nowrap">{fmt(t.amount)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+
+                <button
+                  onClick={() => addSimpleRow('variable')}
+                  className="text-xs text-muted-txt hover:text-gold transition-colors"
+                >
+                  + הוסף שורה
+                </button>
+              </div>
+            )
+          })()}
+
+          {/* Other simple sections (income / fixed / sub / ins) — flat
+              rendering, since they're typically one row per category and
+              don't benefit from the variable-style grouping. */}
+          {SIMPLE_SECTIONS.filter(s => s.key !== 'variable').map(({ key, label, icon }) => (
             <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-txt">{icon} {label}</h3>

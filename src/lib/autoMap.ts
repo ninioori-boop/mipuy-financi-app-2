@@ -11,13 +11,17 @@ import {
 
 // Optional per-row meta. confidence quantifies the AI's certainty;
 // source is a short free-text label of where the row came from
-// (e.g. "אשראי", "PDF: תלוש שכר", "תמונה: ביטוח רכב", "הערה").
-// Both are optional so older generated results (or rows the model
-// chooses to omit them on) keep working as before.
+// (e.g. "אשראי", "PDF: תלוש שכר", "תמונה: ביטוח רכב", "הערה");
+// category is the parent ALL_CATEGORIES entry — used by the UI to
+// surface the underlying credit transactions under each row group
+// (the advisor can drill from "סופרמרקטים 1800" back to the actual
+// shufersal/rami-levy lines that summed to it).
+// All three are optional so older generated results keep working.
 export type GenConfidence = 'high' | 'medium' | 'low'
 export interface GenRowMeta {
   confidence?: GenConfidence
   source?:     string
+  category?:   string
 }
 
 export interface GenSimpleRow extends GenRowMeta { name: string; amount: number }
@@ -105,20 +109,22 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — י
 - "PDF: דוח שנתי 2025" / "תמונה: ביטוח רכב"
 - "הערה מהיועץ" / "הסקה מהקשר"
 
-החזרה של שני השדות **רצויה לכל שורה**. אם באמת אינך יכול לקבוע — דלג עליהם (האפשרות הזו תופיע בממשק כ‑"לא צוין").
+**category** (קטגוריה ראשית) — לכל שורת הוצאה/הכנסה: ציין את הקטגוריה הראשית מ‑ALL_CATEGORIES שאליה השורה שייכת. זה קריטי במיוחד ל‑variable: כאשר אתה שובר את "מזון לבית" לשלוש שורות ("סופרמרקטים", "פירות וירקות", "מאפיות") — כל אחת מהן חייבת לקבל category="מזון לבית". זה מאפשר לממשק לקבץ את השורות מאחורי הקטגוריה הראשית ולהציג את העסקאות הגולמיות שהוליכו לסיכום.
+
+החזרה של שלושת השדות **רצויה לכל שורה**. אם באמת אינך יכול לקבוע — דלג עליהם (יופיע בממשק כ‑"לא צוין").
 
 ## פלט
 החזר **JSON תקין בלבד**, ללא טקסט נוסף, במבנה המדויק הזה (מערך ריק אם אין):
 {
-  "income":[{"name":"","amount":0,"confidence":"high","source":""}],
-  "fixed":[{"name":"","amount":0,"confidence":"high","source":""}],
-  "sub":[{"name":"","amount":0,"confidence":"high","source":""}],
-  "ins":[{"name":"","amount":0,"confidence":"high","source":""}],
-  "variable":[{"name":"","amount":0,"confidence":"high","source":""}],
-  "annual":[{"name":"","annualAmount":0,"confidence":"high","source":""}],
-  "debts":[{"name":"","originalBalance":0,"remainingBalance":0,"interestRate":0,"remainingMonths":0,"monthlyPayment":0,"confidence":"high","source":""}],
-  "installments":[{"name":"","totalAmount":0,"monthlyPayment":0,"paidCount":0,"totalCount":0,"confidence":"high","source":""}],
-  "savings":[{"name":"","monthlyContribution":0,"accumulated":0,"feeBalance":0,"feeDeposit":0,"confidence":"high","source":""}],
+  "income":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
+  "fixed":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
+  "sub":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
+  "ins":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
+  "variable":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
+  "annual":[{"name":"","annualAmount":0,"confidence":"high","source":"","category":""}],
+  "debts":[{"name":"","originalBalance":0,"remainingBalance":0,"interestRate":0,"remainingMonths":0,"monthlyPayment":0,"confidence":"high","source":"","category":""}],
+  "installments":[{"name":"","totalAmount":0,"monthlyPayment":0,"paidCount":0,"totalCount":0,"confidence":"high","source":"","category":""}],
+  "savings":[{"name":"","monthlyContribution":0,"accumulated":0,"feeBalance":0,"feeDeposit":0,"confidence":"high","source":"","category":""}],
   "assessment":"סיכום קצר בעברית: תזרים משוער, דגלים אדומים, והמלצות מרכזיות."
 }`
 
@@ -145,9 +151,12 @@ function meta(r: Record<string, unknown>): GenRowMeta {
     c === 'high' || c === 'medium' || c === 'low' ? c : undefined
   const src =
     typeof r.source === 'string' && r.source.trim() ? r.source.trim() : undefined
+  const cat =
+    typeof r.category === 'string' && r.category.trim() ? r.category.trim() : undefined
   return {
     ...(conf ? { confidence: conf } : {}),
     ...(src  ? { source: src }      : {}),
+    ...(cat  ? { category: cat }    : {}),
   }
 }
 
