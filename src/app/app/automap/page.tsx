@@ -17,6 +17,39 @@ import type { Transaction } from '@/types/transaction'
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 const mkId = () => Math.random().toString(36).slice(2)
 
+// Small chip rendered next to each generated row to surface the AI's
+// confidence + source attribution. The chip is the SOURCE text wrapped
+// in a confidence-colored border, with the full label on hover. If the
+// AI didn't return either field for a row, the chip is omitted (older
+// results stay visually unchanged).
+function RowMetaChip({ confidence, source }: { confidence?: 'high' | 'medium' | 'low'; source?: string }) {
+  if (!confidence && !source) return null
+  const palette: Record<string, string> = {
+    high:   'border-income/40 text-income bg-income/10',
+    medium: 'border-gold/40 text-gold bg-gold/10',
+    low:    'border-expense/40 text-expense bg-expense/10',
+  }
+  const label: Record<string, string> = {
+    high:   'אמין',
+    medium: 'בינוני',
+    low:    'נמוך',
+  }
+  const cls     = (confidence && palette[confidence]) ?? 'border-line text-muted-txt bg-surface'
+  const confTxt = confidence ? label[confidence] : ''
+  const tooltip = [
+    confTxt ? `אמינות: ${confTxt}` : '',
+    source ? `מקור: ${source}` : '',
+  ].filter(Boolean).join(' · ')
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 max-w-[110px] truncate ${cls}`}
+      title={tooltip}
+    >
+      {source ?? confTxt}
+    </span>
+  )
+}
+
 // Experimental advisor-only tool. Anyone else is redirected away even on a direct URL.
 const ADVISOR_EMAIL = 'ninioori@gmail.com'
 
@@ -649,8 +682,9 @@ export default function AutoMapPage() {
                 <span className="text-xs text-muted-txt tabular-nums">{fmt(result[key].reduce((s, r) => s + r.amount, 0))}</span>
               </div>
               {result[key].map((r, i) => (
-                <div key={i} className="flex items-center gap-2 group">
-                  <input value={r.name} onChange={e => editSimple(key, i, 'name', e.target.value)} className={`${inputCls} flex-1`} placeholder="שם" />
+                <div key={i} className="flex items-center gap-2 group flex-wrap">
+                  <input value={r.name} onChange={e => editSimple(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                  <RowMetaChip confidence={r.confidence} source={r.source} />
                   <input type="number" value={r.amount || ''} onChange={e => editSimple(key, i, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
                   <button onClick={() => delRow(key, i)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
                 </div>
@@ -674,8 +708,9 @@ export default function AutoMapPage() {
               <span className="text-xs text-muted-txt tabular-nums">{fmt(result.annual.reduce((s, r) => s + r.annualAmount, 0))}/שנה</span>
             </div>
             {result.annual.map((r, i) => (
-              <div key={i} className="flex items-center gap-2 group">
-                <input value={r.name} onChange={e => editAnnual(i, 'name', e.target.value)} className={`${inputCls} flex-1`} placeholder="שם" />
+              <div key={i} className="flex items-center gap-2 group flex-wrap">
+                <input value={r.name} onChange={e => editAnnual(i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                <RowMetaChip confidence={r.confidence} source={r.source} />
                 <input type="number" value={r.annualAmount || ''} onChange={e => editAnnual(i, 'annualAmount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="שנתי" />
                 <button onClick={() => delRow('annual', i)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
               </div>
@@ -701,8 +736,9 @@ export default function AutoMapPage() {
               <h3 className="text-sm font-semibold text-txt">{label}</h3>
               {(result[key] as unknown as Record<string, unknown>[]).map((r, i) => (
                 <div key={i} className="bg-surface/40 rounded-lg p-2 space-y-1.5 group">
-                  <div className="flex items-center gap-2">
-                    <input value={String(r.name ?? '')} onChange={e => editComplex(key, i, 'name', e.target.value)} className={`${inputCls} flex-1`} placeholder="שם" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input value={String(r.name ?? '')} onChange={e => editComplex(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                    <RowMetaChip confidence={r.confidence as 'high' | 'medium' | 'low' | undefined} source={typeof r.source === 'string' ? r.source : undefined} />
                     <button onClick={() => delRow(key, i)} className="text-muted-txt hover:text-expense text-sm">×</button>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">

@@ -9,17 +9,28 @@ import {
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
 
-export interface GenSimpleRow { name: string; amount: number }
-export interface GenAnnualRow { name: string; annualAmount: number }
-export interface GenDebtRow {
+// Optional per-row meta. confidence quantifies the AI's certainty;
+// source is a short free-text label of where the row came from
+// (e.g. "אשראי", "PDF: תלוש שכר", "תמונה: ביטוח רכב", "הערה").
+// Both are optional so older generated results (or rows the model
+// chooses to omit them on) keep working as before.
+export type GenConfidence = 'high' | 'medium' | 'low'
+export interface GenRowMeta {
+  confidence?: GenConfidence
+  source?:     string
+}
+
+export interface GenSimpleRow extends GenRowMeta { name: string; amount: number }
+export interface GenAnnualRow extends GenRowMeta { name: string; annualAmount: number }
+export interface GenDebtRow extends GenRowMeta {
   name: string; originalBalance: number; remainingBalance: number
   interestRate: number; remainingMonths: number; monthlyPayment: number
 }
-export interface GenInstallmentRow {
+export interface GenInstallmentRow extends GenRowMeta {
   name: string; totalAmount: number; monthlyPayment: number
   paidCount: number; totalCount: number
 }
-export interface GenSavingRow {
+export interface GenSavingRow extends GenRowMeta {
   name: string; monthlyContribution: number; accumulated: number
   feeBalance: number; feeDeposit: number
 }
@@ -81,18 +92,33 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — י
 - אם אין מספיק נתונים להפרדה אמינה — שורה אחת ברמת הקטגוריה זה בסדר. אל תמציא תת‑סוגים.
 - ההפרדה רלוונטית בעיקר ל‑variable. הסעיפים fixed/sub/ins/annual נשארים שורה אחת לקטגוריה (חיובים מובהקים).
 
+## אמינות ומקור (confidence + source) — שדות חובה בכל שורה
+לכל שורה הוסף שני שדות אופציונליים שעוזרים ליועץ לדעת איפה לבדוק לעומק:
+
+**confidence** (אמינות הנתון) — בחר אחד מ:
+- "high" — הסכום נלקח ישירות משורה ברורה בקובץ (תא ב‑Excel, שורה מסומנת בדוח PDF, סיכום שאתה רואה בבירור).
+- "medium" — חישוב/ממוצע ממספר עסקאות, או זיהוי מתמונה איכותית. סביר, אך לא ישיר.
+- "low" — הסקה מהקשר, מטקסט חופשי של היועץ בלבד, או ניחוש מבוסס‑כלל.
+
+**source** (מקור) — מחרוזת קצרה בעברית שמתארת מאיפה הנתון הגיע. דוגמאות:
+- "אשראי" / "עו"ש" / "תלוש שכר" / "דוח הלוואה"
+- "PDF: דוח שנתי 2025" / "תמונה: ביטוח רכב"
+- "הערה מהיועץ" / "הסקה מהקשר"
+
+החזרה של שני השדות **רצויה לכל שורה**. אם באמת אינך יכול לקבוע — דלג עליהם (האפשרות הזו תופיע בממשק כ‑"לא צוין").
+
 ## פלט
 החזר **JSON תקין בלבד**, ללא טקסט נוסף, במבנה המדויק הזה (מערך ריק אם אין):
 {
-  "income":[{"name":"","amount":0}],
-  "fixed":[{"name":"","amount":0}],
-  "sub":[{"name":"","amount":0}],
-  "ins":[{"name":"","amount":0}],
-  "variable":[{"name":"","amount":0}],
-  "annual":[{"name":"","annualAmount":0}],
-  "debts":[{"name":"","originalBalance":0,"remainingBalance":0,"interestRate":0,"remainingMonths":0,"monthlyPayment":0}],
-  "installments":[{"name":"","totalAmount":0,"monthlyPayment":0,"paidCount":0,"totalCount":0}],
-  "savings":[{"name":"","monthlyContribution":0,"accumulated":0,"feeBalance":0,"feeDeposit":0}],
+  "income":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "fixed":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "sub":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "ins":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "variable":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "annual":[{"name":"","annualAmount":0,"confidence":"high","source":""}],
+  "debts":[{"name":"","originalBalance":0,"remainingBalance":0,"interestRate":0,"remainingMonths":0,"monthlyPayment":0,"confidence":"high","source":""}],
+  "installments":[{"name":"","totalAmount":0,"monthlyPayment":0,"paidCount":0,"totalCount":0,"confidence":"high","source":""}],
+  "savings":[{"name":"","monthlyContribution":0,"accumulated":0,"feeBalance":0,"feeDeposit":0,"confidence":"high","source":""}],
   "assessment":"סיכום קצר בעברית: תזרים משוער, דגלים אדומים, והמלצות מרכזיות."
 }`
 
@@ -111,8 +137,22 @@ function arr(v: unknown): unknown[] {
 const obj = (v: unknown): Record<string, unknown> =>
   (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
 
+// Pull optional confidence + source out of a raw row. Missing/invalid values
+// drop out cleanly — the UI shows "—" / no chip rather than crashing.
+function meta(r: Record<string, unknown>): GenRowMeta {
+  const c   = r.confidence
+  const conf: GenConfidence | undefined =
+    c === 'high' || c === 'medium' || c === 'low' ? c : undefined
+  const src =
+    typeof r.source === 'string' && r.source.trim() ? r.source.trim() : undefined
+  return {
+    ...(conf ? { confidence: conf } : {}),
+    ...(src  ? { source: src }      : {}),
+  }
+}
+
 const simple = (rows: unknown[]): GenSimpleRow[] =>
-  rows.map(obj).map(r => ({ name: str(r.name), amount: num(r.amount) })).filter(r => r.name || r.amount)
+  rows.map(obj).map(r => ({ name: str(r.name), amount: num(r.amount), ...meta(r) })).filter(r => r.name || r.amount)
 
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
@@ -126,18 +166,21 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
     sub:      simple(arr(raw.sub)),
     ins:      simple(arr(raw.ins)),
     variable: simple(arr(raw.variable)),
-    annual:   arr(raw.annual).map(obj).map(r => ({ name: str(r.name), annualAmount: num(r.annualAmount) })).filter(r => r.name || r.annualAmount),
+    annual:   arr(raw.annual).map(obj).map(r => ({ name: str(r.name), annualAmount: num(r.annualAmount), ...meta(r) })).filter(r => r.name || r.annualAmount),
     debts:    arr(raw.debts).map(obj).map(r => ({
       name: str(r.name), originalBalance: num(r.originalBalance), remainingBalance: num(r.remainingBalance),
       interestRate: num(r.interestRate), remainingMonths: num(r.remainingMonths), monthlyPayment: num(r.monthlyPayment),
+      ...meta(r),
     })).filter(r => r.name || r.monthlyPayment || r.remainingBalance),
     installments: arr(raw.installments).map(obj).map(r => ({
       name: str(r.name), totalAmount: num(r.totalAmount), monthlyPayment: num(r.monthlyPayment),
       paidCount: num(r.paidCount), totalCount: num(r.totalCount),
+      ...meta(r),
     })).filter(r => r.name || r.monthlyPayment || r.totalAmount),
     savings: arr(raw.savings).map(obj).map(r => ({
       name: str(r.name), monthlyContribution: num(r.monthlyContribution), accumulated: num(r.accumulated),
       feeBalance: num(r.feeBalance), feeDeposit: num(r.feeDeposit),
+      ...meta(r),
     })).filter(r => r.name || r.monthlyContribution || r.accumulated),
     assessment: str(raw.assessment),
   }
