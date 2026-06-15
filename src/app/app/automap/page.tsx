@@ -115,7 +115,11 @@ const inputCls = 'rounded-lg border border-line bg-surface px-2 py-1.5 text-sm t
 export default function AutoMapPage() {
   const router = useRouter()
   const { user } = useAuthStore()
-  const { contextText, reportMonths, result, setContextText, setReportMonths, setResult, updateResult, reset } = useAutoMapStore()
+  const {
+    contextText, reportMonths, result, drafts,
+    setContextText, setReportMonths, setResult, updateResult, reset,
+    saveDraft, loadDraft, deleteDraft,
+  } = useAutoMapStore()
 
   // Full page-level guard: only the advisor may view this, even via direct URL.
   const isAdvisor = !!user && user.email === ADVISOR_EMAIL
@@ -151,6 +155,9 @@ export default function AutoMapPage() {
   // Tracks which variable-category group is currently expanded to show its
   // underlying credit transactions. Null = all collapsed. One at a time.
   const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
+
+  // Drafts panel collapsed/expanded — kept local, doesn't need persistence.
+  const [showDrafts, setShowDrafts] = useState(false)
 
   // Smart-merge vs full-replace toggle inside the preview panel.
   // 'merge' (the default): keep all existing mapping rows, add only result
@@ -390,6 +397,36 @@ export default function AutoMapPage() {
     updateResult({ [key]: rows } as Partial<GeneratedMapping>)
   }
 
+  // Save the current session (context + months + result) as a named draft.
+  // The advisor names the draft via prompt() — quick + good-enough for the
+  // advisor-only sandbox; can graduate to a proper modal if drafts grow.
+  function handleSaveDraft() {
+    if (!result) {
+      toast.warning('אין תוצאה לשמירה — צור מיפוי קודם')
+      return
+    }
+    const name = window.prompt('שם הטיוטה (למשל "יוסי כהן - יוני 2026"):', '') ?? ''
+    if (name === '') return
+    const id = saveDraft(name)
+    if (id) toast.success(`💾 הטיוטה "${name.trim() || 'ללא שם'}" נשמרה`)
+  }
+
+  // Load a draft into the live editor. If there's an existing result, warn
+  // first — loading overwrites contextText / reportMonths / result.
+  function handleLoadDraft(id: string, name: string) {
+    if (result && !window.confirm(`לטעון את "${name}"? זה ידרוס את התוצאה הנוכחית.`)) return
+    if (loadDraft(id)) {
+      toast.success(`📂 הטיוטה "${name}" נטענה`)
+      setShowDrafts(false)
+    }
+  }
+
+  function handleDeleteDraft(id: string, name: string) {
+    if (!window.confirm(`למחוק את הטיוטה "${name}"?`)) return
+    deleteDraft(id)
+    toast.success('🗑️ הטיוטה נמחקה')
+  }
+
   // Pre-fill the context textarea from the client's existing mapping rows.
   // Useful when re-running the lab on an active client — the AI sees what's
   // already mapped and focuses on extracting only the NEW / DIFFERENT items
@@ -527,6 +564,48 @@ export default function AutoMapPage() {
           <strong className="text-txt"> מנותק מהמערכת</strong> — שום דבר לא נשמר למיפוי הרגיל עד שתלחץ "העתק למיפוי".
         </p>
       </div>
+
+      {/* Saved drafts — only rendered when there are any. Collapsed by default;
+          the badge shows the count so the advisor can see at a glance how
+          many past sessions are recoverable without paying for a fresh AI run. */}
+      {drafts.length > 0 && (
+        <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
+          <button
+            onClick={() => setShowDrafts(v => !v)}
+            className="w-full flex items-center justify-between gap-2 text-sm font-semibold text-txt hover:text-gold transition-colors"
+          >
+            <span>📂 טיוטות שמורות ({drafts.length})</span>
+            <span className="text-muted-txt">{showDrafts ? '▲' : '▼'}</span>
+          </button>
+          {showDrafts && (
+            <div className="space-y-1.5">
+              {drafts.map(d => (
+                <div key={d.id} className="flex items-center gap-2 rounded-lg border border-line/60 bg-surface px-3 py-2 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-txt truncate">{d.name}</div>
+                    <div className="text-[11px] text-muted-txt">
+                      נשמר {new Date(d.savedAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleLoadDraft(d.id, d.name)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 transition-colors whitespace-nowrap"
+                  >
+                    📂 טען
+                  </button>
+                  <button
+                    onClick={() => handleDeleteDraft(d.id, d.name)}
+                    aria-label={`מחק את ${d.name}`}
+                    className="size-8 flex items-center justify-center rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Inputs */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
@@ -688,6 +767,15 @@ export default function AutoMapPage() {
             <span className="text-xs text-muted-txt">
               קיימת תוצאה — לחיצה תיצור מיפוי חדש מאותם קבצים
             </span>
+          )}
+          {result && (
+            <button
+              onClick={handleSaveDraft}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 transition-colors whitespace-nowrap"
+              title="שמור את הסשן הנוכחי כטיוטה לטעינה מאוחר יותר — חוסך עלות AI חוזרת"
+            >
+              💾 שמור כטיוטה
+            </button>
           )}
           {result && (
             <button onClick={() => { if (confirm('לאפס את המעבדה (קלט ותוצאה)?')) { reset(); setTxns([]); setFileNames([]); setDocs([]) } }}
