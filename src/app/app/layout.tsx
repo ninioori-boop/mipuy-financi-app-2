@@ -64,7 +64,8 @@ const groups: TabGroup[] = [
   {
     title: 'מעבדה',
     items: [
-      { href: '/app/automap', emoji: '🧪', label: 'מיפוי AI', advisorOnly: true },
+      { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',   advisorOnly: true },
+      { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה', advisorOnly: true },
     ],
   },
 ]
