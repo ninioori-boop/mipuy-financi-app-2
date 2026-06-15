@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
@@ -96,29 +96,47 @@ export default function AutoMapPage() {
   const [isParsing, setIsParsing] = useState(false)
   const [isGenerating, setIsGen]  = useState(false)
 
+  // Drag-and-drop visual feedback + per-file progress during parse.
+  // parseStatus is cleared at the start of every handleFiles call so the
+  // strip below the dropzone only shows the current batch's progress.
+  const [isDragging, setIsDragging]     = useState(false)
+  const [parseStatus, setParseStatus]   = useState<Record<string, 'parsing' | 'done' | 'failed'>>({})
+  const fileInputRef                    = useRef<HTMLInputElement | null>(null)
+
   // Route each file by type: Excel → parsed transactions (cheap/local);
   // PDF + images → base64 blocks the AI reads directly.
+  // parseStatus is updated per-file so the user sees ✓/⏳/✗ next to each one
+  // during a multi-file batch instead of a single global spinner.
   const handleFiles = useCallback(async (files: File[]) => {
     setIsParsing(true)
+    setParseStatus(Object.fromEntries(files.map(f => [f.name, 'parsing'])))
     try {
       const learned = useCreditStore.getState().mergedLearnedDB()
       const all: Transaction[] = []
       const names: string[] = []
       const newDocs: AttachedDoc[] = []
       for (const file of files) {
-        const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
-        const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
-        const isImage = file.type.startsWith('image/')
-        if (isExcel) {
-          const rows = await parseExcelFile(file, { allSheets: true })
-          all.push(...extractTransactions(rows, file.name, learned))
-          names.push(file.name)
-        } else if (isImage) {
-          newDocs.push({ id: mkId(), name: file.name, kind: 'image', mediaType: 'image/jpeg', data: await imageToJpegBase64(file) })
-        } else if (isPdf) {
-          newDocs.push({ id: mkId(), name: file.name, kind: 'pdf', mediaType: 'application/pdf', data: await fileToBase64(file) })
-        } else {
-          toast.warning(`סוג קובץ לא נתמך: ${file.name}`)
+        try {
+          const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
+          const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+          const isImage = file.type.startsWith('image/')
+          if (isExcel) {
+            const rows = await parseExcelFile(file, { allSheets: true })
+            all.push(...extractTransactions(rows, file.name, learned))
+            names.push(file.name)
+          } else if (isImage) {
+            newDocs.push({ id: mkId(), name: file.name, kind: 'image', mediaType: 'image/jpeg', data: await imageToJpegBase64(file) })
+          } else if (isPdf) {
+            newDocs.push({ id: mkId(), name: file.name, kind: 'pdf', mediaType: 'application/pdf', data: await fileToBase64(file) })
+          } else {
+            setParseStatus(prev => ({ ...prev, [file.name]: 'failed' }))
+            toast.warning(`סוג קובץ לא נתמך: ${file.name}`)
+            continue
+          }
+          setParseStatus(prev => ({ ...prev, [file.name]: 'done' }))
+        } catch (fileErr) {
+          setParseStatus(prev => ({ ...prev, [file.name]: 'failed' }))
+          console.warn(`[automap parse] ${file.name} נכשל:`, fileErr)
         }
       }
       if (all.length)     { setTxns(prev => [...prev, ...all]); setFileNames(prev => [...prev, ...names]) }
@@ -126,13 +144,43 @@ export default function AutoMapPage() {
       const parts: string[] = []
       if (all.length)     parts.push(`${all.length} עסקאות`)
       if (newDocs.length) parts.push(`${newDocs.length} מסמכים`)
-      toast.success(`נקלטו ${parts.join(' · ') || 'קבצים'}`)
+      if (parts.length)   toast.success(`נקלטו ${parts.join(' · ')}`)
     } catch (e) {
       toast.error('שגיאה בפענוח: ' + (e as Error).message)
     } finally {
       setIsParsing(false)
+      // Keep the per-file strip visible for ~3s after the batch finishes so
+      // the user can see what succeeded / what failed before it clears.
+      setTimeout(() => setParseStatus({}), 3000)
     }
   }, [])
+
+  // Clipboard paste: capture screenshots / images directly with Ctrl+V.
+  // Only activated on this page (window-level listener cleaned up on unmount).
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items
+      if (!items) return
+      const imageFiles: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (it.type.startsWith('image/')) {
+          const blob = it.getAsFile()
+          if (blob) {
+            const ext   = it.type.split('/')[1] ?? 'png'
+            const named = new File([blob], `clipboard-${Date.now()}-${i}.${ext}`, { type: it.type })
+            imageFiles.push(named)
+          }
+        }
+      }
+      if (imageFiles.length) {
+        e.preventDefault()
+        handleFiles(imageFiles)
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [handleFiles])
 
   // Category totals from the parsed transactions (excluding refunds).
   const catTotals = (() => {
@@ -279,21 +327,68 @@ export default function AutoMapPage() {
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
         <div className="text-sm font-semibold text-txt">1️⃣ נתונים</div>
 
-        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
+        {/* Drag-and-drop zone — keyboard-equivalent click triggers the hidden input */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setIsDragging(false)
+            const fs = Array.from(e.dataTransfer.files)
+            if (fs.length) handleFiles(fs)
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          className={[
+            'relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors text-center select-none',
+            isDragging
+              ? 'border-gold bg-gold/15 ring-2 ring-gold/40'
+              : 'border-line bg-surface hover:border-gold/50 hover:bg-surface/70',
+          ].join(' ')}
+        >
           <input
+            ref={fileInputRef}
             type="file"
             multiple
             accept=".xlsx,.xls,.csv,.pdf,image/*"
             className="hidden"
             onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
           />
-          <span className="text-2xl">📎</span>
-          <span className="text-sm text-txt">העלה קבצים</span>
-          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונות / צילומי מסך</span>
+          <span className="text-3xl">{isDragging ? '⬇️' : '📎'}</span>
+          <span className="text-sm font-medium text-txt">
+            {isDragging ? 'שחרר כאן' : 'גרור קבצים לכאן, או לחץ לבחירה'}
+          </span>
+          <span className="text-xs text-muted-txt/70">
+            Excel · PDF · תמונות · צילומי מסך · <kbd dir="ltr" className="px-1 py-0.5 rounded bg-line text-[10px]">Ctrl+V</kbd> להדבקה
+          </span>
+        </div>
+
+        {/* Mobile-only camera shortcut — opens the native camera UI on phones */}
+        <label className="sm:hidden flex items-center justify-center gap-2 rounded-lg border border-line bg-surface hover:border-gold/50 hover:bg-gold/5 px-3 py-2 text-sm text-txt cursor-pointer transition-colors">
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
+          />
+          <span>📸</span>
+          <span>צלם תלוש / מסך</span>
         </label>
-        {isParsing && (
-          <div className="text-xs text-muted-txt flex items-center gap-2">
-            <span className="size-3 animate-spin rounded-full border-2 border-gold border-t-transparent" /> מעבד קבצים…
+
+        {/* Per-file parse status strip — shows ✓/⏳/✗ next to each filename
+            during a batch and lingers ~3s after the batch ends. */}
+        {Object.keys(parseStatus).length > 0 && (
+          <div className="rounded-lg border border-line bg-surface px-3 py-2 space-y-1">
+            {Object.entries(parseStatus).map(([name, status]) => (
+              <div key={name} className="flex items-center gap-2 text-xs">
+                <span className="shrink-0">
+                  {status === 'parsing' ? <span className="inline-block size-3 animate-spin rounded-full border-2 border-gold border-t-transparent align-middle" /> : status === 'done' ? '✓' : '✗'}
+                </span>
+                <span className={status === 'failed' ? 'text-expense' : status === 'done' ? 'text-txt' : 'text-muted-txt'}>
+                  {name}
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -307,15 +402,48 @@ export default function AutoMapPage() {
         {docs.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {docs.map(d => (
-              <span key={d.id} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs text-txt">
-                {d.kind === 'pdf' ? '📕' : '🖼️'} <span className="max-w-[160px] truncate">{d.name}</span>
-                <button onClick={() => setDocs(prev => prev.filter(x => x.id !== d.id))} className="text-muted-txt hover:text-expense">×</button>
-              </span>
+              <div key={d.id} className="flex items-center gap-2 rounded-lg border border-line bg-surface ps-1 pe-2 py-1 text-xs text-txt">
+                {d.kind === 'pdf' ? (
+                  <span className="size-8 shrink-0 rounded bg-line/60 flex items-center justify-center text-base">📕</span>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={`data:${d.mediaType};base64,${d.data}`}
+                    alt={d.name}
+                    className="size-8 shrink-0 rounded object-cover border border-line"
+                  />
+                )}
+                <span className="max-w-[160px] truncate">{d.name}</span>
+                <button
+                  onClick={() => setDocs(prev => prev.filter(x => x.id !== d.id))}
+                  className="size-7 flex items-center justify-center text-muted-txt hover:text-expense text-base leading-none rounded hover:bg-line/40 transition-colors"
+                  aria-label={`הסר ${d.name}`}
+                >×</button>
+              </div>
             ))}
           </div>
         )}
-        {tooBig && (
-          <div className="text-xs text-expense">הקבצים גדולים מדי ({(docsBytes / 1_000_000).toFixed(1)}MB) — הסר חלק או הקטן תמונות לפני יצירה.</div>
+
+        {/* Byte meter — visible whenever any doc is attached so the user sees
+            how close they are to the 4MB cap. Turns red at the threshold. */}
+        {docs.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-txt">נפח מסמכים</span>
+              <span className={tooBig ? 'text-expense font-semibold tabular-nums' : 'text-muted-txt tabular-nums'}>
+                {(docsBytes / 1_000_000).toFixed(2)} / 4.0 MB
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-line overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 ${tooBig ? 'bg-expense' : 'bg-gold'}`}
+                style={{ width: `${Math.min(100, (docsBytes / 4_000_000) * 100)}%` }}
+              />
+            </div>
+            {tooBig && (
+              <div className="text-xs text-expense">הקבצים גדולים מדי — הסר חלק או הקטן תמונות לפני יצירה.</div>
+            )}
+          </div>
         )}
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -335,11 +463,20 @@ export default function AutoMapPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <button onClick={generate} disabled={isGenerating}
             className="bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 text-sm font-semibold transition-colors disabled:opacity-50">
-            {isGenerating ? '🤖 מנתח…' : '🤖 צור מיפוי'}
+            {isGenerating
+              ? '🤖 מנתח…'
+              : result
+                ? '🔁 צור מיפוי שוב'
+                : '🤖 צור מיפוי'}
           </button>
           {result && (
+            <span className="text-xs text-muted-txt">
+              קיימת תוצאה — לחיצה תיצור מיפוי חדש מאותם קבצים
+            </span>
+          )}
+          {result && (
             <button onClick={() => { if (confirm('לאפס את המעבדה (קלט ותוצאה)?')) { reset(); setTxns([]); setFileNames([]); setDocs([]) } }}
-              className="text-xs text-muted-txt hover:text-expense transition-colors">אפס מעבדה</button>
+              className="me-auto text-xs text-muted-txt hover:text-expense transition-colors">אפס מעבדה</button>
           )}
         </div>
       </div>
