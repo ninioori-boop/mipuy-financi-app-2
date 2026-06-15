@@ -103,6 +103,18 @@ export default function AutoMapPage() {
   const [parseStatus, setParseStatus]   = useState<Record<string, 'parsing' | 'done' | 'failed'>>({})
   const fileInputRef                    = useRef<HTMLInputElement | null>(null)
 
+  // Live "elapsed seconds" counter while the AI is generating. Honest signal
+  // to the advisor that something is happening — the call usually takes 8-30s
+  // depending on doc count + size. Updated by a 1s interval that only runs
+  // while isGenerating is true.
+  const [genElapsed, setGenElapsed] = useState(0)
+  const genStartRef                 = useRef<number>(0)
+
+  // Defer-copy: instead of a blocking confirm() before "📋 העתק למיפוי",
+  // we surface an inline panel showing exactly which sections will change
+  // and by how much. The advisor confirms or cancels with full context.
+  const [showCopyPreview, setShowCopyPreview] = useState(false)
+
   // Route each file by type: Excel → parsed transactions (cheap/local);
   // PDF + images → base64 blocks the AI reads directly.
   // parseStatus is updated per-file so the user sees ✓/⏳/✗ next to each one
@@ -182,6 +194,17 @@ export default function AutoMapPage() {
     return () => window.removeEventListener('paste', onPaste)
   }, [handleFiles])
 
+  // Tick the elapsed-seconds counter while generation is in flight.
+  // Interval is cleared on unmount and whenever isGenerating flips back to
+  // false, so there's no stray timer when the panel is idle.
+  useEffect(() => {
+    if (!isGenerating) return
+    const id = setInterval(() => {
+      setGenElapsed(Math.round((Date.now() - genStartRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [isGenerating])
+
   // Category totals from the parsed transactions (excluding refunds).
   const catTotals = (() => {
     const map = new Map<string, { sum: number; count: number }>()
@@ -234,6 +257,8 @@ export default function AutoMapPage() {
     }
     if (tooBig) { toast.error('הקבצים גדולים מדי — הסר חלק או הקטן תמונות'); return }
     setIsGen(true)
+    genStartRef.current = Date.now()
+    setGenElapsed(0)
     try {
       const res = await fetchWithRetry('/api/automap', {
         method: 'POST',
@@ -280,9 +305,10 @@ export default function AutoMapPage() {
     updateResult({ [key]: rows } as Partial<GeneratedMapping>)
   }
 
-  function copyToMapping() {
+  // Actual copy. Wrapped in a confirm step (the preview panel) so the user
+  // sees exactly what they're about to overwrite before committing.
+  function doCopyToMapping() {
     if (!result) return
-    if (!confirm('פעולה זו תחליף את המיפוי הנוכחי בתוצאת ה‑AI. להמשיך?')) return
     useMappingStore.setState({
       income:   result.income.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
       fixed:    result.fixed.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
@@ -295,9 +321,29 @@ export default function AutoMapPage() {
       savings:  result.savings.map(r => ({ id: mkId(), name: r.name, monthlyContribution: Math.round(r.monthlyContribution), accumulated: Math.round(r.accumulated), feeBalance: r.feeBalance, feeDeposit: r.feeDeposit })),
       varMonths: 1,
     })
+    setShowCopyPreview(false)
     toast.success('📋 הועתק למיפוי הרגיל', {
       action: { label: 'פתח מיפוי', onClick: () => router.push('/app/mapping') },
     })
+  }
+
+  // Per-section before/after counts for the copy preview panel. Read from
+  // mappingStore + result; safe to call without a result (returns nulls).
+  function copyDiff() {
+    if (!result) return null
+    const m = useMappingStore.getState()
+    const len = (a: unknown): number => Array.isArray(a) ? a.length : 0
+    return [
+      { key: 'income',       label: '💰 הכנסות',         current: len(m.income),       next: len(result.income) },
+      { key: 'fixed',        label: '📌 הוצאות קבועות',  current: len(m.fixed),        next: len(result.fixed) },
+      { key: 'variable',     label: '🛒 הוצאות משתנות',  current: len(m.variable),     next: len(result.variable) },
+      { key: 'sub',          label: '🔄 מנויים',         current: len(m.sub),          next: len(result.sub) },
+      { key: 'ins',          label: '🛡️ ביטוחים',        current: len(m.ins),          next: len(result.ins) },
+      { key: 'annual',       label: '📆 שנתיות',         current: len(m.annual),       next: len(result.annual) },
+      { key: 'debts',        label: '💳 חובות',          current: len(m.debts),        next: len(result.debts) },
+      { key: 'installments', label: '🛍️ תשלומים',        current: len(m.installments), next: len(result.installments) },
+      { key: 'savings',      label: '🏦 חיסכון',         current: len(m.savings),      next: len(result.savings) },
+    ]
   }
 
   const monthlyExpense = result
@@ -464,7 +510,7 @@ export default function AutoMapPage() {
           <button onClick={generate} disabled={isGenerating}
             className="bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 text-sm font-semibold transition-colors disabled:opacity-50">
             {isGenerating
-              ? '🤖 מנתח…'
+              ? `🤖 מנתח… ${Math.floor(genElapsed / 60)}:${String(genElapsed % 60).padStart(2, '0')}`
               : result
                 ? '🔁 צור מיפוי שוב'
                 : '🤖 צור מיפוי'}
@@ -487,11 +533,69 @@ export default function AutoMapPage() {
           <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="text-sm font-semibold text-txt">2️⃣ המיפוי שנוצר (ניתן לעריכה)</div>
-              <button onClick={copyToMapping}
+              <button onClick={() => setShowCopyPreview(v => !v)}
                 className="bg-gold text-surface rounded-lg px-4 py-1.5 text-sm font-bold hover:bg-gold-light transition-colors">
                 📋 העתק למיפוי
               </button>
             </div>
+
+            {/* Pre-copy preview — replaces the blocking confirm() with a
+                structured before/after table so the advisor sees exactly
+                what's about to overwrite the real mapping. */}
+            {showCopyPreview && (() => {
+              const diff = copyDiff()
+              if (!diff) return null
+              return (
+                <div className="rounded-lg border-2 border-gold/40 bg-gold/5 p-3 sm:p-4 space-y-3">
+                  <div className="text-sm font-semibold text-gold">📋 השוואה לפני העתקה</div>
+                  <div className="text-xs text-muted-txt">
+                    זה יחליף את המיפוי הנוכחי שלך בתוצאת ה-AI. בדוק שמספרים בעמודה "אחרי" הגיוניים — הם יהפכו לערכים החדשים במיפוי.
+                  </div>
+                  <div className="rounded-lg overflow-hidden border border-line">
+                    <table className="w-full text-xs">
+                      <thead className="bg-surface2 border-b border-line">
+                        <tr>
+                          <th className="text-start px-3 py-2 font-medium text-muted-txt">סעיף</th>
+                          <th className="text-center px-3 py-2 font-medium text-muted-txt">לפני</th>
+                          <th className="text-center px-3 py-2 font-medium text-muted-txt">אחרי</th>
+                          <th className="text-center px-3 py-2 font-medium text-muted-txt">שינוי</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line/50">
+                        {diff.map(d => {
+                          const delta = d.next - d.current
+                          const sign  = delta > 0 ? '+' : ''
+                          return (
+                            <tr key={d.key} className="hover:bg-surface2/40">
+                              <td className="px-3 py-1.5 text-txt">{d.label}</td>
+                              <td className="px-3 py-1.5 text-center text-muted-txt tabular-nums">{d.current}</td>
+                              <td className="px-3 py-1.5 text-center text-gold font-semibold tabular-nums">{d.next}</td>
+                              <td className={`px-3 py-1.5 text-center tabular-nums ${delta > 0 ? 'text-income' : delta < 0 ? 'text-expense' : 'text-muted-txt'}`}>
+                                {delta === 0 ? '—' : `${sign}${delta}`}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={doCopyToMapping}
+                      className="bg-gold text-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-gold-light transition-colors"
+                    >
+                      ✓ אשר והעתק
+                    </button>
+                    <button
+                      onClick={() => setShowCopyPreview(false)}
+                      className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted-txt hover:text-txt hover:border-gold/40 transition-colors"
+                    >
+                      ביטול
+                    </button>
+                  </div>
+                </div>
+              )
+            })()}
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="bg-surface border border-line rounded-lg p-2">
                 <div className="text-[10px] text-muted-txt">הכנסות/חודש</div>
