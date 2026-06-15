@@ -32,6 +32,17 @@ service cloud.firestore {
         && request.resource.data.db.keys().hasAll(resource.data.db.keys());
     }
 
+    // ── Auto-pushed transaction inbox ─────────────────────────────────
+    // /api/transaction (admin SDK, bypassing rules) writes externally-pushed
+    // charges (Apple Pay / Google Pay) here; the client drains them into its
+    // expense log and deletes them. The owner may read+delete only its own items;
+    // no client can create/forge items. Additive collection — the old live app
+    // never touches it, so this is zero-risk to it.
+    match /transactionInbox/{userId}/items/{itemId} {
+      allow read, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if false;
+    }
+
     // ── Everything else: blocked ──────────────────────────────────────
     // Includes `allowlist` (advisor-managed via console/admin only) and the
     // unused advisor/invites/maps collections.

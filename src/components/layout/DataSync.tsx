@@ -29,6 +29,7 @@ import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 import { saveUserData, loadUserData, loadSharedLearnedDB } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
+import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 
 const DEBOUNCE_MS = 2000
 const MAX_BYTES   = 900_000  // ≈900KB; Firestore doc hard cap is ~1MB
@@ -46,6 +47,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
   const [retryCount, setRetryCount] = useState(0)
+
+  // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
+  // log. No-op until the transactionInbox rule + backend are enabled.
+  useTransactionInbox()
 
   // ── 1. Load on auth ready / user change ──
   useEffect(() => {
