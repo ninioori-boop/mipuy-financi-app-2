@@ -5,8 +5,32 @@
 
 **פלטפורמות יעד:** גם iOS וגם אנדרואיד.
 
-> סטטוס: **תוכנית מאושרת. הצי-הראשון נבנה. ממתינים להמשך הבנייה של המסלול השקט.**
-> עיקרון-על לאורך כל הפרויקט: **לא לשבור את המערכת החיה.** הכל תוספתי ומבודד.
+> סטטוס (2026-06-13, עודכן): **כל הקוד נבנה ופרוס (חי ב-staging, gated/no-op). נשאר רק: (א) הפעלה בקונסולה (env + כלל), (ב) בניית הטריגרים.**
+> אומת בפרודקשן: `POST /api/transaction` מחזיר **503 "not configured"** — חי אבל אינרטי עד הפעלה. אפס שבירה.
+> עיקרון-על: **לא לשבור את המערכת החיה.** הכל תוספתי ומבודד.
+
+---
+
+## ⏭️ מה נשאר לעשות (תמצית להמשך)
+
+**הכל בצד-הקוד הושלם ופרוס.** נשארו 3 שלבים:
+
+### שלב א׳ — הפעלת ה-backend (פעולות קונסולה שלך; האסיסטנט מדריך)
+1. **Vercel → Project → Settings → Environment Variables → Add:**
+   - `FIREBASE_SERVICE_ACCOUNT` = כל התוכן של `service-account-key.json` (כמחרוזת JSON אחת). *(server-only; לא `NEXT_PUBLIC_`.)*
+   - `TRANSACTION_SECRET` = מחרוזת אקראית ארוכה (למשל 40+ תווים). זוכרים אותה — סיבוב שלה מבטל את כל טוקני-המכשיר.
+   - לבחור את כל הסביבות (Production/Preview), ואז **Redeploy** (Deployments → … → Redeploy).
+2. **Firestore Console → Rules:** להדביק את הגרסה המעודכנת מ-`firestore.rules` (כוללת את בלוק `transactionInbox`) → **Publish**. גיבוי: `firestore.rules.backup-2026-06-13`.
+
+### שלב ב׳ — בדיקה מקצה-לקצה (בלי טלפון)
+1. להתחבר ל-staging, לפתוח **מעבדה → 💳 קליטת עסקה → 🔑 צור טוקן**, להעתיק את הטוקן.
+2. `curl -X POST .../api/transaction -H "Content-Type: application/json" -d '{"token":"<הטוקן>","merchant":"רמי לוי","amount":250}'` → אמור להחזיר `{"ok":true,"category":"סופר"}`.
+3. לפתוח טאב **הוצאות** → הרשומה הופיעה לבד (דרך ה-onSnapshot drain). ✅ זה מוכיח את כל המסלול השקט.
+
+### שלב ג׳ — הטריגרים האמיתיים ("השומר", חוליה ①)
+- **iOS:** Shortcut אוטומציית Wallet → "Get Contents of URL" POST ל-`/api/transaction` עם הטוקן + Merchant + Amount. (בדיקה דורשת אייפון של לקוח.)
+- **אנדרואיד (מיידי):** MacroDroid/Tasker — טריגר התראה מ-Google Pay/בנק → regex לשם+סכום → POST ל-`/api/transaction`.
+- **אנדרואיד (מוצר):** native (Capacitor + NotificationListenerService) → אותו POST → Google Play.
 
 ---
 
@@ -48,11 +72,11 @@
 
 | # | חלק | מי | סיכון | סטטוס |
 |---|-----|-----|-------|--------|
-| 1 | **`/api/transaction`** (POST) — מאמת טוקן-מכשיר, מקטלג (`categorize` בצד-שרת), כותב לתיבה דרך firebase-admin | 🤖 | אפס (route חדש) | ⬜ |
-| 2 | **firebase-admin + service-account** כ-env ב-Vercel | 👤 (אדריך) | נמוך (שרת בלבד) | ⬜ |
-| 3 | **כלל-Firestore לתיבה** — אוסף חדש, תוספת בלבד | 🤖 כותב / 👤 מפרסם | נמוך | ⬜ |
-| 4 | **ניקוז בצד-לקוח** — onSnapshot על התיבה → `expenseLogStore.add()` → מחיקת הפריט | 🤖 | אפס | ⬜ |
-| 5 | **טוקן-מכשיר** — `/api/device-token` (מאומת Firebase ID) מחזיר טוקן חתום; UI בדף המעבדה להציג/להעתיק | 🤖 | אפס | ⬜ |
+| 1 | **`/api/transaction`** (POST) — מאמת טוקן-מכשיר, מקטלג (`categorize` בצד-שרת), כותב לתיבה דרך firebase-admin | 🤖 | אפס (route חדש) | ✅ נבנה+פרוס (gated 503) |
+| 2 | **firebase-admin + service-account** כ-env ב-Vercel | 👤 (אדריך) | נמוך (שרת בלבד) | ⬜ **נשאר — אתה** |
+| 3 | **כלל-Firestore לתיבה** — אוסף חדש, תוספת בלבד | 🤖 כותב / 👤 מפרסם | נמוך | 🟡 נכתב ב-`firestore.rules` — **ממתין לפרסום שלך** |
+| 4 | **ניקוז בצד-לקוח** — onSnapshot על התיבה → `expenseLogStore.add()` → מחיקת הפריט | 🤖 | אפס | ✅ נבנה (`hooks/useTransactionInbox.ts`, מחובר ל-DataSync) |
+| 5 | **טוקן-מכשיר** — `/api/device-token` (מאומת Firebase ID) מחזיר טוקן חתום; UI בדף המעבדה להציג/להעתיק | 🤖 | אפס | ✅ נבנה (כרטיס 🔑 בדף המעבדה) |
 
 ### פרטי מימוש (לזכור כשממשיכים)
 
