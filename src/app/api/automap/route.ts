@@ -93,7 +93,12 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model:      'claude-sonnet-4-6',
-      max_tokens: 8000,
+      // Bumped from 8000: confidence + source meta on every row grew responses
+      // ~40%. A 30-50 row mapping with the meta fields would hit the old cap
+      // and get truncated mid-JSON, producing the "לא התקבל JSON תקין" error
+      // on the client. Sonnet 4.6 supports up to 64K output; 16000 gives
+      // comfortable headroom for the biggest realistic mappings.
+      max_tokens: 16000,
       system:     AUTOMAP_SYSTEM_PROMPT,
       messages:   [{ role: 'user', content: userContent }],
     }),

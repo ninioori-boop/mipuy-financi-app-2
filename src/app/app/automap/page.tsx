@@ -303,9 +303,27 @@ export default function AutoMapPage() {
         throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
       }
       const data = await res.json()
-      const parsed = parseGeneratedMapping((data as { text?: string }).text ?? '')
-      setResult(parsed)
-      toast.success('✅ נוצר מיפוי — בדוק וערוך לפי הצורך')
+      const rawText: string = (data as { text?: string }).text ?? ''
+      try {
+        const parsed = parseGeneratedMapping(rawText)
+        setResult(parsed)
+        toast.success('✅ נוצר מיפוי — בדוק וערוך לפי הצורך')
+      } catch (parseErr) {
+        // Surface what Claude actually returned so we can debug "no JSON"
+        // failures from the console instead of guessing. The toast keeps
+        // the user-facing message short; the console has the full payload.
+        console.error('[automap] failed to parse AI response', {
+          error:     (parseErr as Error).message,
+          textLen:   rawText.length,
+          textHead:  rawText.slice(0, 300),
+          textTail:  rawText.slice(-300),
+        })
+        const preview = rawText.slice(0, 80).replace(/\s+/g, ' ')
+        toast.error(
+          `שגיאה בקריאת תשובת ה‑AI. תחילת התשובה: "${preview || '(ריק)'}…" — פתח קונסול לפרטים`,
+          { duration: 12000 },
+        )
+      }
     } catch (e) {
       toast.error('שגיאה ביצירת המיפוי: ' + (e as Error).message)
     } finally {
