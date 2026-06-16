@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
+import { hasLabAccess } from '@/lib/labAccess'
 import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { parseExcelFile } from '@/lib/parseExcel'
@@ -11,7 +12,7 @@ import { extractTransactions } from '@/lib/parsing'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
-import { parseGeneratedMapping, type GeneratedMapping } from '@/lib/autoMap'
+import { parseGeneratedMapping, validateMapping, type GeneratedMapping } from '@/lib/autoMap'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -49,9 +50,6 @@ function RowMetaChip({ confidence, source }: { confidence?: 'high' | 'medium' | 
     </span>
   )
 }
-
-// Experimental advisor-only tool. Anyone else is redirected away even on a direct URL.
-const ADVISOR_EMAIL = 'ninioori@gmail.com'
 
 // Non-Excel documents (PDF / images) sent to Claude as base64 blocks so it reads
 // them directly — no OCR of our own.
@@ -122,9 +120,9 @@ export default function AutoMapPage() {
   } = useAutoMapStore()
 
   // Full page-level guard: only the advisor may view this, even via direct URL.
-  const isAdvisor = !!user && user.email === ADVISOR_EMAIL
+  const isAdvisor = hasLabAccess(user?.email)
   useEffect(() => {
-    if (user && user.email !== ADVISOR_EMAIL) router.replace('/app/credit')
+    if (user && !hasLabAccess(user.email)) router.replace('/app/credit')
   }, [user, router])
 
   const [txns, setTxns]           = useState<Transaction[]>([])
@@ -552,6 +550,12 @@ export default function AutoMapPage() {
     ]
   }
 
+  // Local sanity checks on the AI result — runs free, instantly, on every
+  // edit. Surfaces zeroed-out rows, paid>total installments, AI sums that
+  // disagree with the underlying txns, etc. Recomputed when result or
+  // txns change.
+  const issues = result ? validateMapping(result, txns) : []
+
   const monthlyExpense = result
     ? [...result.fixed, ...result.variable, ...result.sub, ...result.ins].reduce((s, r) => s + r.amount, 0)
       + result.annual.reduce((s, r) => s + r.annualAmount / 12, 0)
@@ -904,6 +908,44 @@ export default function AutoMapPage() {
               </div>
             )}
           </div>
+
+          {/* Local validation panel — surfaces any sanity-check issues found
+              in the result. Pure heuristics, no AI call. Errors (red) vs
+              warnings (gold) sorted by severity. Hidden when the result is
+              clean. */}
+          {issues.length > 0 && (() => {
+            const errs  = issues.filter(i => i.severity === 'error')
+            const warns = issues.filter(i => i.severity === 'warning')
+            return (
+              <div className="rounded-xl border-2 border-gold/30 bg-gold/5 p-3 sm:p-4 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <div className="font-semibold text-gold">
+                    ⚠️ דגלים בתוצאה ({issues.length})
+                  </div>
+                  <div className="text-xs text-muted-txt">
+                    {errs.length > 0 && <span className="text-expense font-semibold">{errs.length} שגיאות</span>}
+                    {errs.length > 0 && warns.length > 0 && <span> · </span>}
+                    {warns.length > 0 && <span>{warns.length} אזהרות</span>}
+                  </div>
+                </div>
+                <ul className="space-y-1">
+                  {[...errs, ...warns].map((iss, i) => (
+                    <li
+                      key={i}
+                      className={`flex items-start gap-2 text-xs rounded-lg border px-2.5 py-1.5 ${
+                        iss.severity === 'error'
+                          ? 'border-expense/40 bg-expense/5 text-expense'
+                          : 'border-line bg-surface text-txt'
+                      }`}
+                    >
+                      <span className="shrink-0">{iss.severity === 'error' ? '🛑' : '⚠️'}</span>
+                      <span className="leading-snug">{iss.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })()}
 
           {/* Variable section — special grouped render with txns drill-down.
               The AI returns sub-rows per merchant type ("סופרמרקטים 1800",

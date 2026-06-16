@@ -6,13 +6,11 @@ import { usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
+import { hasLabAccess } from '@/lib/labAccess'
 import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
 
 type TabItem  = { href: string; emoji: string; label: string; advisorOnly?: boolean }
 type TabGroup = { title: string; items: TabItem[] }
-
-// The advisor account — experimental tools are shown only to this user, never to clients.
-const ADVISOR_EMAIL = 'ninioori@gmail.com'
 
 const groups: TabGroup[] = [
   {
@@ -89,7 +87,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false)
   }, [pathname])
 
-  const isAdvisor = user?.email === ADVISOR_EMAIL
+  const isAdvisor = hasLabAccess(user?.email)
   const visibleGroups = groups
     .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
     .filter(g => g.items.length > 0)
