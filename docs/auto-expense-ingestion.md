@@ -5,32 +5,29 @@
 
 **פלטפורמות יעד:** גם iOS וגם אנדרואיד.
 
-> סטטוס (2026-06-13, עודכן): **כל הקוד נבנה ופרוס (חי ב-staging, gated/no-op). נשאר רק: (א) הפעלה בקונסולה (env + כלל), (ב) בניית הטריגרים.**
-> אומת בפרודקשן: `POST /api/transaction` מחזיר **503 "not configured"** — חי אבל אינרטי עד הפעלה. אפס שבירה.
-> עיקרון-על: **לא לשבור את המערכת החיה.** הכל תוספתי ומבודד.
+> סטטוס (2026-06-15, עודכן): **המסלול השקט פעיל ב-staging! ההפעלה הושלמה** — `FIREBASE_SERVICE_ACCOUNT` + `TRANSACTION_SECRET` ב-Vercel (Production+Preview), וכלל `transactionInbox` פורסם ב-Firestore. אומת: `POST /api/transaction` עבר מ-503 ל-401 (firebase-admin מחובר). **נשאר: (ב) בדיקת E2E — תקועה על אי-התאמת secret, ראה למטה · (ג) בניית הטריגרים · (ד) ניקוי-אבטחה.**
+> עיקרון-על: **לא לשבור את המערכת החיה.** הכל תוספתי ומבודד. גיבוי כללים: `firestore.rules.backup-before-inbox-2026-06-15`.
 
 ---
 
 ## ⏭️ מה נשאר לעשות (תמצית להמשך)
 
-**הכל בצד-הקוד הושלם ופרוס.** נשארו 3 שלבים:
+**הקוד + ההפעלה הושלמו.** נשארו: בדיקה, טריגרים, וניקוי-אבטחה.
 
-### שלב א׳ — הפעלת ה-backend (פעולות קונסולה שלך; האסיסטנט מדריך)
-1. **Vercel → Project → Settings → Environment Variables → Add:**
-   - `FIREBASE_SERVICE_ACCOUNT` = כל התוכן של `service-account-key.json` (כמחרוזת JSON אחת). *(server-only; לא `NEXT_PUBLIC_`.)*
-   - `TRANSACTION_SECRET` = מחרוזת אקראית ארוכה (למשל 40+ תווים). זוכרים אותה — סיבוב שלה מבטל את כל טוקני-המכשיר.
-   - לבחור את כל הסביבות (Production/Preview), ואז **Redeploy** (Deployments → … → Redeploy).
-2. **Firestore Console → Rules:** להדביק את הגרסה המעודכנת מ-`firestore.rules` (כוללת את בלוק `transactionInbox`) → **Publish**. גיבוי: `firestore.rules.backup-2026-06-13`.
+### ✅ שלב א׳ — הפעלת ה-backend — הושלם (2026-06-15)
+`FIREBASE_SERVICE_ACCOUNT` + `TRANSACTION_SECRET` הוגדרו ב-Vercel (Sensitive, Production+Preview) ונעשה Redeploy. כלל `transactionInbox` פורסם ב-Firestore (גיבוי הקודם: `firestore.rules.backup-before-inbox-2026-06-15`). אומת מהשרת: `/api/transaction` עבר מ-503 ל-401 → firebase-admin מחובר וה-secret נטען.
 
-### שלב ב׳ — בדיקה מקצה-לקצה (בלי טלפון)
-1. להתחבר ל-staging, לפתוח **מעבדה → 💳 קליטת עסקה → 🔑 צור טוקן**, להעתיק את הטוקן.
-2. `curl -X POST .../api/transaction -H "Content-Type: application/json" -d '{"token":"<הטוקן>","merchant":"רמי לוי","amount":250}'` → אמור להחזיר `{"ok":true,"category":"סופר"}`.
-3. לפתוח טאב **הוצאות** → הרשומה הופיעה לבד (דרך ה-onSnapshot drain). ✅ זה מוכיח את כל המסלול השקט.
+### 🟡 שלב ב׳ — בדיקת E2E — **תקועה, להמשיך מכאן**
+ניסיון: חתמתי טוקן מקומית (uid של Ori = `TYxUOdf3LcTiyuzunrAf0CEVsQx1`, secret = שיצרתי) ועשיתי `POST /api/transaction` → קיבלתי **`{"error":"unauthorized"}`**. כלומר ה-HMAC לא תאם → **ה-`TRANSACTION_SECRET` ששמור ב-Vercel ≠ המחרוזת שלי** (כנראה רווח/תו שנכנס בהדבקה).
+**איך לסגור:** או (א) הלקוח/Ori מייצר טוקן מהאפליקציה החיה (מעבדה → 🔑 צור טוקן — משתמש בערך המדויק ששמור) ומדביק, ואז `POST` איתו; או (ב) למחוק+להוסיף מחדש את `TRANSACTION_SECRET` ב-Vercel עם ערך נקי ולעשות Redeploy, ואז לחתום טוקן מקומית. הצלחה = `{"ok":true,"category":"סופר"}` והרשומה מופיעה לבד בטאב **הוצאות** (דרך ה-onSnapshot drain).
 
-### שלב ג׳ — הטריגרים האמיתיים ("השומר", חוליה ①)
+### 🔲 שלב ג׳ — הטריגרים האמיתיים ("השומר", חוליה ①)
 - **iOS:** Shortcut אוטומציית Wallet → "Get Contents of URL" POST ל-`/api/transaction` עם הטוקן + Merchant + Amount. (בדיקה דורשת אייפון של לקוח.)
-- **אנדרואיד (מיידי):** MacroDroid/Tasker — טריגר התראה מ-Google Pay/בנק → regex לשם+סכום → POST ל-`/api/transaction`.
-- **אנדרואיד (מוצר):** native (Capacitor + NotificationListenerService) → אותו POST → Google Play.
+- **אנדרואיד (מוצר, היעד):** אפליקציית **native** (Capacitor + NotificationListenerService) שמתקינה מ-Google Play. הלקוח מתקין → מתחבר → מאשר הרשאת-התראות → האפליקציה שולפת את הטוקן לבד ושולחת. **הלקוח לא רואה טוקן.** (MacroDroid היה רק לבדיקה מהירה, לא למוצר.)
+- חוויית-לקוח סופית מתועדת ב-`[[project_auto_expense_ingestion]]`: אנדרואיד = אישור הרשאה בלבד; iOS = הוספת Shortcut מוכן.
+
+### 🔒 שלב ד׳ — ניקוי-אבטחה (לפני שימוש אמיתי)
+ה-`TRANSACTION_SECRET` וגם תוכן `service-account-key.json` **עברו דרך הצ'אט** בסשן הזה. לפני שלקוחות אמיתיים משתמשים — **לסובב את שניהם**: (1) `TRANSACTION_SECRET` חדש ב-Vercel; (2) Firebase Console → Project Settings → Service accounts → Generate new private key, להחליף את `FIREBASE_SERVICE_ACCOUNT` ב-Vercel ולמחוק את המפתח הישן.
 
 ---
 
