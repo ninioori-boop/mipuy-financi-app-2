@@ -128,6 +128,145 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — י
   "assessment":"סיכום קצר בעברית: תזרים משוער, דגלים אדומים, והמלצות מרכזיות."
 }`
 
+// ── Local validation — runs after every generation / edit, costs $0 ──
+//
+// Looks for sanity-check failures the advisor should eye before walking the
+// result over to the real mapping: zeroed-out rows, unknown categories,
+// installment paid > total, AI category totals that disagree with the raw
+// transaction sum, etc. All checks are deterministic; no AI call is made.
+
+export type IssueSeverity = 'warning' | 'error'
+
+export interface ValidationIssue {
+  severity:  IssueSeverity
+  section:   string                  // 'income' | 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | 'debts' | 'installments' | 'savings' | 'all'
+  message:   string                  // Hebrew, user-facing
+  rowIndex?: number                  // index within that section's array
+}
+
+// Optional second arg: the local Excel-parsed transactions. When supplied,
+// we cross-check the AI's per-category variable totals against the actual
+// txn sums — the strongest "did the AI hallucinate" signal we have.
+export function validateMapping(
+  r:    GeneratedMapping,
+  txns: { amount: number; category: string; isRefund: boolean }[] = [],
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+
+  // Income — a mapping with zero income is almost always wrong.
+  if (r.income.length === 0) {
+    issues.push({ severity: 'warning', section: 'income', message: 'אין שורות הכנסה — האם זה צפוי?' })
+  }
+
+  // Zero-amount rows the AI populated with a name but no number — usually
+  // a placeholder that slipped through.
+  const simpleSections: { key: 'income' | 'fixed' | 'variable' | 'sub' | 'ins'; label: string }[] = [
+    { key: 'income',   label: 'הכנסות' },
+    { key: 'fixed',    label: 'קבועות' },
+    { key: 'variable', label: 'משתנות' },
+    { key: 'sub',      label: 'מנויים' },
+    { key: 'ins',      label: 'ביטוחים' },
+  ]
+  for (const { key, label } of simpleSections) {
+    r[key].forEach((row, i) => {
+      if (row.name && row.amount === 0) {
+        issues.push({
+          severity: 'warning', section: key, rowIndex: i,
+          message: `${label}: "${row.name}" עם סכום 0 — מילוי חסר?`,
+        })
+      }
+    })
+  }
+  r.annual.forEach((row, i) => {
+    if (row.name && row.annualAmount === 0) {
+      issues.push({
+        severity: 'warning', section: 'annual', rowIndex: i,
+        message: `שנתיות: "${row.name}" עם סכום 0`,
+      })
+    }
+  })
+
+  // Variable: row.category should resolve to a known ALL_CATEGORIES entry —
+  // if not, grouping fails silently and the txns drill-down won't work.
+  r.variable.forEach((row, i) => {
+    if (row.category && !ALL_CATEGORIES.includes(row.category)) {
+      issues.push({
+        severity: 'warning', section: 'variable', rowIndex: i,
+        message: `משתנות: "${row.name}" עם קטגוריה לא מוכרת "${row.category}"`,
+      })
+    }
+  })
+
+  // Confidence summary — flag if the AI was unsure on a meaningful chunk.
+  const allTaggedRows = [...r.income, ...r.fixed, ...r.variable, ...r.sub, ...r.ins, ...r.annual]
+  const lowConf  = allTaggedRows.filter(x => x.confidence === 'low').length
+  if (lowConf >= 3) {
+    issues.push({
+      severity: 'warning', section: 'all',
+      message: `${lowConf} שורות סומנו בביטחון נמוך — סקור לפני העתקה`,
+    })
+  }
+
+  // Debts — monthly payment without remainingMonths means "ad infinitum"
+  // and almost always reflects a missed field in the AI's read.
+  r.debts.forEach((d, i) => {
+    if (d.monthlyPayment > 0 && d.remainingMonths === 0) {
+      issues.push({
+        severity: 'warning', section: 'debts', rowIndex: i,
+        message: `חובות: "${d.name}" — תשלום חודשי ללא מספר חודשים`,
+      })
+    }
+    if (d.remainingBalance > 0 && d.monthlyPayment === 0) {
+      issues.push({
+        severity: 'warning', section: 'debts', rowIndex: i,
+        message: `חובות: "${d.name}" — יתרה ללא תשלום חודשי`,
+      })
+    }
+  })
+
+  // Installments — paid > total is a clear data error.
+  r.installments.forEach((inst, i) => {
+    if (inst.totalCount > 0 && inst.paidCount > inst.totalCount) {
+      issues.push({
+        severity: 'error', section: 'installments', rowIndex: i,
+        message: `תשלומים: "${inst.name}" — שולמו ${inst.paidCount} מתוך ${inst.totalCount}?`,
+      })
+    }
+  })
+
+  // Cross-check vs local txns: per ALL_CATEGORIES that has txns, compare
+  // the txn sum to the sum of AI variable rows tagged with that category.
+  // Tolerance: ±10% OR ±50₪, whichever is larger (rounding / minor edits).
+  if (txns.length) {
+    const txnByCat = new Map<string, number>()
+    for (const t of txns) {
+      if (t.isRefund) continue
+      txnByCat.set(t.category, (txnByCat.get(t.category) ?? 0) + t.amount)
+    }
+    const aiByCat = new Map<string, number>()
+    for (const row of r.variable) {
+      if (!row.category) continue
+      aiByCat.set(row.category, (aiByCat.get(row.category) ?? 0) + row.amount)
+    }
+    for (const [cat, txnSum] of txnByCat) {
+      if (!VAR_CATEGORIES.has(cat)) continue   // only check variable txns
+      const aiSum = aiByCat.get(cat) ?? 0
+      if (aiSum === 0) continue                 // AI didn't cover it; not a "diff" issue
+      const diff = Math.abs(aiSum - txnSum)
+      const tol  = Math.max(50, txnSum * 0.10)
+      if (diff > tol) {
+        const pct = txnSum > 0 ? Math.round((diff / txnSum) * 100) : 0
+        issues.push({
+          severity: 'warning', section: 'variable',
+          message: `משתנות: "${cat}" — AI חישב ${Math.round(aiSum)}₪, סכום העסקאות בפועל ${Math.round(txnSum)}₪ (פער ${pct}%)`,
+        })
+      }
+    }
+  }
+
+  return issues
+}
+
 // ── Safe parsing of the model's JSON output ──
 function num(v: unknown): number {
   if (typeof v === 'number') return isFinite(v) ? v : 0
