@@ -159,6 +159,16 @@ export default function AutoMapPage() {
   // Drafts panel collapsed/expanded — kept local, doesn't need persistence.
   const [showDrafts, setShowDrafts] = useState(false)
 
+  // Per-section collapsed state for the result blocks. Mobile screens get
+  // overwhelmed with 9 stacked sections after a full generation; letting
+  // the advisor fold sections away keeps the page navigable.
+  // Default everything open after first render — same as before.
+  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
+    income: true, fixed: true, variable: true, sub: true, ins: true,
+    annual: true, debts: true, installments: true, savings: true,
+  })
+  const toggleSection = (k: string) => setSectionOpen(s => ({ ...s, [k]: !s[k] }))
+
   // Smart-merge vs full-replace toggle inside the preview panel.
   // 'merge' (the default): keep all existing mapping rows, add only result
   //   rows whose normalized name doesn't already exist in the section.
@@ -554,7 +564,7 @@ export default function AutoMapPage() {
   if (!isAdvisor) return null
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20 sm:pb-0">
 
       {/* Header */}
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6">
@@ -877,7 +887,7 @@ export default function AutoMapPage() {
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="bg-surface border border-line rounded-lg p-2">
                 <div className="text-[10px] text-muted-txt">הכנסות/חודש</div>
-                <div className="text-sm font-bold text-green-400 tabular-nums">{fmt(monthlyIncome)}</div>
+                <div className="text-sm font-bold text-income tabular-nums">{fmt(monthlyIncome)}</div>
               </div>
               <div className="bg-surface border border-line rounded-lg p-2">
                 <div className="text-[10px] text-muted-txt">הוצאות/חודש</div>
@@ -885,7 +895,7 @@ export default function AutoMapPage() {
               </div>
               <div className="bg-surface border border-line rounded-lg p-2">
                 <div className="text-[10px] text-muted-txt">תזרים/חודש</div>
-                <div className={`text-sm font-bold tabular-nums ${monthlyIncome - monthlyExpense >= 0 ? 'text-green-400' : 'text-expense'}`}>{fmt(monthlyIncome - monthlyExpense)}</div>
+                <div className={`text-sm font-bold tabular-nums ${monthlyIncome - monthlyExpense >= 0 ? 'text-income' : 'text-expense'}`}>{fmt(monthlyIncome - monthlyExpense)}</div>
               </div>
             </div>
             {result.assessment && (
@@ -916,18 +926,26 @@ export default function AutoMapPage() {
             const groups = [...groupsMap.values()].sort((a, b) =>
               b.rows.reduce((s, r) => s + r.amount, 0) - a.rows.reduce((s, r) => s + r.amount, 0))
 
+            const isOpen = sectionOpen.variable
             return (
               <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <button
+                  onClick={() => toggleSection('variable')}
+                  className="w-full flex items-center justify-between gap-2 text-start"
+                  aria-expanded={isOpen}
+                >
                   <h3 className="text-sm font-semibold text-txt">🛒 הוצאות משתנות</h3>
-                  <span className="text-xs text-muted-txt tabular-nums">{fmt(result.variable.reduce((s, r) => s + r.amount, 0))}</span>
-                </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-txt tabular-nums">{fmt(result.variable.reduce((s, r) => s + r.amount, 0))}</span>
+                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
 
-                {groups.length === 0 && (
+                {isOpen && groups.length === 0 && (
                   <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
                 )}
 
-                {groups.map(g => {
+                {isOpen && groups.map(g => {
                   const groupTotal = g.rows.reduce((s, r) => s + r.amount, 0)
                   const matchingTxns = txns.filter(t => !t.isRefund && t.category === g.category)
                   const isOpen = openCategoryTxns === g.category
@@ -945,7 +963,7 @@ export default function AutoMapPage() {
                           <input value={r.name} onChange={e => editSimple('variable', r._idx, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
                           <RowMetaChip confidence={r.confidence} source={r.source} />
                           <input type="number" value={r.amount || ''} onChange={e => editSimple('variable', r._idx, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
-                          <button onClick={() => delRow('variable', r._idx)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
+                          <button onClick={() => delRow('variable', r._idx)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
                         </div>
                       ))}
 
@@ -988,12 +1006,14 @@ export default function AutoMapPage() {
                   )
                 })}
 
-                <button
-                  onClick={() => addSimpleRow('variable')}
-                  className="text-xs text-muted-txt hover:text-gold transition-colors"
-                >
-                  + הוסף שורה
-                </button>
+                {isOpen && (
+                  <button
+                    onClick={() => addSimpleRow('variable')}
+                    className="text-xs text-muted-txt hover:text-gold transition-colors"
+                  >
+                    + הוסף שורה
+                  </button>
+                )}
               </div>
             )
           })()}
@@ -1001,93 +1021,145 @@ export default function AutoMapPage() {
           {/* Other simple sections (income / fixed / sub / ins) — flat
               rendering, since they're typically one row per category and
               don't benefit from the variable-style grouping. */}
-          {SIMPLE_SECTIONS.filter(s => s.key !== 'variable').map(({ key, label, icon }) => (
-            <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-txt">{icon} {label}</h3>
-                <span className="text-xs text-muted-txt tabular-nums">{fmt(result[key].reduce((s, r) => s + r.amount, 0))}</span>
+          {SIMPLE_SECTIONS.filter(s => s.key !== 'variable').map(({ key, label, icon }) => {
+            const isOpen = sectionOpen[key]
+            return (
+              <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
+                <button
+                  onClick={() => toggleSection(key)}
+                  className="w-full flex items-center justify-between gap-2 text-start"
+                  aria-expanded={isOpen}
+                >
+                  <h3 className="text-sm font-semibold text-txt">{icon} {label}</h3>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-txt tabular-nums">{fmt(result[key].reduce((s, r) => s + r.amount, 0))}</span>
+                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+                {isOpen && result[key].map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 group flex-wrap">
+                    <input value={r.name} onChange={e => editSimple(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                    <RowMetaChip confidence={r.confidence} source={r.source} />
+                    <input type="number" value={r.amount || ''} onChange={e => editSimple(key, i, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
+                    <button onClick={() => delRow(key, i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
+                  </div>
+                ))}
+                {isOpen && result[key].length === 0 && (
+                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
+                )}
+                {isOpen && (
+                  <button
+                    onClick={() => addSimpleRow(key)}
+                    className="text-xs text-muted-txt hover:text-gold transition-colors"
+                  >
+                    + הוסף שורה
+                  </button>
+                )}
               </div>
-              {result[key].map((r, i) => (
-                <div key={i} className="flex items-center gap-2 group flex-wrap">
-                  <input value={r.name} onChange={e => editSimple(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                  <RowMetaChip confidence={r.confidence} source={r.source} />
-                  <input type="number" value={r.amount || ''} onChange={e => editSimple(key, i, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
-                  <button onClick={() => delRow(key, i)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
-                </div>
-              ))}
-              {result[key].length === 0 && (
-                <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-              )}
-              <button
-                onClick={() => addSimpleRow(key)}
-                className="text-xs text-muted-txt hover:text-gold transition-colors"
-              >
-                + הוסף שורה
-              </button>
-            </div>
-          ))}
+            )
+          })}
 
           {/* Annual — always shown so advisor can add yearly costs manually */}
-          <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-txt">📆 שנתיות</h3>
-              <span className="text-xs text-muted-txt tabular-nums">{fmt(result.annual.reduce((s, r) => s + r.annualAmount, 0))}/שנה</span>
-            </div>
-            {result.annual.map((r, i) => (
-              <div key={i} className="flex items-center gap-2 group flex-wrap">
-                <input value={r.name} onChange={e => editAnnual(i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                <RowMetaChip confidence={r.confidence} source={r.source} />
-                <input type="number" value={r.annualAmount || ''} onChange={e => editAnnual(i, 'annualAmount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="שנתי" />
-                <button onClick={() => delRow('annual', i)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 text-sm">×</button>
+          {(() => {
+            const isOpen = sectionOpen.annual
+            return (
+              <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
+                <button
+                  onClick={() => toggleSection('annual')}
+                  className="w-full flex items-center justify-between gap-2 text-start"
+                  aria-expanded={isOpen}
+                >
+                  <h3 className="text-sm font-semibold text-txt">📆 שנתיות</h3>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-txt tabular-nums">{fmt(result.annual.reduce((s, r) => s + r.annualAmount, 0))}/שנה</span>
+                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+                {isOpen && result.annual.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 group flex-wrap">
+                    <input value={r.name} onChange={e => editAnnual(i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                    <RowMetaChip confidence={r.confidence} source={r.source} />
+                    <input type="number" value={r.annualAmount || ''} onChange={e => editAnnual(i, 'annualAmount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="שנתי" />
+                    <button onClick={() => delRow('annual', i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
+                  </div>
+                ))}
+                {isOpen && result.annual.length === 0 && (
+                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
+                )}
+                {isOpen && (
+                  <button
+                    onClick={addAnnualRow}
+                    className="text-xs text-muted-txt hover:text-gold transition-colors"
+                  >
+                    + הוסף שורה
+                  </button>
+                )}
               </div>
-            ))}
-            {result.annual.length === 0 && (
-              <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-            )}
-            <button
-              onClick={addAnnualRow}
-              className="text-xs text-muted-txt hover:text-gold transition-colors"
-            >
-              + הוסף שורה
-            </button>
-          </div>
+            )
+          })()}
 
           {/* Complex sections — always rendered with add-row buttons */}
           {([
             { key: 'debts' as const,        label: '💳 חובות',   fields: DEBT_FIELDS },
             { key: 'installments' as const, label: '🛍️ תשלומים', fields: INST_FIELDS },
             { key: 'savings' as const,      label: '🏦 חיסכון',  fields: SAV_FIELDS },
-          ]).map(({ key, label, fields }) => (
-            <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-              <h3 className="text-sm font-semibold text-txt">{label}</h3>
-              {(result[key] as unknown as Record<string, unknown>[]).map((r, i) => (
-                <div key={i} className="bg-surface/40 rounded-lg p-2 space-y-1.5 group">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <input value={String(r.name ?? '')} onChange={e => editComplex(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                    <RowMetaChip confidence={r.confidence as 'high' | 'medium' | 'low' | undefined} source={typeof r.source === 'string' ? r.source : undefined} />
-                    <button onClick={() => delRow(key, i)} className="text-muted-txt hover:text-expense text-sm">×</button>
+          ]).map(({ key, label, fields }) => {
+            const isOpen = sectionOpen[key]
+            return (
+              <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
+                <button
+                  onClick={() => toggleSection(key)}
+                  className="w-full flex items-center justify-between gap-2 text-start"
+                  aria-expanded={isOpen}
+                >
+                  <h3 className="text-sm font-semibold text-txt">{label}</h3>
+                  <span className="text-xs text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
+                </button>
+                {isOpen && (result[key] as unknown as Record<string, unknown>[]).map((r, i) => (
+                  <div key={i} className="bg-surface/40 rounded-lg p-2 space-y-1.5 group">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input value={String(r.name ?? '')} onChange={e => editComplex(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                      <RowMetaChip confidence={r.confidence as 'high' | 'medium' | 'low' | undefined} source={typeof r.source === 'string' ? r.source : undefined} />
+                      <button onClick={() => delRow(key, i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense text-base rounded">×</button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      {fields.map(([f, l]) => (
+                        <div key={String(f)} className="space-y-0.5">
+                          <div className="text-[10px] text-muted-txt px-1">{l}</div>
+                          <input type="number" value={(r[f as string] as number) || ''} onChange={e => editComplex(key, i, f as string, e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-full text-left tabular-nums`} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                    {fields.map(([f, l]) => (
-                      <div key={String(f)} className="space-y-0.5">
-                        <div className="text-[10px] text-muted-txt px-1">{l}</div>
-                        <input type="number" value={(r[f as string] as number) || ''} onChange={e => editComplex(key, i, f as string, e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-full text-left tabular-nums`} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {(result[key] as unknown[]).length === 0 && (
-                <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-              )}
-              <button
-                onClick={() => addComplexRow(key)}
-                className="text-xs text-muted-txt hover:text-gold transition-colors"
-              >
-                + הוסף שורה
-              </button>
-            </div>
-          ))}
+                ))}
+                {isOpen && (result[key] as unknown[]).length === 0 && (
+                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
+                )}
+                {isOpen && (
+                  <button
+                    onClick={() => addComplexRow(key)}
+                    className="text-xs text-muted-txt hover:text-gold transition-colors"
+                  >
+                    + הוסף שורה
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Mobile sticky CTA — keeps "📋 העתק למיפוי" reachable without
+          scrolling through 9 expanded result sections. Desktop users get
+          the inline button at the top of the result, so hidden ≥ sm. */}
+      {result && (
+        <div className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur border-t border-line p-3">
+          <button
+            onClick={() => setShowCopyPreview(v => !v)}
+            className="w-full bg-gold text-surface rounded-xl py-3 text-base font-bold hover:bg-gold-light transition-colors shadow-lg"
+          >
+            📋 העתק למיפוי
+          </button>
         </div>
       )}
     </div>
