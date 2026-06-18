@@ -12,14 +12,17 @@ import {
   type Timestamp,
 } from 'firebase/firestore'
 import { auth, db, storage } from './firebase'
+import { intakeQuestionLabel } from './intakeForm'
 
 export interface IntakeFile {
-  id:         string
-  name:       string
-  type:       string
-  size:       number
-  path:       string   // Storage object path
-  uploadedAt: number   // ms
+  id:            string
+  name:          string
+  type:          string
+  size:          number
+  path:          string   // Storage object path
+  uploadedAt:    number   // ms
+  questionId?:   string    // which questionnaire question this file answers
+  questionLabel?: string
 }
 
 export interface IntakeClient {
@@ -27,6 +30,7 @@ export interface IntakeClient {
   email:       string
   displayName: string
   updatedAt:   number  // ms
+  answers:     Record<string, string>   // text/choice answers, keyed by question id
   files:       IntakeFile[]
 }
 
@@ -40,8 +44,9 @@ function requireUid(): string {
   return uid
 }
 
-/** Upload one file for the current client + write its metadata. */
-export async function uploadIntakeFile(file: File): Promise<void> {
+/** Upload one file for the current client + write its metadata (optionally
+ * tagged with the questionnaire question it answers). */
+export async function uploadIntakeFile(file: File, questionId?: string): Promise<void> {
   const uid = requireUid()
   const user = auth.currentUser!
   const fileId = mkId()
@@ -55,6 +60,7 @@ export async function uploadIntakeFile(file: File): Promise<void> {
     size: file.size,
     path,
     uploadedAt: serverTimestamp(),
+    ...(questionId ? { questionId, questionLabel: intakeQuestionLabel(questionId) } : {}),
   })
 
   // Summary doc — lets the advisor list clients without scanning subcollections.
@@ -64,6 +70,26 @@ export async function uploadIntakeFile(file: File): Promise<void> {
     displayName: user.displayName ?? '',
     updatedAt:   serverTimestamp(),
   }, { merge: true })
+}
+
+/** Save the questionnaire's text/choice answers for the current client. */
+export async function saveAnswers(answers: Record<string, string>): Promise<void> {
+  const uid = requireUid()
+  const user = auth.currentUser!
+  await setDoc(doc(db, 'intake', uid), {
+    uid,
+    email:       user.email ?? '',
+    displayName: user.displayName ?? '',
+    answers,
+    updatedAt:   serverTimestamp(),
+  }, { merge: true })
+}
+
+/** Load the current client's saved answers. */
+export async function loadMyAnswers(): Promise<Record<string, string>> {
+  const snap = await getDoc(doc(db, 'intake', requireUid()))
+  const a = snap.exists() ? (snap.data().answers as unknown) : null
+  return a && typeof a === 'object' ? (a as Record<string, string>) : {}
 }
 
 async function readFiles(uid: string): Promise<IntakeFile[]> {
@@ -77,6 +103,7 @@ async function readFiles(uid: string): Promise<IntakeFile[]> {
       size: Number(x.size) || 0,
       path: String(x.path ?? ''),
       uploadedAt: toMs(x.uploadedAt),
+      ...(x.questionId ? { questionId: String(x.questionId), questionLabel: String(x.questionLabel ?? x.questionId) } : {}),
     }
   })
 }
@@ -99,16 +126,20 @@ export async function listAllIntake(): Promise<IntakeClient[]> {
   const clients = await Promise.all(snap.docs.map(async (d) => {
     const x = d.data()
     const files = await readFiles(d.id)
+    const answers = x.answers && typeof x.answers === 'object' ? (x.answers as Record<string, string>) : {}
     return {
       uid: d.id,
       email:       String(x.email ?? ''),
       displayName: String(x.displayName ?? ''),
       updatedAt:   toMs(x.updatedAt),
+      answers,
       files,
     }
   }))
-  // Only clients that actually have files, newest activity first.
-  return clients.filter(c => c.files.length > 0).sort((a, b) => b.updatedAt - a.updatedAt)
+  // Only clients that have uploaded something or answered, newest activity first.
+  return clients
+    .filter(c => c.files.length > 0 || Object.values(c.answers).some(v => v && v.trim()))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** A temporary download URL for a stored file (owner or advisor). */

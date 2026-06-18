@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { hasLabAccess } from '@/lib/labAccess'
 import { listAllIntake, getFileUrl, type IntakeClient, type IntakeFile } from '@/lib/intake'
 import { setHandoffFiles } from '@/lib/intakeHandoff'
+import { INTAKE_QUESTIONS } from '@/lib/intakeForm'
 
 function fmtSize(b: number): string {
   if (b >= 1_000_000) return `${(b / 1_000_000).toFixed(1)}MB`
@@ -111,17 +112,42 @@ export default function IntakeReviewPage() {
                 </div>
 
                 {isOpen && (
-                  <div className="border-t border-line p-4 space-y-1.5">
-                    {c.files.map(f => (
-                      <div key={f.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface border border-line">
-                        <span className="text-lg shrink-0">{fileIcon(f.type, f.name)}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm text-txt truncate">{f.name}</div>
-                          <div className="text-[11px] text-muted-txt">{fmtSize(f.size)} · {fmtDate(f.uploadedAt)}</div>
+                  <div className="border-t border-line p-4 space-y-4">
+                    {/* Text / choice answers, in questionnaire order */}
+                    {(() => {
+                      const answered = INTAKE_QUESTIONS.filter(q => q.type !== 'file' && (c.answers[q.id] ?? '').trim())
+                      return answered.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-semibold text-muted-txt">תשובות</div>
+                          {answered.map(q => (
+                            <div key={q.id} className="text-sm bg-surface border border-line rounded-lg px-3 py-1.5">
+                              <span className="text-muted-txt">{q.label}: </span>
+                              <span className="text-txt whitespace-pre-wrap">{c.answers[q.id]}</span>
+                            </div>
+                          ))}
                         </div>
-                        <button onClick={() => viewFile(f)} className="text-xs border border-line rounded-lg px-2.5 py-1 text-muted-txt hover:text-gold hover:border-gold/60 transition-colors shrink-0">פתח</button>
-                      </div>
-                    ))}
+                      ) : null
+                    })()}
+
+                    {/* Uploaded files */}
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-semibold text-muted-txt">קבצים ({c.files.length})</div>
+                      {c.files.length === 0 ? (
+                        <p className="text-xs text-muted-txt">לא הועלו קבצים.</p>
+                      ) : c.files.map(f => (
+                        <div key={f.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface border border-line">
+                          <span className="text-lg shrink-0">{fileIcon(f.type, f.name)}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-txt truncate">{f.name}</div>
+                            <div className="text-[11px] text-muted-txt">
+                              {f.questionLabel ? <span className="text-gold/80">{f.questionLabel} · </span> : null}
+                              {fmtSize(f.size)} · {fmtDate(f.uploadedAt)}
+                            </div>
+                          </div>
+                          <button onClick={() => viewFile(f)} className="text-xs border border-line rounded-lg px-2.5 py-1 text-muted-txt hover:text-gold hover:border-gold/60 transition-colors shrink-0">פתח</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
