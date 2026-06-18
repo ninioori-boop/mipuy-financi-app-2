@@ -1,0 +1,41 @@
+// BACKUP of the LIVE Firestore rules as they were on 2026-06-18, BEFORE adding
+// the additive `intake` collection (client document upload). If anything goes
+// wrong, paste this content back into Firebase Console → Firestore → Rules →
+// Publish to restore the previous behavior exactly.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── User data — owner-only AND invite-only ────────────────────────
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+    }
+
+    // ── Shared category-learning DB ───────────────────────────────────
+    match /shared/learnedDB {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map
+        && request.resource.data.db.keys().size() <= 20000;
+      allow update: if request.auth != null
+        && request.resource.data.keys().hasOnly(['db'])
+        && request.resource.data.db is map
+        && request.resource.data.db.keys().size() <= 20000
+        && request.resource.data.db.keys().hasAll(resource.data.db.keys());
+    }
+
+    // ── Auto-pushed transaction inbox ─────────────────────────────────
+    match /transactionInbox/{userId}/items/{itemId} {
+      allow read, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if false;
+    }
+
+    // ── Everything else: blocked ──────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
