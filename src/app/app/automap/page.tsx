@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
 import { hasLabAccess } from '@/lib/labAccess'
+import { takeHandoffFiles } from '@/lib/intakeHandoff'
 import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { parseExcelFile } from '@/lib/parseExcel'
@@ -226,6 +227,18 @@ export default function AutoMapPage() {
       setTimeout(() => setParseStatus({}), 3000)
     }
   }, [])
+
+  // Handoff from the advisor's intake-review "פתח במעבדה": load the client's
+  // files straight into the lab once, on mount.
+  const handoffConsumed = useRef(false)
+  useEffect(() => {
+    if (handoffConsumed.current) return
+    const h = takeHandoffFiles()
+    if (h?.files.length) {
+      handoffConsumed.current = true
+      handleFiles(h.files)
+    }
+  }, [handleFiles])
 
   // Clipboard paste: capture screenshots / images directly with Ctrl+V.
   // Only activated on this page (window-level listener cleaned up on unmount).

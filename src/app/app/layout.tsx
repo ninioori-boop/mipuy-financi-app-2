@@ -25,6 +25,9 @@ const groups: TabGroup[] = [
       { href: '/app/credit', emoji: '💳', label: 'אשראי' },
       { href: '/app/bank',   emoji: '🏦', label: 'עו"ש' },
       { href: '/app/import', emoji: '📥', label: 'ייבוא' },
+      // Visible to advisors only until Firebase Storage is enabled + verified;
+      // flip `advisorOnly` off (one line) to expose the upload tab to all clients.
+      { href: '/app/intake', emoji: '📤', label: 'העלאת מסמכים', advisorOnly: true },
     ],
   },
   {
@@ -63,6 +66,7 @@ const groups: TabGroup[] = [
     title: 'מעבדה',
     items: [
       { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',   advisorOnly: true },
+      { href: '/app/intake-review',    emoji: '📨', label: 'תיבת קליטה', advisorOnly: true },
       { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה', advisorOnly: true },
     ],
   },
