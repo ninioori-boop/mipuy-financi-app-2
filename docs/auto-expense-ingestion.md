@@ -5,7 +5,7 @@
 
 **פלטפורמות יעד:** גם iOS וגם אנדרואיד.
 
-> סטטוס (2026-06-15, עודכן): **המסלול השקט פעיל ב-staging! ההפעלה הושלמה** — `FIREBASE_SERVICE_ACCOUNT` + `TRANSACTION_SECRET` ב-Vercel (Production+Preview), וכלל `transactionInbox` פורסם ב-Firestore. אומת: `POST /api/transaction` עבר מ-503 ל-401 (firebase-admin מחובר). **נשאר: (ב) בדיקת E2E — תקועה על אי-התאמת secret, ראה למטה · (ג) בניית הטריגרים · (ד) ניקוי-אבטחה.**
+> סטטוס (2026-06-18, עודכן): **המסלול השקט מאומת מקצה-לקצה וחי ב-staging! 🎉** ההפעלה (env + כלל) ובדיקת ה-E2E הושלמו — עסקה ב-`POST /api/transaction` נכנסה לבד, מקוטלגת ("רמי לוי" → "מזון לבית"), לטאב תיעוד הוצאות (Ori אישר ויזואלית). **נשאר: (ג) בניית הטריגרים (Shortcut iOS / native אנדרואיד) · (ד) ניקוי-אבטחה (סיבוב secret + service-account).**
 > עיקרון-על: **לא לשבור את המערכת החיה.** הכל תוספתי ומבודד. גיבוי כללים: `firestore.rules.backup-before-inbox-2026-06-15`.
 
 ---
@@ -17,9 +17,8 @@
 ### ✅ שלב א׳ — הפעלת ה-backend — הושלם (2026-06-15)
 `FIREBASE_SERVICE_ACCOUNT` + `TRANSACTION_SECRET` הוגדרו ב-Vercel (Sensitive, Production+Preview) ונעשה Redeploy. כלל `transactionInbox` פורסם ב-Firestore (גיבוי הקודם: `firestore.rules.backup-before-inbox-2026-06-15`). אומת מהשרת: `/api/transaction` עבר מ-503 ל-401 → firebase-admin מחובר וה-secret נטען.
 
-### 🟡 שלב ב׳ — בדיקת E2E — **תקועה, להמשיך מכאן**
-ניסיון: חתמתי טוקן מקומית (uid של Ori = `TYxUOdf3LcTiyuzunrAf0CEVsQx1`, secret = שיצרתי) ועשיתי `POST /api/transaction` → קיבלתי **`{"error":"unauthorized"}`**. כלומר ה-HMAC לא תאם → **ה-`TRANSACTION_SECRET` ששמור ב-Vercel ≠ המחרוזת שלי** (כנראה רווח/תו שנכנס בהדבקה).
-**איך לסגור:** או (א) הלקוח/Ori מייצר טוקן מהאפליקציה החיה (מעבדה → 🔑 צור טוקן — משתמש בערך המדויק ששמור) ומדביק, ואז `POST` איתו; או (ב) למחוק+להוסיף מחדש את `TRANSACTION_SECRET` ב-Vercel עם ערך נקי ולעשות Redeploy, ואז לחתום טוקן מקומית. הצלחה = `{"ok":true,"category":"סופר"}` והרשומה מופיעה לבד בטאב **הוצאות** (דרך ה-onSnapshot drain).
+### ✅ שלב ב׳ — בדיקת E2E — הושלם (2026-06-18)
+הטוקן מאי-ההתאמה תוקן ע"י ייצורו מהאפליקציה החיה (מעבדה → 🔑) במקום מקומית. `POST /api/transaction` עם הטוקן החזיר **`{"ok":true,"category":"מזון לבית"}`** ("רמי לוי" קוטלג נכון). Ori אישר שהעסקה **הופיעה לבד בטאב תיעוד הוצאות** דרך ה-onSnapshot drain. **כל הצינור מאומת מקצה-לקצה.** (הערה: curl על Windows שולח עברית מקולקלת → "שונות"; node/השולחים-האמיתיים שולחים UTF-8 נקי. דרך לשלוח בדיקה מ-node: `fetch(..., {body: JSON.stringify({token, merchant:'רמי לוי', amount, ref})})`.)
 
 ### 🔲 שלב ג׳ — הטריגרים האמיתיים ("השומר", חוליה ①)
 - **iOS:** Shortcut אוטומציית Wallet → "Get Contents of URL" POST ל-`/api/transaction` עם הטוקן + Merchant + Amount. (בדיקה דורשת אייפון של לקוח.)
