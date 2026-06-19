@@ -7,9 +7,11 @@ import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { parseExcelFile } from '@/lib/parseExcel'
-import { extractTransactions } from '@/lib/parsing'
+import { extractTransactions, isStandingOrderDesc, rowsToText } from '@/lib/parsing'
+import { categorize } from '@/lib/categorize'
+import { fileToBase64, imageToJpegBase64 } from '@/lib/fileEncoding'
 import { ALL_CATEGORIES } from '@/lib/constants'
-import { FileDropzone } from '@/components/credit/FileDropzone'
+import type { Transaction } from '@/types/transaction'
 import { SmartPatterns } from '@/components/credit/SmartPatterns'
 import { CategoryBreakdown } from '@/components/credit/CategoryBreakdown'
 import { AiAnalysis } from '@/components/credit/AiAnalysis'
@@ -40,6 +42,56 @@ function pushToMapping() {
   toast.success(`📤 ${transactions.length} עסקאות נשלחו למיפוי`)
 }
 
+// ── AI safety-net: read a credit statement (PDF/image, or Excel-rows-as-text)
+// when the deterministic parser can't, and turn it into Transaction[]. ──
+const aiUid = () => Math.random().toString(36).slice(2)
+type AiCreditTxn = { date: string; desc: string; amount: number; isRefund: boolean }
+
+function parseAiCreditTxns(text: string): AiCreditTxn[] {
+  const m = text.match(/\{[\s\S]*\}/)
+  if (!m) return []
+  let parsed: unknown
+  try { parsed = JSON.parse(m[0].replace(/,\s*([}\]])/g, '$1')) } catch { return [] }
+  const arr = (parsed as { transactions?: unknown }).transactions
+  if (!Array.isArray(arr)) return []
+  return arr
+    .map(o => {
+      const r = (o ?? {}) as Record<string, unknown>
+      return { date: String(r.date ?? ''), desc: String(r.desc ?? ''), amount: Number(r.amount) || 0, isRefund: !!r.isRefund }
+    })
+    .filter(t => t.desc && t.amount)
+}
+
+function creditTxnsFromAi(ai: AiCreditTxn[], fileName: string, learnedDB: Record<string, string>): Transaction[] {
+  return ai.map(t => ({
+    id: aiUid(),
+    desc: t.desc,
+    amount: Math.abs(t.amount),
+    originalAmount: null,
+    category: categorize(t.desc, learnedDB),
+    source: fileName,
+    notes: '',
+    date: t.date || '',
+    installment: null,
+    isStandingOrder: isStandingOrderDesc(t.desc),
+    isRefund: t.isRefund || t.amount < 0,
+  }))
+}
+
+async function aiExtractCredit(content: unknown[]): Promise<AiCreditTxn[]> {
+  const res = await fetchWithRetry('/api/credit-statement', {
+    method: 'POST',
+    headers: await aiHeaders(),
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
+  }
+  const json = await res.json()
+  return parseAiCreditTxns((json as { text?: string }).text ?? '')
+}
+
 export default function CreditPage() {
   const {
     transactions, uploadedFileNames, isLoading, loadingMessage,
@@ -50,14 +102,39 @@ export default function CreditPage() {
   const handleFiles = useCallback(async (files: File[]) => {
     setLoading(true, 'מנתח קבצים...')
     try {
-      const allTxns: ReturnType<typeof extractTransactions> = []
+      const learned = useCreditStore.getState().mergedLearnedDB()
+      const allTxns: Transaction[] = []
       const fileNames: string[] = []
       for (const file of files) {
-        const rows = await parseExcelFile(file, { allSheets: true })
-        const txns = extractTransactions(rows, file.name, useCreditStore.getState().mergedLearnedDB())
-        allTxns.push(...txns)
+        const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+        const isImage = file.type.startsWith('image/')
+
+        if (isPdf || isImage) {
+          // PDF / photo of a statement → read with AI.
+          setLoading(true, `קורא ${file.name} עם AI…`)
+          const data = isImage ? await imageToJpegBase64(file) : await fileToBase64(file)
+          const block = isImage
+            ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
+            : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+          const ai = await aiExtractCredit([{ type: 'text', text: 'חלץ את כל העסקאות מדוח האשראי המצורף.' }, block])
+          allTxns.push(...creditTxnsFromAi(ai, file.name, learned))
+        } else {
+          // Excel → deterministic parser first (rich: installments etc.); if it
+          // recognizes nothing, fall back to the AI so no format gets rejected.
+          const rows = await parseExcelFile(file, { allSheets: true })
+          let txns = extractTransactions(rows, file.name, learned)
+          if (txns.length === 0) {
+            setLoading(true, `קורא ${file.name} עם AI…`)
+            const ai = await aiExtractCredit([{ type: 'text', text:
+              'חלץ את כל העסקאות מדוח האשראי הבא (טבלה, עמודות מופרדות ב‑| ):\n\n' + rowsToText(rows) }])
+            txns = creditTxnsFromAi(ai, file.name, learned)
+          }
+          allTxns.push(...txns)
+        }
         fileNames.push(file.name)
       }
+
+      if (!allTxns.length) throw new Error('לא זוהו עסקאות בקובץ')
       setTransactions(allTxns, fileNames)
       setLoading(false)
 
@@ -193,7 +270,19 @@ export default function CreditPage() {
       {/* Upload + months selector */}
       <div className="rounded-xl border border-line bg-surface2 p-6 space-y-4">
         <div className="text-sm font-semibold text-txt">📂 העלאת קבצים</div>
-        <FileDropzone onFiles={handleFiles} isLoading={isLoading} />
+        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
+          <input
+            type="file"
+            multiple
+            accept=".xlsx,.xls,.csv,.pdf,image/*"
+            className="hidden"
+            disabled={isLoading}
+            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
+          />
+          <span className="text-2xl">{isLoading ? '⏳' : '📂'}</span>
+          <span className="text-sm text-txt">{isLoading ? 'מנתח…' : 'בחרו / גררו דוחות אשראי'}</span>
+          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונה / צילום</span>
+        </label>
 
         {/* Months selector — identical logic to v1 */}
         <div className="flex items-center gap-4 bg-surface border border-line rounded-xl px-4 py-3 flex-wrap">

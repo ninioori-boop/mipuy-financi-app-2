@@ -69,6 +69,17 @@ export function isStandingOrderDesc(desc: string): boolean {
          d.includes('standing order') || d.includes('direct debit')
 }
 
+// Flatten parsed spreadsheet rows to a compact pipe-separated table the AI can
+// read (used as the safety-net path when deterministic extraction finds nothing).
+export function rowsToText(rows: unknown[][], maxChars = 38000): string {
+  const text = rows
+    .map(r => (r ?? [])
+      .map(c => c instanceof Date ? c.toLocaleDateString('he-IL') : String(c ?? ''))
+      .join(' | '))
+    .join('\n')
+  return text.length > maxChars ? text.slice(0, maxChars) : text
+}
+
 export function extractTransactions(
   rows: unknown[][],
   fileName: string,
