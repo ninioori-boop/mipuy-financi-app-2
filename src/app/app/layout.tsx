@@ -64,7 +64,6 @@ const groups: TabGroup[] = [
     items: [
       { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',     advisorOnly: true },
       { href: '/app/intake',           emoji: '📤', label: 'העלאת מסמכים', advisorOnly: true },
-      { href: '/app/intake-review',    emoji: '📨', label: 'תיבת קליטה',   advisorOnly: true },
       { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה',   advisorOnly: true },
     ],
   },

@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/authStore'
+import { hasLabAccess } from '@/lib/labAccess'
+import { IntakeReview } from '@/components/intake/IntakeReview'
 import { INTAKE_QUESTIONS, INTAKE_TITLE, INTAKE_INTRO, type IntakeQuestion } from '@/lib/intakeForm'
 import {
   uploadIntakeFile, listMyIntake, deleteIntakeFile, saveAnswers, loadMyAnswers, getFileUrl,
@@ -22,6 +25,9 @@ const fileIcon = (type: string, name: string) =>
 const inputCls = 'w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60'
 
 export default function IntakePage() {
+  const { user } = useAuthStore()
+  const isAdvisor = hasLabAccess(user?.email)
+
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [files, setFiles]     = useState<IntakeFile[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,6 +95,9 @@ export default function IntakePage() {
     }
     return map
   }, [files])
+
+  // Advisors get the all-clients review in this same tab; clients get the form.
+  if (isAdvisor) return <IntakeReview />
 
   return (
     <div className="max-w-2xl mx-auto space-y-5">
