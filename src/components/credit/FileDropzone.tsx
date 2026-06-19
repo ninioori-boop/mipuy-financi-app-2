@@ -3,22 +3,37 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
+const DEFAULT_MATCH = (f: File) => /\.(xlsx|xls)$/i.test(f.name)
+
 interface Props {
   onFiles: (files: File[]) => void
   isLoading: boolean
+  /** Accepted file types — defaults to Excel. Pass a wider set for tabs that
+   *  also take PDF/images. */
+  accept?: string
+  match?: (f: File) => boolean
+  title?: string
+  hint?: string
 }
 
-export function FileDropzone({ onFiles, isLoading }: Props) {
+export function FileDropzone({
+  onFiles,
+  isLoading,
+  accept = '.xlsx,.xls',
+  match = DEFAULT_MATCH,
+  title = 'גרור קבצי Excel לכאן, או לחץ לבחירה',
+  hint = 'xlsx, xls',
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [pending, setPending] = useState<File[]>([])
 
   function addFiles(incoming: File[]) {
-    const xlsx = incoming.filter(f => /\.(xlsx|xls)$/i.test(f.name))
-    if (!xlsx.length) return
+    const ok = incoming.filter(match)
+    if (!ok.length) return
     setPending(prev => {
       const existing = new Set(prev.map(f => f.name))
-      return [...prev, ...xlsx.filter(f => !existing.has(f.name))]
+      return [...prev, ...ok.filter(f => !existing.has(f.name))]
     })
   }
 
@@ -55,15 +70,15 @@ export function FileDropzone({ onFiles, isLoading }: Props) {
       >
         <span className="text-3xl">📂</span>
         <p className="text-sm text-muted-txt text-center">
-          גרור קבצי Excel לכאן, או לחץ לבחירה
+          {title}
         </p>
-        <p className="text-xs text-muted-txt/60">xlsx, xls</p>
+        <p className="text-xs text-muted-txt/60">{hint}</p>
       </div>
 
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept={accept}
         multiple
         className="hidden"
         onChange={e => { addFiles(Array.from(e.target.files ?? [])); e.target.value = '' }}

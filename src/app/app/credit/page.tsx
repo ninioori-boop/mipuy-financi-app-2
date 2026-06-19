@@ -12,6 +12,7 @@ import { categorize } from '@/lib/categorize'
 import { fileToBase64, imageToJpegBase64 } from '@/lib/fileEncoding'
 import { ALL_CATEGORIES } from '@/lib/constants'
 import type { Transaction } from '@/types/transaction'
+import { FileDropzone } from '@/components/credit/FileDropzone'
 import { SmartPatterns } from '@/components/credit/SmartPatterns'
 import { CategoryBreakdown } from '@/components/credit/CategoryBreakdown'
 import { AiAnalysis } from '@/components/credit/AiAnalysis'
@@ -270,19 +271,14 @@ export default function CreditPage() {
       {/* Upload + months selector */}
       <div className="rounded-xl border border-line bg-surface2 p-6 space-y-4">
         <div className="text-sm font-semibold text-txt">📂 העלאת קבצים</div>
-        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
-          <input
-            type="file"
-            multiple
-            accept=".xlsx,.xls,.csv,.pdf,image/*"
-            className="hidden"
-            disabled={isLoading}
-            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
-          />
-          <span className="text-2xl">{isLoading ? '⏳' : '📂'}</span>
-          <span className="text-sm text-txt">{isLoading ? 'מנתח…' : 'בחרו / גררו דוחות אשראי'}</span>
-          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונה / צילום</span>
-        </label>
+        <FileDropzone
+          onFiles={handleFiles}
+          isLoading={isLoading}
+          accept=".xlsx,.xls,.csv,.pdf,image/*"
+          match={f => /\.(xlsx|xls|csv|pdf)$/i.test(f.name) || f.type.startsWith('image/')}
+          title="גררו דוחות אשראי לכאן, או לחצו לבחירה"
+          hint="Excel · PDF · תמונה / צילום — אפשר כמה קבצים, הניתוח יתחיל בלחיצה על 'נתח'"
+        />
 
         {/* Months selector — identical logic to v1 */}
         <div className="flex items-center gap-4 bg-surface border border-line rounded-xl px-4 py-3 flex-wrap">

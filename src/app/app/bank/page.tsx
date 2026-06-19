@@ -9,6 +9,7 @@ import { normalizeForLookup } from '@/lib/categorize'
 import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { fileToBase64, imageToJpegBase64 } from '@/lib/fileEncoding'
+import { FileDropzone } from '@/components/credit/FileDropzone'
 import { detectCols, classifyRow, type Dir } from '@/lib/bankParse'
 
 type BankSection = 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
@@ -150,48 +151,51 @@ export default function BankPage() {
   const { importFromBank } = useMappingStore()
 
   const handleFiles = useCallback(async (files: File[]) => {
-    const file = files[0]
-    if (!file) return
+    if (!files.length) return
     setIsLoading(true)
     try {
-      const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
-      const isImage = file.type.startsWith('image/')
+      // Read every file with the AI → structured transactions → synthetic rows
+      // that flow through the existing grouping. Robust across all bank formats
+      // (Hapoalim signed-amount, Isracard חובה/זכות, …). Multiple files (e.g.
+      // several accounts/months) are merged into one combined view.
+      const all: AiTxn[] = []
+      for (const file of files) {
+        const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+        const isImage = file.type.startsWith('image/')
 
-      // Both Excel and PDF/image are read by the AI → structured transactions →
-      // synthetic rows that flow through the existing grouping. This is robust
-      // across every bank format (Hapoalim signed-amount, Isracard חובה/זכות, …)
-      // where the old heuristic Excel parser would silently produce 0 rows.
-      let content: unknown[]
-      if (isPdf || isImage) {
-        const data = isImage ? await imageToJpegBase64(file) : await fileToBase64(file)
-        content = [
-          { type: 'text', text: 'חלץ את כל התנועות מדוח הבנק המצורף.' },
-          isImage
-            ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
-            : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } },
-        ]
-      } else {
-        const rows = await parseExcelFile(file)
-        content = [{ type: 'text', text:
-          'חלץ את כל התנועות מדוח הבנק הבא (טבלה, עמודות מופרדות ב‑| ). ' +
-          'שים לב לעמודת הסכום עם הסימן (מינוס=חיוב) והתעלם מעמודת היתרה הרצה וממספרי רצף:\n\n' +
-          rowsToText(rows) }]
+        let content: unknown[]
+        if (isPdf || isImage) {
+          const data = isImage ? await imageToJpegBase64(file) : await fileToBase64(file)
+          content = [
+            { type: 'text', text: 'חלץ את כל התנועות מדוח הבנק המצורף.' },
+            isImage
+              ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
+              : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } },
+          ]
+        } else {
+          const rows = await parseExcelFile(file)
+          content = [{ type: 'text', text:
+            'חלץ את כל התנועות מדוח הבנק הבא (טבלה, עמודות מופרדות ב‑| ). ' +
+            'שים לב לעמודת הסכום עם הסימן (מינוס=חיוב) והתעלם מעמודת היתרה הרצה וממספרי רצף:\n\n' +
+            rowsToText(rows) }]
+        }
+
+        const res = await fetchWithRetry('/api/bank-statement', {
+          method: 'POST',
+          headers: await aiHeaders(),
+          body: JSON.stringify({ content }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
+        }
+        const json = await res.json()
+        all.push(...parseBankTxns((json as { text?: string }).text ?? ''))
       }
 
-      const res = await fetchWithRetry('/api/bank-statement', {
-        method: 'POST',
-        headers: await aiHeaders(),
-        body: JSON.stringify({ content }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
-      }
-      const json = await res.json()
-      const txns = parseBankTxns((json as { text?: string }).text ?? '')
-      if (!txns.length) throw new Error('לא זוהו תנועות בקובץ')
-      setData(bankRowsFromTxns(txns), file.name)
-      toast.success(`נקראו ${txns.length} תנועות מהדוח`)
+      if (!all.length) throw new Error('לא זוהו תנועות בקבצים')
+      setData(bankRowsFromTxns(all), files.map(f => f.name).join(', '))
+      toast.success(`נקראו ${all.length} תנועות מ‑${files.length} קבצים`)
 
       setActiveKey(null)
       setExpandedKeys(new Set())
@@ -307,17 +311,14 @@ export default function BankPage() {
 
       {/* Upload + months selector */}
       <div className="rounded-xl border border-line bg-surface2 p-6 space-y-4">
-        <label className="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line bg-surface hover:border-gold/50 p-6 cursor-pointer transition-colors text-center">
-          <input
-            type="file"
-            accept=".xlsx,.xls,.pdf,image/*"
-            className="hidden"
-            onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
-          />
-          <span className="text-2xl">📂</span>
-          <span className="text-sm text-txt">העלה דוח בנק</span>
-          <span className="text-xs text-muted-txt/70">Excel · PDF · תמונה / צילום</span>
-        </label>
+        <FileDropzone
+          onFiles={handleFiles}
+          isLoading={isLoading}
+          accept=".xlsx,.xls,.csv,.pdf,image/*"
+          match={f => /\.(xlsx|xls|csv|pdf)$/i.test(f.name) || f.type.startsWith('image/')}
+          title="גררו דוחות בנק לכאן, או לחצו לבחירה"
+          hint="Excel · PDF · תמונה / צילום — אפשר כמה קבצים, הניתוח יתחיל בלחיצה על 'נתח'"
+        />
 
         <div className="flex items-center gap-4 bg-surface border border-line rounded-xl px-4 py-3 flex-wrap">
           <span className="text-lg">📅</span>
