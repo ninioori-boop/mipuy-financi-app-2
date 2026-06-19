@@ -125,6 +125,16 @@ function bankRowsFromTxns(txns: AiTxn[]): unknown[][] {
   return rows
 }
 
+// Flatten parsed Excel rows to a compact pipe-separated table the AI can read.
+function rowsToText(rows: unknown[][], maxChars = 38000): string {
+  const text = rows
+    .map(r => (r ?? [])
+      .map(c => c instanceof Date ? c.toLocaleDateString('he-IL') : String(c ?? ''))
+      .join(' | '))
+    .join('\n')
+  return text.length > maxChars ? text.slice(0, maxChars) : text
+}
+
 export default function BankPage() {
   const { rawRows, fileName, sentRows: sentArr, reportMonths, setData, markSent, setReportMonths, reset } = useBankStore()
   const sentRows = new Set(sentArr)
@@ -146,31 +156,43 @@ export default function BankPage() {
     try {
       const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
       const isImage = file.type.startsWith('image/')
+
+      // Both Excel and PDF/image are read by the AI → structured transactions →
+      // synthetic rows that flow through the existing grouping. This is robust
+      // across every bank format (Hapoalim signed-amount, Isracard חובה/זכות, …)
+      // where the old heuristic Excel parser would silently produce 0 rows.
+      let content: unknown[]
       if (isPdf || isImage) {
-        // Read the statement with AI → structured transactions → synthetic rows.
         const data = isImage ? await imageToJpegBase64(file) : await fileToBase64(file)
-        const block = isImage
-          ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
-          : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
-        const content: unknown[] = [{ type: 'text', text: 'חלץ את כל התנועות מדוח הבנק המצורף.' }, block]
-        const res = await fetchWithRetry('/api/bank-statement', {
-          method: 'POST',
-          headers: await aiHeaders(),
-          body: JSON.stringify({ content }),
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
-        }
-        const json = await res.json()
-        const txns = parseBankTxns((json as { text?: string }).text ?? '')
-        if (!txns.length) throw new Error('לא זוהו תנועות בקובץ')
-        setData(bankRowsFromTxns(txns), file.name)
-        toast.success(`נקראו ${txns.length} תנועות מהדוח`)
+        content = [
+          { type: 'text', text: 'חלץ את כל התנועות מדוח הבנק המצורף.' },
+          isImage
+            ? { type: 'image',    source: { type: 'base64', media_type: 'image/jpeg', data } }
+            : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } },
+        ]
       } else {
         const rows = await parseExcelFile(file)
-        setData(rows, file.name)
+        content = [{ type: 'text', text:
+          'חלץ את כל התנועות מדוח הבנק הבא (טבלה, עמודות מופרדות ב‑| ). ' +
+          'שים לב לעמודת הסכום עם הסימן (מינוס=חיוב) והתעלם מעמודת היתרה הרצה וממספרי רצף:\n\n' +
+          rowsToText(rows) }]
       }
+
+      const res = await fetchWithRetry('/api/bank-statement', {
+        method: 'POST',
+        headers: await aiHeaders(),
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error ?? `שגיאת שרת ${res.status}`)
+      }
+      const json = await res.json()
+      const txns = parseBankTxns((json as { text?: string }).text ?? '')
+      if (!txns.length) throw new Error('לא זוהו תנועות בקובץ')
+      setData(bankRowsFromTxns(txns), file.name)
+      toast.success(`נקראו ${txns.length} תנועות מהדוח`)
+
       setActiveKey(null)
       setExpandedKeys(new Set())
       setDirOverride(new Map())
@@ -343,7 +365,7 @@ export default function BankPage() {
         {isLoading && (
           <div className="flex items-center gap-3 text-sm text-muted-txt">
             <span className="size-4 animate-spin rounded-full border-2 border-gold border-t-transparent" />
-            טוען...
+            מנתח את הדוח עם AI… (כמה שניות)
           </div>
         )}
       </div>

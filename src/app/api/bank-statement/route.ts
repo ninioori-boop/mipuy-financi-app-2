@@ -2,25 +2,30 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
 
-// Client-facing (every user can upload a bank statement). Per-user daily cap to
-// bound AI cost/abuse — a real bank statement is one call.
+// Client-facing (every user / advisor can upload a bank statement). Per-user
+// daily cap to bound AI cost/abuse — a real statement is one call, but an
+// advisor may process many clients in a day.
 const userLimitMap = new Map<string, { count: number; start: number }>()
-const USER_LIMIT  = 15
+const USER_LIMIT  = 60
 const WINDOW_MS   = 86_400_000 // 24 hours
 
-// Multimodal payload (base64 PDF/image) kept under the serverless body limit.
+// Multimodal payload (base64 PDF/image, or Excel rows as text) kept under the
+// serverless body limit.
 const MAX_CONTENT_LEN = 4_000_000
 
-const SYSTEM_PROMPT = `אתה קורא דוח חשבון עו"ש (בנק) ישראלי שמועלה כקובץ (PDF או תמונה). חלץ את כל התנועות.
+const SYSTEM_PROMPT = `אתה קורא דוח חשבון עו"ש (בנק) ישראלי. הוא יכול להגיע כקובץ (PDF/תמונה) או כטבלת נתונים בטקסט (שורות עם עמודות מופרדות ב‑|). חלץ את כל התנועות.
 
 לכל תנועה החזר:
 - date: תאריך בפורמט YYYY-MM-DD אם ניתן (אחרת מחרוזת ריקה).
 - desc: שם בית העסק / המוטב / תיאור התנועה.
-- amount: סכום חיובי (מספר בלבד, ללא ₪ וללא פסיקים).
-- dir: "out" לחיוב / כסף שיצא (חובה, תשלום, משיכה), או "in" לזיכוי / כסף שנכנס (זכות, הפקדה, העברה נכנסת, משכורת).
+- amount: הסכום של התנועה כמספר חיובי (ללא ₪, ללא פסיקים, ללא סימן).
+- dir: "out" לכסף שיצא (חיוב/חובה/תשלום/משיכה), או "in" לכסף שנכנס (זיכוי/זכות/הפקדה/העברה נכנסת/משכורת).
 
-כללים:
-- התעלם משורות יתרה, סיכומים, כותרות וכותרות עמודות.
+כללים חשובים:
+- אם יש עמודת סכום אחת עם **סימן**: מינוס (-) = out, חיובי = in. החזר את הסכום בערך מוחלט (חיובי).
+- אם יש עמודות נפרדות "חובה" ו"זכות": חובה=out, זכות=in.
+- **התעלם מעמודת היתרה הרצה** (running balance) — היא לא תנועה. בפורמט הפועלים: עמודה אחת היא הסכום עם סימן, עמודה אחרת היא היתרה אחריו (תמיד חיובית וגדלה/קטנה בהדרגה) — אל תיקח אותה.
+- התעלם ממספרי אסמכתא/רצף, מסיכומים, מכותרות, ומשורות כותרת עמודות.
 - אל תמציא תנועות; חלץ רק מה שמופיע בדוח.
 
 החזר JSON תקין בלבד, ללא טקסט נוסף:
