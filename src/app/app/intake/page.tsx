@@ -26,6 +26,7 @@ export default function IntakePage() {
   const [files, setFiles]     = useState<IntakeFile[]>([])
   const [loading, setLoading] = useState(true)
   const [busyQ, setBusyQ]     = useState<string | null>(null)
+  const [dragQ, setDragQ]     = useState<string | null>(null)  // question being dragged over
   const [saved, setSaved]     = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -157,10 +158,17 @@ export default function IntakePage() {
                 </div>
               )}
 
-              {/* file upload */}
+              {/* file upload — click OR drag-and-drop */}
               {q.type === 'file' && (
                 <div className="space-y-2">
-                  <label className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-line bg-surface hover:border-gold/50 px-4 py-3 cursor-pointer transition-colors text-sm text-muted-txt">
+                  <label
+                    onDragOver={e => { e.preventDefault(); setDragQ(q.id) }}
+                    onDragLeave={() => setDragQ(prev => (prev === q.id ? null : prev))}
+                    onDrop={e => { e.preventDefault(); setDragQ(null); const fs = Array.from(e.dataTransfer.files); if (fs.length) uploadForQuestion(q, fs) }}
+                    className={`flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-3 cursor-pointer transition-colors text-sm text-muted-txt ${
+                      dragQ === q.id ? 'border-gold bg-gold/10 text-gold' : 'border-line bg-surface hover:border-gold/50'
+                    }`}
+                  >
                     <input
                       type="file"
                       multiple
@@ -169,7 +177,7 @@ export default function IntakePage() {
                       disabled={busyQ === q.id}
                       onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) uploadForQuestion(q, fs) }}
                     />
-                    <span>{busyQ === q.id ? '⏳ מעלה…' : '📎 בחרו / גררו קבצים'}</span>
+                    <span>{busyQ === q.id ? '⏳ מעלה…' : dragQ === q.id ? '⬇ שחררו כאן' : '📎 בחרו או גררו קבצים לכאן'}</span>
                   </label>
                   {qFiles.length > 0 && (
                     <div className="space-y-1">
