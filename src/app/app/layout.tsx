@@ -22,6 +22,7 @@ const groups: TabGroup[] = [
   {
     title: 'דוחות',
     items: [
+      { href: '/app/intake', emoji: '📤', label: 'העלאת מסמכים' },
       { href: '/app/credit', emoji: '💳', label: 'אשראי' },
       { href: '/app/bank',   emoji: '🏦', label: 'עו"ש' },
       { href: '/app/import', emoji: '📥', label: 'ייבוא' },
@@ -62,9 +63,8 @@ const groups: TabGroup[] = [
   {
     title: 'מעבדה',
     items: [
-      { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',     advisorOnly: true },
-      { href: '/app/intake',           emoji: '📤', label: 'העלאת מסמכים', advisorOnly: true },
-      { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה',   advisorOnly: true },
+      { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',   advisorOnly: true },
+      { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה', advisorOnly: true },
     ],
   },
 ]
