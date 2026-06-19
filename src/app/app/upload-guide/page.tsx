@@ -160,8 +160,7 @@ export default function UploadGuidePage() {
 
       {/* Footer + CTA */}
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6 text-center space-y-3">
-        <p className="text-sm text-txt font-semibold">עכשיו הגיע הזמן לתת בראש! מחכים לעדכונים 💪</p>
-        <p className="text-xs text-muted-txt">אני זמין בוואטסאפ לכל שאלה על המשימות או בכללי 🙂</p>
+        <p className="text-sm text-txt font-semibold">עכשיו הגיע הזמן לתת בראש! מחכה לעדכונים 💪</p>
         <div><CtaButton /></div>
       </div>
     </div>
