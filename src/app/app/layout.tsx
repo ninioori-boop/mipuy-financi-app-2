@@ -16,13 +16,13 @@ const groups: TabGroup[] = [
   {
     title: '',
     items: [
-      { href: '/app/guide', emoji: '📖', label: 'מדריך' },
+      { href: '/app/intake', emoji: '📤', label: 'העלאת מסמכים' },
+      { href: '/app/guide',  emoji: '📖', label: 'מדריך' },
     ],
   },
   {
     title: 'דוחות',
     items: [
-      { href: '/app/intake', emoji: '📤', label: 'העלאת מסמכים' },
       { href: '/app/credit', emoji: '💳', label: 'אשראי' },
       { href: '/app/bank',   emoji: '🏦', label: 'עו"ש' },
       { href: '/app/import', emoji: '📥', label: 'ייבוא' },
