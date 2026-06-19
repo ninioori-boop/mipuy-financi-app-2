@@ -270,7 +270,7 @@ export default function BankPage() {
     if (activeKey === g.key) setActiveKey(null)
   }
 
-  function sendGroup(g: BankGroup, section: BankSection) {
+  function sendGroup(g: BankGroup, section: BankSection | 'income') {
     const { desc, amount } = picker
     if (!desc.trim() && amount === 0) { toast.error('הזן תיאור או סכום'); return }
     const divisor       = Math.max(1, reportMonths)
@@ -282,10 +282,11 @@ export default function BankPage() {
     }])
     for (const t of g.txns) markSent(t.origIdx)
     setActiveKey(null)
-    const secLabel = SECTIONS.find(s => s.id === section)?.label ?? section
+    const secLabel = section === 'income' ? 'הכנסות' : (SECTIONS.find(s => s.id === section)?.label ?? section)
+    const noun     = section === 'income' ? txNoun(g.count, 'in') : txNoun(g.count, 'out')
     const divNote  = divisor > 1 ? ` (${amount} ÷ ${divisor} = ${monthlyAmount})` : ''
     toast.success(
-      `✅ "${desc.trim() || g.displayName}" (${g.count} ${txNoun(g.count, 'out')}) נשלח ל${secLabel}${divNote}`
+      `✅ "${desc.trim() || g.displayName}" (${g.count} ${noun}) נשלח ל${secLabel}${divNote}`
     )
   }
 
@@ -497,12 +498,13 @@ export default function BankPage() {
           </div>
 
           {inGroups.map(g => {
+            const isOpen     = activeKey === g.key
             const isExpanded = expandedKeys.has(g.key)
             return (
-              <div key={g.key} className="rounded-xl border border-income/30 bg-income/5">
+              <div key={g.key} className={`rounded-xl border transition-colors ${isOpen ? 'border-income/60 bg-income/10' : 'border-income/30 bg-income/5'}`}>
                 <div className="flex items-stretch">
                   <button
-                    onClick={() => toggleExpanded(g.key)}
+                    onClick={() => openGroup(g)}
                     className="flex-1 p-4 flex items-center gap-3 hover:bg-income/5 transition-colors text-right min-w-0"
                     dir="rtl"
                   >
@@ -518,7 +520,7 @@ export default function BankPage() {
                       </div>
                       <div className="text-[10px] text-muted-txt">נכנס לחשבון</div>
                     </div>
-                    <span className="text-income text-xl shrink-0 w-5 text-center">{isExpanded ? '−' : '+'}</span>
+                    <span className="text-income text-xl shrink-0 w-5 text-center">{isOpen ? '−' : '+'}</span>
                   </button>
                   <button
                     onClick={() => flipGroup(g, 'in')}
@@ -529,15 +531,62 @@ export default function BankPage() {
                   </button>
                 </div>
 
-                {isExpanded && (
-                  <div className="border-t border-income/20 p-4 space-y-1.5 max-h-64 overflow-y-auto" dir="rtl">
-                    {g.txns.map(t => (
-                      <div key={t.origIdx} className="flex items-center justify-between gap-3 text-xs px-2 py-1 rounded bg-surface2/50">
-                        <span className="text-muted-txt truncate flex-1">{t.desc}</span>
-                        {t.date && <span className="text-[10px] text-muted-txt shrink-0">{t.date}</span>}
-                        <span className="tabular-nums text-income shrink-0">+{t.amount.toLocaleString('he-IL')} ₪</span>
+                {/* Picker — send the credit to the mapping's income section */}
+                {isOpen && (
+                  <div className="border-t border-income/30 p-4 space-y-3 bg-surface" dir="rtl">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="text-xs text-muted-txt">תיאור:</label>
+                      <input
+                        value={picker.desc}
+                        onChange={e => setPicker(p => ({ ...p, desc: e.target.value }))}
+                        placeholder="תיאור"
+                        className="flex-1 min-w-[160px] rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-txt focus:outline-none focus:border-income/60"
+                      />
+                      <label className="text-xs text-muted-txt">סכום:</label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-muted-txt">₪</span>
+                        <input
+                          type="number"
+                          value={picker.amount || ''}
+                          onChange={e => setPicker(p => ({ ...p, amount: parseFloat(e.target.value) || 0 }))}
+                          placeholder="סכום"
+                          min={0}
+                          style={{ direction: 'ltr' }}
+                          className="rounded-lg border border-line bg-surface2 px-2 py-1.5 text-sm text-txt focus:outline-none focus:border-income/60 w-28 text-left tabular-nums"
+                        />
                       </div>
-                    ))}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-muted-txt">העבר ל:</span>
+                      <button
+                        onClick={() => sendGroup(g, 'income')}
+                        className="px-3 py-1.5 rounded-lg border text-sm font-semibold transition-all text-income border-income/40 bg-income/10 hover:bg-income/25"
+                      >
+                        💰 הכנסות
+                      </button>
+                      <button onClick={() => setActiveKey(null)}
+                        className="text-muted-txt hover:text-txt text-xs me-auto">ביטול</button>
+                    </div>
+
+                    <button
+                      onClick={() => toggleExpanded(g.key)}
+                      className="text-xs text-income/80 hover:text-income transition-colors"
+                    >
+                      {isExpanded ? '▲ הסתר עסקאות בקבוצה' : `▼ הצג ${g.count} עסקאות בקבוצה`}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-line pt-3 space-y-1.5 max-h-64 overflow-y-auto">
+                        {g.txns.map(t => (
+                          <div key={t.origIdx} className="flex items-center justify-between gap-3 text-xs px-2 py-1 rounded bg-surface2/50">
+                            <span className="text-muted-txt truncate flex-1">{t.desc}</span>
+                            {t.date && <span className="text-[10px] text-muted-txt shrink-0">{t.date}</span>}
+                            <span className="tabular-nums text-income shrink-0">+{t.amount.toLocaleString('he-IL')} ₪</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

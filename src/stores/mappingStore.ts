@@ -169,7 +169,7 @@ interface MappingState {
   importFromBank: (rows: {
     name:    string
     amount:  number             // monthly cost-basis to ADD to the target section as a new row
-    section: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
+    section: 'income' | 'fixed' | 'variable' | 'sub' | 'ins' | 'annual'
     /**
      * When present, the matching fromCredit row in the source category's
      * section gets reduced by `amount`. Used by the credit-tab SmartPatterns
@@ -337,6 +337,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
   importFromBank: (rows) => {
     set(s => {
+      let income   = s.income
       let fixed    = s.fixed
       let variable = s.variable
       let sub      = s.sub
@@ -352,7 +353,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
           annual = [{ id: uid(), name: r.name, annualAmount: r.amount, fromCredit: true, fromBank: true }, ...annual]
         } else {
           const newRow: MappingRow = { id: uid(), name: r.name, amount: r.amount, fromCredit: true, fromBank: true }
-          if      (r.section === 'fixed')    fixed    = [newRow, ...fixed]
+          if      (r.section === 'income')   income   = [newRow, ...income]
+          else if (r.section === 'fixed')    fixed    = [newRow, ...fixed]
           else if (r.section === 'variable') variable = [newRow, ...variable]
           else if (r.section === 'sub')      sub      = [newRow, ...sub]
           else if (r.section === 'ins')      ins      = [newRow, ...ins]
@@ -396,7 +398,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         else                                   ins      = updated
       })
 
-      return { fixed, variable, sub, ins, annual }
+      return { income, fixed, variable, sub, ins, annual }
     })
   },
 }))
