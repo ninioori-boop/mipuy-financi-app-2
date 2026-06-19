@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { toast } from 'sonner'
 import { INTAKE_QUESTIONS, INTAKE_TITLE, INTAKE_INTRO, type IntakeQuestion } from '@/lib/intakeForm'
 import {
-  uploadIntakeFile, listMyIntake, deleteIntakeFile, saveAnswers, loadMyAnswers,
+  uploadIntakeFile, listMyIntake, deleteIntakeFile, saveAnswers, loadMyAnswers, getFileUrl,
   type IntakeFile,
 } from '@/lib/intake'
 
@@ -74,6 +74,11 @@ export default function IntakePage() {
     if (!confirm(`למחוק את "${f.name}"?`)) return
     try { await deleteIntakeFile(f); await reloadFiles() }
     catch (e) { toast.error('שגיאה במחיקה: ' + (e as Error).message) }
+  }
+
+  async function openFile(f: IntakeFile) {
+    try { window.open(await getFileUrl(f.path), '_blank', 'noopener') }
+    catch (e) { toast.error('שגיאה בפתיחת הקובץ: ' + (e as Error).message) }
   }
 
   const filesByQ = useMemo(() => {
@@ -173,7 +178,8 @@ export default function IntakePage() {
                           <span className="shrink-0">{fileIcon(f.type, f.name)}</span>
                           <span className="flex-1 min-w-0 truncate text-txt">{f.name}</span>
                           <span className="text-muted-txt shrink-0">{fmtSize(f.size)}</span>
-                          <button onClick={() => removeFile(f)} className="text-muted-txt hover:text-expense opacity-0 group-hover:opacity-100 shrink-0" title="מחק">×</button>
+                          <button onClick={() => openFile(f)} className="text-muted-txt hover:text-gold shrink-0" title="פתח / הורד">פתח</button>
+                          <button onClick={() => removeFile(f)} className="text-muted-txt hover:text-expense shrink-0" title="מחק">×</button>
                         </div>
                       ))}
                     </div>
