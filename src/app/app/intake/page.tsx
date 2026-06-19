@@ -178,8 +178,8 @@ export default function IntakePage() {
                           <span className="shrink-0">{fileIcon(f.type, f.name)}</span>
                           <span className="flex-1 min-w-0 truncate text-txt">{f.name}</span>
                           <span className="text-muted-txt shrink-0">{fmtSize(f.size)}</span>
-                          <button onClick={() => openFile(f)} className="text-muted-txt hover:text-gold shrink-0" title="פתח / הורד">פתח</button>
-                          <button onClick={() => removeFile(f)} className="text-muted-txt hover:text-expense shrink-0" title="מחק">×</button>
+                          <button onClick={() => openFile(f)} className="border border-line rounded px-2 py-0.5 text-muted-txt hover:text-gold hover:border-gold/60 transition-colors shrink-0" title="פתח / הורד">פתח</button>
+                          <button onClick={() => removeFile(f)} className="border border-line rounded px-2 py-0.5 text-muted-txt hover:text-expense hover:border-expense/50 transition-colors shrink-0" title="מחק קובץ">מחק</button>
                         </div>
                       ))}
                     </div>
