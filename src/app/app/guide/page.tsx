@@ -11,6 +11,29 @@ export default function GuidePage() {
         </p>
       </div>
 
+      {/* Before we start — data collection */}
+      <div>
+        <h2 className="text-xl font-bold text-txt mb-4">🚀 לפני שמתחילים — איסוף הנתונים</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-gold/30 bg-gold/5 p-5 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-txt"><span className="text-xl">📋</span> משימות למיפוי</div>
+            <p className="text-sm text-muted-txt leading-relaxed">
+              רשימת המשימות שהלקוח מבצע לקראת פגישת המיפוי — מאיפה לייצא כל נתון (תלושי שכר, עו&quot;ש, אשראי,
+              הלוואות, פנסיה, ביטוחים, השקעות ודירוג אשראי), צעד אחר צעד, עם קישורים לאתרים החיצוניים הנדרשים.
+            </p>
+            <p className="text-xs text-gold/80">💡 זה הצעד הראשון — אוספים את כל החומר לפי הרשימה ואז מעלים אותו.</p>
+          </div>
+          <div className="rounded-xl border border-gold/30 bg-gold/5 p-5 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-txt"><span className="text-xl">📤</span> העלאת מסמכים</div>
+            <p className="text-sm text-muted-txt leading-relaxed">
+              שאלון שבו הלקוח עונה על פרטים ומעלה את כל הקבצים שאסף — לכל שאלה אזור העלאה משלה (גרירה או בחירה).
+              הכול נשמר אוטומטית בענן, והיועץ נכנס לחשבון ורואה בדיוק מה מולא והועלה.
+            </p>
+            <p className="text-xs text-gold/80">💡 אפשר לפתוח, להוריד ולמחוק כל קובץ אחרי שהועלה.</p>
+          </div>
+        </div>
+      </div>
+
       {/* Workflow */}
       <div>
         <h2 className="text-xl font-bold text-txt mb-4">🗺️ מסלול העבודה המומלץ</h2>
