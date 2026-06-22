@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import {
   onAuthStateChanged,
+  signInWithEmailAndPassword,
   signInWithPopup,
   GoogleAuthProvider,
   getIdToken,
@@ -17,14 +18,18 @@ type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
 /**
  * Device-connect page for the Android expense-tracker app.
- * Standalone, additive route — the client signs in with Google (once) and the
- * page hands their personal device token back to the native app via a custom
- * URL scheme. No copy-paste. Reuses the existing auth + /api/device-token.
+ * Standalone, additive route — the client signs in (email+password, like most
+ * do, or Google) once, and the page hands their personal device token back to
+ * the native app via a custom URL scheme. No copy-paste. Reuses existing auth +
+ * /api/device-token.
  */
 export default function ConnectPage() {
   const [phase, setPhase] = useState<Phase>('loading')
   const [token, setToken] = useState('')
   const [error, setError] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const fetchToken = useCallback(async (user: User) => {
     setPhase('fetching')
@@ -53,16 +58,32 @@ export default function ConnectPage() {
     [fetchToken],
   )
 
-  async function signIn() {
+  async function signInEmail(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password)
+      // onAuthStateChanged fires → fetchToken
+    } catch (err) {
+      const code = (err as { code?: string }).code || ''
+      setError(
+        code.includes('invalid') || code.includes('wrong') || code.includes('user-not-found')
+          ? 'מייל או סיסמה שגויים'
+          : 'ההתחברות נכשלה, נסה שוב',
+      )
+      setBusy(false)
+    }
+  }
+
+  async function signInGoogle() {
     setError('')
     try {
       await signInWithPopup(auth, new GoogleAuthProvider())
-      // onAuthStateChanged fires → fetchToken
     } catch (e) {
       const code = (e as { code?: string }).code
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
-        setError('ההתחברות נכשלה, נסה שוב')
-        setPhase('signin')
+        setError('ההתחברות עם Google נכשלה, נסה שוב')
       }
     }
   }
@@ -83,17 +104,53 @@ export default function ConnectPage() {
       )}
 
       {phase === 'signin' && (
-        <>
-          <p className="text-txt mb-6 max-w-xs">
-            התחבר עם חשבון Google שלך כדי לחבר את האפליקציה — פעם אחת בלבד.
-          </p>
+        <div className="w-full max-w-xs">
+          <p className="text-txt mb-6">התחבר לחשבון שלך כדי לחבר את האפליקציה — פעם אחת בלבד.</p>
+
+          <form onSubmit={signInEmail} className="space-y-3">
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="אימייל"
+              style={{ direction: 'ltr' }}
+              className="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left"
+            />
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="סיסמה"
+              style={{ direction: 'ltr' }}
+              className="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors disabled:opacity-50"
+            >
+              {busy ? 'מתחבר…' : 'התחבר'}
+            </button>
+          </form>
+
+          {error && <p className="text-expense text-sm mt-4">{error}</p>}
+
+          <div className="flex items-center gap-3 my-5">
+            <div className="h-px bg-line flex-1" />
+            <span className="text-muted-txt text-xs">או</span>
+            <div className="h-px bg-line flex-1" />
+          </div>
+
           <button
-            onClick={signIn}
-            className="bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+            onClick={signInGoogle}
+            className="w-full bg-surface2 text-txt border border-line rounded-xl px-8 py-3 hover:bg-surface3 transition-colors"
           >
             התחבר עם Google
           </button>
-        </>
+        </div>
       )}
 
       {phase === 'fetching' && (
