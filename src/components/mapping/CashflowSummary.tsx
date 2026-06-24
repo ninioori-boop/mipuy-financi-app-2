@@ -37,6 +37,11 @@ export function CashflowSummary({ income, fixed, sub, ins, variable, annual, deb
   const totalAssetsMo     = savings.reduce((s, r) => s + r.monthlyContribution, 0)
   const totalDebtBal      = debts.reduce((s, r) => s + r.remainingBalance, 0)
 
+  // "Total monthly outflow" — what actually leaves the account every month,
+  // expenses AND savings contributions combined. The advisor's go-to number
+  // when sitting with the client.
+  const totalOutflow      = totalExpenses + totalAssetsMo
+
   const positive = cashflow >= 0
 
   return (
@@ -99,6 +104,19 @@ export function CashflowSummary({ income, fixed, sub, ins, variable, annual, deb
             <span className="text-txt">סה&quot;כ הוצאות</span>
             <span className="text-expense tabular-nums">{fmt(totalExpenses)}</span>
           </div>
+
+          {totalAssetsMo > 0 && (
+            <>
+              <div className="flex justify-between text-xs pt-1.5">
+                <span className="text-muted-txt">+ 🏦 הפרשות לחסכון</span>
+                <span className="text-txt font-medium tabular-nums">{fmt(totalAssetsMo)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-bold border-t border-gold/30 pt-2 mt-1">
+                <span className="text-gold">סה&quot;כ יציאה חודשית</span>
+                <span className="text-gold tabular-nums">{fmt(totalOutflow)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

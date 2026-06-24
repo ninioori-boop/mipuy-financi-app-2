@@ -9,7 +9,6 @@ import { DebtPanel } from '@/components/mapping/DebtPanel'
 import { InstallmentPanel } from '@/components/mapping/InstallmentPanel'
 import { SavingPanel } from '@/components/mapping/SavingPanel'
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
-import { MonthlySpendBanner } from '@/components/mapping/MonthlySpendBanner'
 
 function fmt(n: number) {
   return '₪' + n.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -38,19 +37,6 @@ export default function MappingPage() {
         <h1 className="text-2xl font-bold text-gold mb-1">🗂️ מיפוי ידני</h1>
         <p className="text-muted-txt text-sm">הגדר הכנסות והוצאות חודשיות — הבסיס לתכנון התקציב</p>
       </div>
-
-      {/* Live monthly spend total — the headline number the advisor needs at a glance */}
-      <MonthlySpendBanner
-        fixed={store.fixed}
-        sub={store.sub}
-        ins={store.ins}
-        variable={store.variable}
-        annual={store.annual}
-        debts={store.debts}
-        installments={store.installments}
-        savings={store.savings}
-        varMonths={store.varMonths}
-      />
 
       {/* Credit rating score */}
       <div className="rounded-xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
