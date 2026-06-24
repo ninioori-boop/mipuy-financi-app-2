@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
-import type { MappingRow } from '@/stores/mappingStore'
+import { useMemo, useState } from 'react'
+import { useMappingStore, type MappingRow } from '@/stores/mappingStore'
 import type { Transaction } from '@/types/transaction'
+import { normalizeForLookup } from '@/lib/categorize'
 
 function fmt(n: number) {
   return '₪' + n.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -33,9 +34,38 @@ export function SectionPanel({
   const [openDetail, setOpenDetail] = useState<string | null>(null)
   const total = rows.reduce((s, r) => s + r.amount, 0)
 
+  // Names of every mapping row across the entire mapping (all sections),
+  // normalized. Used to suppress transactions in a category-aggregated row's
+  // פירוט view once their merchant has been carved out to its own row — so
+  // PIC* CLAUDE doesn't appear under both the standalone Anthropic row AND
+  // the aggregated "מנויים" row.
+  const mFixed    = useMappingStore(s => s.fixed)
+  const mVariable = useMappingStore(s => s.variable)
+  const mSub      = useMappingStore(s => s.sub)
+  const mIns      = useMappingStore(s => s.ins)
+  const mAnnual   = useMappingStore(s => s.annual)
+  const allMappingNames = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of [...mFixed, ...mVariable, ...mSub, ...mIns, ...mAnnual]) {
+      const k = normalizeForLookup(r.name)
+      if (k) set.add(k)
+    }
+    return set
+  }, [mFixed, mVariable, mSub, mIns, mAnnual])
+
   function txsForRow(name: string): Transaction[] {
     if (!creditTransactions) return []
-    return creditTransactions.filter(t => t.category === name && !t.isRefund)
+    const myKey = normalizeForLookup(name)
+    return creditTransactions.filter(t => {
+      if (t.isRefund) return false
+      if (t.category !== name) return false
+      const merchantKey = normalizeForLookup(t.desc)
+      // Skip the txn if its merchant has its OWN mapping row elsewhere.
+      // (myKey check keeps the txn visible when the row IS the merchant's
+      // dedicated row — edge case where row name equals merchant desc.)
+      if (merchantKey && merchantKey !== myKey && allMappingNames.has(merchantKey)) return false
+      return true
+    })
   }
 
   return (
