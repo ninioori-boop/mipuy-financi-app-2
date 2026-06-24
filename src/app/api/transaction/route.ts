@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { FieldValue } from 'firebase-admin/firestore'
+import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
@@ -50,9 +50,11 @@ export async function POST(req: NextRequest) {
   const refStr = typeof ref === 'string' ? ref.slice(0, 64) : null
 
   const cleanMerchant = merchant.trim()
-  // Rule-based BUSINESS_DB first; fall back to AI for unknown merchants
-  // (e.g. English / company names from Google Wallet) so they don't all land in "שונות".
-  let category = categorize(cleanMerchant)
+  // Learned corrections (shared — same DB the credit/import/expenses tabs teach)
+  // → BUSINESS_DB → AI fallback. One correction fixes this merchant for every
+  // future ingested charge.
+  const learnedDB = await loadSharedLearned(db)
+  let category = categorize(cleanMerchant, learnedDB)
   if (category === 'שונות') {
     const ai = await aiCategorizeOne(cleanMerchant)
     if (ai) category = ai
@@ -73,4 +75,18 @@ export async function POST(req: NextRequest) {
   console.log(`[transaction] uid=${uid} cat=${category}`)
 
   return NextResponse.json({ ok: true, category })
+}
+
+// Reads the shared merchant→category corrections (admin SDK) so a fix made once
+// in the expenses/credit/import tabs auto-applies to future ingested charges.
+async function loadSharedLearned(db: Firestore): Promise<Record<string, string>> {
+  try {
+    const snap = await db.collection('shared').doc('learnedDB').get()
+    const data = snap.exists ? snap.data() : null
+    return data && typeof data.db === 'object' && data.db
+      ? (data.db as Record<string, string>)
+      : {}
+  } catch {
+    return {}
+  }
 }

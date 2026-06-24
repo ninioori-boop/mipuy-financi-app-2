@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useCreditStore } from '@/stores/creditStore'
 import { ALL_CATEGORIES, CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
 
 function today() {
@@ -40,6 +41,7 @@ export default function ExpensesPage() {
   const router = useRouter()
   const { entries, add, update, remove } = useExpenseLogStore()
   const { initMonth, applyExpenseLog } = useMonthlyStore()
+  const learn = useCreditStore(s => s.learn)   // shared learnedDB — same teaching as credit/import
 
   const [selMonth, setSelMonth] = useState(currentMonth())
   const [amount, setAmount]     = useState('')
@@ -245,7 +247,14 @@ export default function ExpensesPage() {
                       <div className="flex-1 min-w-0">
                         <select
                           value={e.category}
-                          onChange={ev => { update(e.id, { category: ev.target.value }); toast.success('הקטגוריה עודכנה ✓') }}
+                          onChange={ev => {
+                            const cat = ev.target.value
+                            update(e.id, { category: cat })
+                            // Teach the shared learnedDB from the merchant (note minus the "#ref" suffix)
+                            const merchant = e.note.replace(/ #\S+$/, '').trim()
+                            if (merchant) learn(merchant, cat)
+                            toast.success(merchant ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
+                          }}
                           title="שנה קטגוריה"
                           className="-ms-1 max-w-full bg-transparent text-sm text-txt hover:text-gold focus:text-gold focus:outline-none cursor-pointer rounded"
                         >
