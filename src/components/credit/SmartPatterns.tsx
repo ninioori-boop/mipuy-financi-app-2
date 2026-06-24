@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import type { Transaction } from '@/types/transaction'
 import { useMappingStore } from '@/stores/mappingStore'
+import { normalizeForLookup } from '@/lib/categorize'
 
 type MappingSection = 'fixed' | 'sub' | 'ins'
 
@@ -103,15 +104,11 @@ function fmt(n: number) {
   return '₪' + n.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
-function itemKey(item: PatternItem): string {
-  return `${item.desc}|${Math.round(item.amount * 10)}`
-}
-
 function SectionBlock({
-  icon, title, color, items, sendActions, sentItems, onSend,
+  icon, title, color, items, sendActions, hidden, onSend,
 }: Section & {
-  sentItems: Map<string, string>     // itemKey → targetLabel of the section it was sent to
-  onSend:    (item: PatternItem, target: MappingSection, targetLabel: string) => void
+  hidden:  number     // how many items were filtered because they're already in mapping
+  onSend:  (item: PatternItem, target: MappingSection, targetLabel: string) => void
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -122,6 +119,14 @@ function SectionBlock({
       >
         <span>{icon}</span>
         <span className="font-medium text-sm flex-1 text-right">{title}</span>
+        {hidden > 0 && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-md border border-green-400/30 bg-green-400/10 text-green-400 whitespace-nowrap"
+            title={`${hidden} פריטים כבר במיפוי — לא מוצגים כאן כדי למנוע כפל`}
+          >
+            +{hidden} במיפוי
+          </span>
+        )}
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${color}`}>
           {items.length}
         </span>
@@ -130,48 +135,38 @@ function SectionBlock({
 
       {open && (
         <div className="divide-y divide-line">
-          {items.map((item, i) => {
-            const key      = itemKey(item)
-            const sentTo   = sentItems.get(key)
-            return (
-              <div key={i} className="px-4 py-2.5 flex items-center gap-2 text-sm flex-wrap">
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{item.desc}</div>
-                  {item.meta && <div className="text-xs text-muted-txt">{item.meta}</div>}
-                  {item.progress !== undefined && (
-                    <div className="mt-1 h-1 bg-surface rounded-full overflow-hidden">
-                      <div className="h-full bg-gold rounded-full" style={{ width: `${item.progress}%` }} />
-                    </div>
-                  )}
-                </div>
-                <span className="font-medium text-gold">{fmt(item.amount)}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full border ${item.tagColor}`}>
-                  {item.tag}
-                </span>
-                {sendActions && (
-                  sentTo ? (
-                    <span className="text-xs px-2 py-0.5 rounded-lg border border-green-400/30 bg-green-400/10 text-green-400 whitespace-nowrap">
-                      ✓ נשלח ל{sentTo}
-                    </span>
-                  ) : (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className="text-xs text-muted-txt">→</span>
-                      {sendActions.map(action => (
-                        <button
-                          key={action.target}
-                          onClick={() => onSend(item, action.target, action.label)}
-                          className={`text-xs px-2 py-0.5 rounded-lg border transition-colors whitespace-nowrap ${action.buttonClass}`}
-                          title={`שלח ל${action.label} במיפוי`}
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                  )
+          {items.map((item, i) => (
+            <div key={i} className="px-4 py-2.5 flex items-center gap-2 text-sm flex-wrap">
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">{item.desc}</div>
+                {item.meta && <div className="text-xs text-muted-txt">{item.meta}</div>}
+                {item.progress !== undefined && (
+                  <div className="mt-1 h-1 bg-surface rounded-full overflow-hidden">
+                    <div className="h-full bg-gold rounded-full" style={{ width: `${item.progress}%` }} />
+                  </div>
                 )}
               </div>
-            )
-          })}
+              <span className="font-medium text-gold">{fmt(item.amount)}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${item.tagColor}`}>
+                {item.tag}
+              </span>
+              {sendActions && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-xs text-muted-txt">→</span>
+                  {sendActions.map(action => (
+                    <button
+                      key={action.target}
+                      onClick={() => onSend(item, action.target, action.label)}
+                      className={`text-xs px-2 py-0.5 rounded-lg border transition-colors whitespace-nowrap ${action.buttonClass}`}
+                      title={`שלח ל${action.label} במיפוי`}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -181,7 +176,23 @@ function SectionBlock({
 export function SmartPatterns({ transactions }: { transactions: Transaction[] }) {
   const p = detectPatterns(transactions)
   const importFromBank = useMappingStore(s => s.importFromBank)
-  const [sentItems, setSentItems] = useState<Map<string, string>>(new Map())
+  // Source-of-truth set of merchants already carved out into mapping. Built
+  // from the current mapping state — survives reloads, switches between
+  // clients, and direct manual additions in the mapping tab. Normalized via
+  // the same helper used to dedupe merchant lookups elsewhere.
+  const mFixed    = useMappingStore(s => s.fixed)
+  const mVariable = useMappingStore(s => s.variable)
+  const mSub      = useMappingStore(s => s.sub)
+  const mIns      = useMappingStore(s => s.ins)
+  const mAnnual   = useMappingStore(s => s.annual)
+  const alreadyMappedKeys = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of [...mFixed, ...mVariable, ...mSub, ...mIns, ...mAnnual]) {
+      const k = normalizeForLookup(r.name)
+      if (k) set.add(k)
+    }
+    return set
+  }, [mFixed, mVariable, mSub, mIns, mAnnual])
 
   function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
     const amount = Math.round(item.amount)
@@ -194,12 +205,10 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
       ? { category: item.category, amount: subtractTotal }
       : undefined
     importFromBank([{ name: item.desc, amount, section: target, subtractFrom }])
-    setSentItems(prev => {
-      const next = new Map(prev)
-      next.set(itemKey(item), targetLabel)
-      return next
-    })
     toast.success(`✅ "${item.desc}" נשלח ל${targetLabel} במיפוי`)
+    // No local "sent" state needed — the new mapping row enters
+    // alreadyMappedKeys on next render, and the item filters itself out of
+    // the section. Survives refresh because mapping is persisted.
   }
 
   // Three colored chip styles for the multi-target send picker
@@ -297,9 +306,19 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         tag: 'זיכוי', tagColor: 'border-green-400/50 text-green-300',
       })),
     },
-  ].filter(s => s.items.length > 0)
+  ]
 
-  if (!sections.length) return null
+  // Filter items already carved into mapping (per the user's request — avoid
+  // re-offering the same merchant once it's been moved). Only sections with
+  // sendActions get this treatment; refunds/installments are reference info,
+  // not actionable, so they pass through unchanged.
+  const filteredSections = sections.map(s => {
+    if (!s.sendActions) return { ...s, hidden: 0 }
+    const filtered = s.items.filter(it => !alreadyMappedKeys.has(normalizeForLookup(it.desc)))
+    return { ...s, items: filtered, hidden: s.items.length - filtered.length }
+  }).filter(s => s.items.length > 0)
+
+  if (!filteredSections.length) return null
 
   return (
     <div className="space-y-2">
@@ -307,8 +326,8 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
         🔍 ניתוח חכם
       </div>
       <div className="space-y-2">
-        {sections.map((s, i) => (
-          <SectionBlock key={i} {...s} sentItems={sentItems} onSend={handleSend} />
+        {filteredSections.map((s, i) => (
+          <SectionBlock key={i} {...s} onSend={handleSend} />
         ))}
       </div>
     </div>
