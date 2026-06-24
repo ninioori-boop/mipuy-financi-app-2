@@ -104,21 +104,29 @@ export function CategoryPicker({
       close()
     }
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close() }
-    function onScroll() { close() }
+    // Close only on scrolls outside the popover — scrolling the picker's own
+    // result list must not dismiss it. Capture-phase listener so we see
+    // scrolls on any ancestor scroll container.
+    function onScroll(e: Event) {
+      const target = e.target as Node | null
+      if (target && popRef.current?.contains(target)) return
+      close()
+    }
+    function onResize() { close() }
     document.addEventListener('mousedown', onDocDown)
     document.addEventListener('keydown',   onKey)
     document.addEventListener('scroll',    onScroll, true)
-    window.addEventListener  ('resize',    onScroll)
+    window.addEventListener  ('resize',    onResize)
     // Mobile soft-keyboard appearing shrinks visualViewport without firing a
     // regular resize. Closing the picker is the conservative choice — the
     // popover would otherwise hide behind the keyboard.
-    window.visualViewport?.addEventListener('resize', onScroll)
+    window.visualViewport?.addEventListener('resize', onResize)
     return () => {
       document.removeEventListener('mousedown', onDocDown)
       document.removeEventListener('keydown',   onKey)
       document.removeEventListener('scroll',    onScroll, true)
-      window.removeEventListener  ('resize',    onScroll)
-      window.visualViewport?.removeEventListener('resize', onScroll)
+      window.removeEventListener  ('resize',    onResize)
+      window.visualViewport?.removeEventListener('resize', onResize)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
