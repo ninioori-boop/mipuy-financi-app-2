@@ -41,6 +41,11 @@ function detectPatterns(txs: Transaction[]) {
   const installments: Transaction[]   = []
   const refunds: Transaction[]        = []
   const merchantMap: Record<string, Transaction[]> = {}
+  // Subscriptions = anything auto-categorized as "מנויים", grouped by merchant.
+  // Kept separate from `recurring` (which is purely pattern-based: any merchant
+  // with 2+ charges) so the advisor can SEE all subs at a glance — including
+  // single-charge ones the pattern detector ignores.
+  const subscriptionsMap: Record<string, Transaction[]> = {}
 
   for (const t of txs) {
     if (t.isStandingOrder) standingOrders.push(t)
@@ -50,6 +55,10 @@ function detectPatterns(txs: Transaction[]) {
       const key = t.desc.toLowerCase().replace(/\s+/g, ' ').trim()
       if (!merchantMap[key]) merchantMap[key] = []
       merchantMap[key].push(t)
+      if (t.category === 'מנויים') {
+        if (!subscriptionsMap[key]) subscriptionsMap[key] = []
+        subscriptionsMap[key].push(t)
+      }
     }
   }
 
@@ -74,7 +83,20 @@ function detectPatterns(txs: Transaction[]) {
   // Show the biggest spenders first so the coach scans the relevant ones fast
   recurring.sort((a, b) => b.total - a.total)
 
-  return { standingOrders, installments, refunds, recurring }
+  const subscriptions: { desc: string; amount: number; count: number; total: number; category: string }[] = []
+  for (const [, group] of Object.entries(subscriptionsMap)) {
+    const total = group.reduce((s, t) => s + t.amount, 0)
+    subscriptions.push({
+      desc:     group[0].desc,
+      amount:   Math.round(total / group.length),
+      count:    group.length,
+      total:    Math.round(total),
+      category: 'מנויים',
+    })
+  }
+  subscriptions.sort((a, b) => b.total - a.total)
+
+  return { standingOrders, installments, refunds, recurring, subscriptions }
 }
 
 function fmt(n: number) {
@@ -188,6 +210,31 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
   const insBtn   = 'border-orange-400/40 bg-orange-400/10 text-orange-300 hover:bg-orange-400/25'
 
   const sections: Section[] = [
+    // Subscriptions section — kept FIRST because it's the one the advisor most
+    // often wants to carve out into per-merchant rows in mapping (Netflix,
+    // Spotify, ChatGPT, gym, etc.). Sending one here subtracts its total from
+    // the aggregated "מנויים" category row so accounting stays clean.
+    {
+      icon: '🎬',
+      title: 'מנויים מזוהים',
+      color: 'bg-purple-500/20 text-purple-300',
+      items: p.subscriptions.map(s => ({
+        desc:   s.desc,
+        amount: s.amount,
+        meta:   s.count === 1
+          ? `חיוב יחיד · ${fmt(s.total)}`
+          : `${s.count} חיובים · סה"כ ${fmt(s.total)}`,
+        tag:    'מנוי', tagColor: 'border-purple-400/50 text-purple-300',
+        category: s.category,
+        count:    s.count,
+        total:    s.total,
+      })),
+      sendActions: [
+        { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
+        { label: 'מנויים', target: 'sub'   as const, buttonClass: subBtn   },
+        { label: 'ביטוחים', target: 'ins'  as const, buttonClass: insBtn   },
+      ],
+    },
     {
       icon: '📌',
       title: 'הוראות קבע',

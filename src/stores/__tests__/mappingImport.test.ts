@@ -48,6 +48,27 @@ describe('importFromCredit — one row per category (no per-merchant split)', ()
     expect(fromCredit[0].name).toBe('חדר כושר')
     expect(fromCredit[0].amount).toBe(153)
   })
+
+  it('refunds are NEVER added to a category total (locking regression for credit + import)', () => {
+    // 300 of real spend in מזון לבית, plus a 100 refund tagged to the same
+    // category. The mapping row must reflect 300 — refunds should not be
+    // summed in as expenses, nor subtracted as if they reduced the expense.
+    // (CategoryBreakdown / import sendToBudget / mappingStore all skip refunds
+    // entirely so the breakdown matches the mapping.)
+    const refund: Transaction = { ...makeTxn('החזר Shufersal', 100, 'מזון לבית'), isRefund: true }
+    const txns: Transaction[] = [
+      makeTxn('Shufersal', 200, 'מזון לבית'),
+      makeTxn('Rami Levi', 100, 'מזון לבית'),
+      refund,
+    ]
+    useMappingStore.getState().importFromCredit(txns, 1)
+
+    const variable = useMappingStore.getState().variable
+    const fromCredit = variable.filter(r => r.fromCredit && !r.fromBank)
+    expect(fromCredit).toHaveLength(1)
+    expect(fromCredit[0].name).toBe('מזון לבית')
+    expect(fromCredit[0].amount).toBe(300)   // 200 + 100, refund excluded entirely
+  })
 })
 
 describe('importFromBank — subtractFrom carves a merchant out of its source category', () => {
