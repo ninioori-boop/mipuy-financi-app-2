@@ -30,6 +30,8 @@ export default function ConnectPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const fetchToken = useCallback(async (user: User) => {
     setPhase('fetching')
@@ -57,6 +59,11 @@ export default function ConnectPage() {
       }),
     [fetchToken],
   )
+
+  // iPhone has no native app to receive the token → show a copy-token flow (for the Shortcut).
+  useEffect(() => {
+    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent))
+  }, [])
 
   async function signInEmail(e: FormEvent) {
     e.preventDefault()
@@ -92,6 +99,16 @@ export default function ConnectPage() {
     const u = auth.currentUser
     if (u) fetchToken(u)
     else setPhase('signin')
+  }
+
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText(token)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* clipboard blocked — the token box is select-all so it can be copied by hand */
+    }
   }
 
   return (
@@ -161,19 +178,44 @@ export default function ConnectPage() {
       )}
 
       {phase === 'ready' && (
-        <>
+        <div className="w-full max-w-xs">
           <div className="text-5xl mb-4">✅</div>
-          <p className="text-income font-semibold mb-2">התחברת בהצלחה!</p>
-          <p className="text-muted-txt text-sm mb-8 max-w-xs">
-            לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.
-          </p>
-          <a
-            href={SCHEME + encodeURIComponent(token)}
-            className="bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
-          >
-            פתח את האפליקציה ←
-          </a>
-        </>
+          <p className="text-income font-semibold mb-4">התחברת בהצלחה!</p>
+
+          {isIOS ? (
+            <>
+              <p className="text-muted-txt text-sm mb-3">העתק את הטוקן והדבק אותו ב-Shortcut (פעם אחת):</p>
+              <div
+                dir="ltr"
+                className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
+              >
+                {token}
+              </div>
+              <button
+                onClick={copyToken}
+                className="w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+              >
+                {copied ? '✓ הועתק' : '📋 העתק טוקן'}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-txt text-sm mb-6">לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.</p>
+              <a
+                href={SCHEME + encodeURIComponent(token)}
+                className="block bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+              >
+                פתח את האפליקציה ←
+              </a>
+              <button
+                onClick={copyToken}
+                className="mt-4 text-xs text-muted-txt hover:text-gold transition-colors"
+              >
+                {copied ? '✓ הועתק' : 'או העתק את הטוקן ידנית'}
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       {phase === 'error' && (
