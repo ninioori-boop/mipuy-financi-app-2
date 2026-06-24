@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import type { Transaction } from '@/types/transaction'
-import { ALL_CATEGORIES, CATEGORY_ICONS } from '@/lib/constants'
 import { CategoryBadge } from './CategoryBadge'
+import { CategoryPicker } from '@/components/shared/CategoryPicker'
 
 interface Props {
   transactions: Transaction[]
@@ -134,17 +134,13 @@ export function TransactionTable({ transactions, onCategoryChange, onDescChange,
                     {/* קטגוריה */}
                     <td className="px-4 py-2.5">
                       {isEditingCat ? (
-                        <select
-                          autoFocus
+                        <CategoryPicker
                           value={t.category}
-                          onChange={e => { onCategoryChange(realIdx, e.target.value); setEditingCatIdx(null) }}
-                          onBlur={() => setEditingCatIdx(null)}
-                          className="rounded-lg border border-gold bg-surface px-2 py-1 text-xs text-txt focus:outline-none"
-                        >
-                          {ALL_CATEGORIES.map(c => (
-                            <option key={c} value={c}>{CATEGORY_ICONS[c] ?? '📦'} {c}</option>
-                          ))}
-                        </select>
+                          onChange={c => { onCategoryChange(realIdx, c); setEditingCatIdx(null) }}
+                          autoOpen
+                          onClose={() => setEditingCatIdx(null)}
+                          variant="badge"
+                        />
                       ) : (
                         <button onClick={() => { setEditingCatIdx(realIdx); setEditingDescIdx(null); setEditingAmountIdx(null) }}>
                           <CategoryBadge category={t.category} />

@@ -6,7 +6,8 @@ import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
-import { ALL_CATEGORIES, CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
+import { CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
+import { CategoryPicker } from '@/components/shared/CategoryPicker'
 
 function today() {
   const d = new Date()
@@ -132,16 +133,12 @@ export default function ExpensesPage() {
           </div>
           <div className="space-y-1">
             <label className="text-[11px] text-muted-txt">קטגוריה</label>
-            <select
+            <CategoryPicker
               value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
-            >
-              <option value="">בחר קטגוריה…</option>
-              {ALL_CATEGORIES.map(c => (
-                <option key={c} value={c}>{icon(c)} {c}</option>
-              ))}
-            </select>
+              onChange={setCategory}
+              variant="field"
+              placeholder="בחר קטגוריה…"
+            />
           </div>
           <div className="space-y-1">
             <label className="text-[11px] text-muted-txt">תאריך</label>
@@ -245,23 +242,16 @@ export default function ExpensesPage() {
                     <div key={e.id} className="group flex items-center gap-3 px-4 py-2.5">
                       <span className="text-lg shrink-0">{icon(e.category)}</span>
                       <div className="flex-1 min-w-0">
-                        <select
+                        <CategoryPicker
                           value={e.category}
-                          onChange={ev => {
-                            const cat = ev.target.value
+                          onChange={cat => {
                             update(e.id, { category: cat })
-                            // Teach the shared learnedDB from the merchant (note minus the "#ref" suffix)
                             const merchant = e.note.replace(/ #\S+$/, '').trim()
                             if (merchant) learn(merchant, cat)
                             toast.success(merchant ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
                           }}
-                          title="שנה קטגוריה"
-                          className="-ms-1 max-w-full bg-transparent text-sm text-txt hover:text-gold focus:text-gold focus:outline-none cursor-pointer rounded"
-                        >
-                          {ALL_CATEGORIES.map(c => (
-                            <option key={c} value={c} className="bg-surface2 text-txt">{c}</option>
-                          ))}
-                        </select>
+                          variant="plain"
+                        />
                         {e.note && <div className="text-xs text-muted-txt truncate">{e.note}</div>}
                       </div>
                       <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>

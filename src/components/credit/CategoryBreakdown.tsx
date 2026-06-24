@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import type { Transaction } from '@/types/transaction'
-import { ALL_CATEGORIES, CATEGORY_ICONS } from '@/lib/constants'
+import { CATEGORY_ICONS } from '@/lib/constants'
+import { CategoryPicker } from '@/components/shared/CategoryPicker'
 
 // Per-device persistence for the open-category state in CategoryBreakdown.
 // Local-only on purpose (not synced via Firestore): expansion is purely a
@@ -176,26 +177,13 @@ export function CategoryBreakdown({ transactions, onCategoryChange, onDescChange
 
                             {/* קטגוריה */}
                             <td className="px-3 py-2">
-                              {editingCat === idx ? (
-                                <select
-                                  autoFocus
-                                  value={t.category}
-                                  onChange={e => { onCategoryChange(idx, e.target.value); setEditingCat(null) }}
-                                  onBlur={() => setEditingCat(null)}
-                                  className="rounded border border-gold bg-surface px-1 py-0.5 text-xs text-txt focus:outline-none"
-                                >
-                                  {ALL_CATEGORIES.map(c => (
-                                    <option key={c} value={c}>{CATEGORY_ICONS[c] ?? '📦'} {c}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <button
-                                  onClick={() => setEditingCat(idx)}
-                                  className="text-xs px-1.5 py-0.5 rounded border border-line bg-surface2 text-muted-txt hover:border-gold/50 hover:text-txt transition-colors whitespace-nowrap"
-                                >
-                                  {CATEGORY_ICONS[t.category] ?? '📦'} {t.category}
-                                </button>
-                              )}
+                              <CategoryPicker
+                                value={t.category}
+                                onChange={c => { onCategoryChange(idx, c); setEditingCat(null) }}
+                                autoOpen={editingCat === idx}
+                                onClose={() => setEditingCat(null)}
+                                variant="chip"
+                              />
                             </td>
 
                             {/* תאריך */}
