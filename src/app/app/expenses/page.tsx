@@ -38,7 +38,7 @@ const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
 export default function ExpensesPage() {
   const router = useRouter()
-  const { entries, add, remove } = useExpenseLogStore()
+  const { entries, add, update, remove } = useExpenseLogStore()
   const { initMonth, applyExpenseLog } = useMonthlyStore()
 
   const [selMonth, setSelMonth] = useState(currentMonth())
@@ -243,7 +243,16 @@ export default function ExpensesPage() {
                     <div key={e.id} className="group flex items-center gap-3 px-4 py-2.5">
                       <span className="text-lg shrink-0">{icon(e.category)}</span>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm text-txt truncate">{e.category}</div>
+                        <select
+                          value={e.category}
+                          onChange={ev => { update(e.id, { category: ev.target.value }); toast.success('הקטגוריה עודכנה ✓') }}
+                          title="שנה קטגוריה"
+                          className="-ms-1 max-w-full bg-transparent text-sm text-txt hover:text-gold focus:text-gold focus:outline-none cursor-pointer rounded"
+                        >
+                          {ALL_CATEGORIES.map(c => (
+                            <option key={c} value={c} className="bg-surface2 text-txt">{c}</option>
+                          ))}
+                        </select>
                         {e.note && <div className="text-xs text-muted-txt truncate">{e.note}</div>}
                       </div>
                       <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
