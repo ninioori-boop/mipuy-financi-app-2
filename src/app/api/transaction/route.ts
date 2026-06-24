@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
+import { aiCategorizeOne } from '@/lib/aiCategorize'
 
 // firebase-admin needs the Node runtime (not Edge).
 export const runtime = 'nodejs'
@@ -49,7 +50,13 @@ export async function POST(req: NextRequest) {
   const refStr = typeof ref === 'string' ? ref.slice(0, 64) : null
 
   const cleanMerchant = merchant.trim()
-  const category = categorize(cleanMerchant)
+  // Rule-based BUSINESS_DB first; fall back to AI for unknown merchants
+  // (e.g. English / company names from Google Wallet) so they don't all land in "שונות".
+  let category = categorize(cleanMerchant)
+  if (category === 'שונות') {
+    const ai = await aiCategorizeOne(cleanMerchant)
+    if (ai) category = ai
+  }
 
   await db
     .collection('transactionInbox').doc(uid)
