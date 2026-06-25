@@ -48,6 +48,8 @@ export interface Snapshot {
     debts:         ReturnType<typeof useMappingStore.getState>['debts']
     installments:  ReturnType<typeof useMappingStore.getState>['installments']
     savings:       ReturnType<typeof useMappingStore.getState>['savings']
+    creditCards:   ReturnType<typeof useMappingStore.getState>['creditCards']
+    bankAccounts:  ReturnType<typeof useMappingStore.getState>['bankAccounts']
     varMonths:     number
     creditImported: boolean
     bufferPct:     number
@@ -128,6 +130,7 @@ export function collectSnapshot(): Snapshot {
       income: p.income, fixed: p.fixed, sub: p.sub, ins: p.ins,
       variable: p.variable, annual: p.annual,
       debts: p.debts, installments: p.installments, savings: p.savings,
+      creditCards: p.creditCards, bankAccounts: p.bankAccounts,
       varMonths: p.varMonths, creditImported: p.creditImported,
       bufferPct: p.bufferPct,
       incomeOverride:   p.incomeOverride,
@@ -255,6 +258,8 @@ export function applySnapshot(raw: unknown): void {
     const debts        = dedupRows(m.debts as Snapshot['mapping']['debts']          | undefined)
     const installments = dedupRows(m.installments as Snapshot['mapping']['installments'] | undefined)
     const savings      = dedupRows(m.savings as Snapshot['mapping']['savings']      | undefined)
+    const creditCards  = dedupRows(m.creditCards as Snapshot['mapping']['creditCards'] | undefined)
+    const bankAccounts = dedupRows(m.bankAccounts as Snapshot['mapping']['bankAccounts'] | undefined)
 
     useMappingStore.setState({
       ...(income       ? { income }       : {}),
@@ -266,6 +271,8 @@ export function applySnapshot(raw: unknown): void {
       ...(debts        ? { debts }        : {}),
       ...(installments ? { installments } : {}),
       ...(savings      ? { savings }      : {}),
+      ...(creditCards  ? { creditCards }  : {}),
+      ...(bankAccounts ? { bankAccounts } : {}),
       ...(typeof m.varMonths === 'number'  ? { varMonths: m.varMonths }       : {}),
       ...(typeof m.creditImported === 'boolean' ? { creditImported: m.creditImported } : {}),
       ...(typeof m.bufferPct === 'number' ? { bufferPct: m.bufferPct }         : {}),
@@ -366,6 +373,7 @@ export function resetAllStores(): void {
   useMappingStore.setState({
     income: [], fixed: [], sub: [], ins: [],
     variable: [], annual: [], debts: [], installments: [], savings: [],
+    creditCards: [], bankAccounts: [],
     varMonths: 3, creditImported: false, bufferPct: 0.4,
     incomeOverride: null, expensesOverride: null,
     creditScore: 0,

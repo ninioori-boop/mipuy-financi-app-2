@@ -68,6 +68,8 @@ function populateAllStores() {
     debts:         [{ id: 'md',  name: 'loan', originalBalance: 10000, remainingBalance: 5000, interestRate: 5, remainingMonths: 20, monthlyPayment: 250 }],
     installments:  [{ id: 'mi2', name: 'TV', totalAmount: 6000, monthlyPayment: 500, paidCount: 1, totalCount: 12 }],
     savings:       [{ id: 'mvs', name: 'pension', monthlyContribution: 500, accumulated: 6000, feeBalance: 0.5, feeDeposit: 0.25 }],
+    creditCards:   [{ id: 'mcc', name: 'ויזה לאומי', limit: 15000, chargeDay: 2 }],
+    bankAccounts:  [{ id: 'mba', name: 'עו"ש לאומי', balance: 4200, overdraftLimit: 5000 }],
     varMonths:     6,
     creditImported: true,
     bufferPct:     0.5,

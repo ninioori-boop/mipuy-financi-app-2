@@ -8,6 +8,8 @@ import { VariablePanel } from '@/components/mapping/VariablePanel'
 import { DebtPanel } from '@/components/mapping/DebtPanel'
 import { InstallmentPanel } from '@/components/mapping/InstallmentPanel'
 import { SavingPanel } from '@/components/mapping/SavingPanel'
+import { CreditCardsPanel } from '@/components/mapping/CreditCardsPanel'
+import { BankAccountsPanel } from '@/components/mapping/BankAccountsPanel'
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
 
 function fmt(n: number) {
@@ -218,6 +220,20 @@ export default function MappingPage() {
         onAdd={store.addSavingRow}
         onUpdate={(id, field, value) => store.updateSavingRow(id, field, value)}
         onDelete={store.deleteSavingRow}
+      />
+
+      <CreditCardsPanel
+        cards={store.creditCards}
+        onAdd={store.addCreditCardRow}
+        onUpdate={(id, field, value) => store.updateCreditCardRow(id, field, value)}
+        onDelete={store.deleteCreditCardRow}
+      />
+
+      <BankAccountsPanel
+        accounts={store.bankAccounts}
+        onAdd={store.addBankAccountRow}
+        onUpdate={(id, field, value) => store.updateBankAccountRow(id, field, value)}
+        onDelete={store.deleteBankAccountRow}
       />
 
       {/* Live cashflow summary */}

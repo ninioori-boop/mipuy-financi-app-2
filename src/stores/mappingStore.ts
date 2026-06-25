@@ -51,6 +51,26 @@ export interface SavingRow {
   feeDeposit: number   // דמי ניהול מההפקדה (%)
 }
 
+// Credit card snapshot — limit + when the monthly charge hits the bank.
+// Helps the advisor plan cash-flow timing (income must arrive before the
+// charge date). chargeDay is the day-of-month the bill is debited.
+export interface CreditCardRow {
+  id: string
+  name: string
+  limit: number       // מסגרת — total credit line on the card
+  chargeDay: number   // 1-28; the safe upper bound that exists in every month
+}
+
+// Checking-account (עו"ש) snapshot — current balance + agreed overdraft.
+// balance can be negative when the client is in overdraft; overdraftLimit
+// is the bank-approved minus line ("מסגרת אוברדראפט").
+export interface BankAccountRow {
+  id: string
+  name: string
+  balance: number
+  overdraftLimit: number
+}
+
 export type SimpleSection = 'income' | 'fixed' | 'sub' | 'ins'
 
 // Random-enough id. Used to be a counter (`r${++_seq}`), but that reset to
@@ -103,6 +123,16 @@ const DEFAULT_SAVINGS: SavingRow[] = [
   'קרן חירום', 'חיסכון בבנק', 'קרן השתלמות', 'קרן פנסיה', 'קופת גמל להשקעה', 'חסכונות ילדים',
 ].map(name => ({ id: uid(), name, monthlyContribution: 0, accumulated: 0, feeBalance: 0, feeDeposit: 0 }))
 
+// Default with one empty row so the panel doesn't feel barren on first open —
+// the advisor sees the column structure and fills it in.
+const DEFAULT_CREDIT_CARDS: CreditCardRow[] = [
+  { id: uid(), name: '', limit: 0, chargeDay: 2 },
+]
+
+const DEFAULT_BANK_ACCOUNTS: BankAccountRow[] = [
+  { id: uid(), name: '', balance: 0, overdraftLimit: 0 },
+]
+
 interface MappingState {
   income: MappingRow[]
   fixed: MappingRow[]
@@ -113,6 +143,8 @@ interface MappingState {
   debts: DebtRow[]
   installments: InstallmentRow[]
   savings: SavingRow[]
+  creditCards: CreditCardRow[]
+  bankAccounts: BankAccountRow[]
   varMonths: number
   creditImported: boolean
 
@@ -165,6 +197,16 @@ interface MappingState {
   updateSavingRow: (id: string, field: keyof Omit<SavingRow, 'id'>, value: string | number) => void
   deleteSavingRow: (id: string) => void
 
+  // Credit cards (snapshot only — limit + charge date, no monthly amount)
+  addCreditCardRow: () => void
+  updateCreditCardRow: (id: string, field: keyof Omit<CreditCardRow, 'id'>, value: string | number) => void
+  deleteCreditCardRow: (id: string) => void
+
+  // Checking account (עו"ש) — current balance + agreed overdraft
+  addBankAccountRow: () => void
+  updateBankAccountRow: (id: string, field: keyof Omit<BankAccountRow, 'id'>, value: string | number) => void
+  deleteBankAccountRow: (id: string) => void
+
   // Bank import
   importFromBank: (rows: {
     name:    string
@@ -191,6 +233,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   debts: DEFAULT_DEBTS,
   installments: DEFAULT_INSTALLMENTS,
   savings: DEFAULT_SAVINGS,
+  creditCards: DEFAULT_CREDIT_CARDS,
+  bankAccounts: DEFAULT_BANK_ACCOUNTS,
   varMonths: 3,
   creditImported: false,
   bufferPct: 0.4,
@@ -334,6 +378,39 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     set(s => ({ savings: s.savings.map(r => r.id === id ? { ...r, [field]: value } : r) })),
   deleteSavingRow: (id) =>
     set(s => ({ savings: s.savings.filter(r => r.id !== id) })),
+
+  addCreditCardRow: () =>
+    set(s => ({ creditCards: [...s.creditCards, { id: uid(), name: '', limit: 0, chargeDay: 2 }] })),
+  updateCreditCardRow: (id, field, value) =>
+    set(s => ({
+      creditCards: s.creditCards.map(r => {
+        if (r.id !== id) return r
+        // chargeDay clamped 1..28 so the date exists in every month (Feb in
+        // particular). limit clamped to non-negative.
+        if (field === 'chargeDay') return { ...r, chargeDay: Math.max(1, Math.min(28, Math.round(Number(value) || 1))) }
+        if (field === 'limit')     return { ...r, limit:     Math.max(0, Number(value) || 0) }
+        if (field === 'name')      return { ...r, name:      String(value) }
+        return r
+      }),
+    })),
+  deleteCreditCardRow: (id) =>
+    set(s => ({ creditCards: s.creditCards.filter(r => r.id !== id) })),
+
+  addBankAccountRow: () =>
+    set(s => ({ bankAccounts: [...s.bankAccounts, { id: uid(), name: '', balance: 0, overdraftLimit: 0 }] })),
+  updateBankAccountRow: (id, field, value) =>
+    set(s => ({
+      bankAccounts: s.bankAccounts.map(r => {
+        if (r.id !== id) return r
+        // overdraftLimit non-negative; balance can be negative (overdraft).
+        if (field === 'overdraftLimit') return { ...r, overdraftLimit: Math.max(0, Number(value) || 0) }
+        if (field === 'balance')        return { ...r, balance:        Number(value) || 0 }
+        if (field === 'name')           return { ...r, name:           String(value) }
+        return r
+      }),
+    })),
+  deleteBankAccountRow: (id) =>
+    set(s => ({ bankAccounts: s.bankAccounts.filter(r => r.id !== id) })),
 
   importFromBank: (rows) => {
     set(s => {
