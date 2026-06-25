@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { Transaction } from '@/types/transaction'
 import { useMappingStore } from '@/stores/mappingStore'
 import { normalizeForLookup } from '@/lib/categorize'
+import { INSURANCE_CATEGORIES } from '@/lib/constants'
 
 type MappingSection = 'fixed' | 'sub' | 'ins'
 
@@ -47,6 +48,9 @@ function detectPatterns(txs: Transaction[]) {
   // with 2+ charges) so the advisor can SEE all subs at a glance — including
   // single-charge ones the pattern detector ignores.
   const subscriptionsMap: Record<string, Transaction[]> = {}
+  // Same idea, for insurances — any of the INSURANCE_CATEGORIES
+  // (ביטוח / ביטוח רכב / חיים / בריאות / לאומי / רכוש).
+  const insurancesMap: Record<string, Transaction[]> = {}
 
   for (const t of txs) {
     if (t.isStandingOrder) standingOrders.push(t)
@@ -59,6 +63,10 @@ function detectPatterns(txs: Transaction[]) {
       if (t.category === 'מנויים') {
         if (!subscriptionsMap[key]) subscriptionsMap[key] = []
         subscriptionsMap[key].push(t)
+      }
+      if (INSURANCE_CATEGORIES.has(t.category)) {
+        if (!insurancesMap[key]) insurancesMap[key] = []
+        insurancesMap[key].push(t)
       }
     }
   }
@@ -97,7 +105,22 @@ function detectPatterns(txs: Transaction[]) {
   }
   subscriptions.sort((a, b) => b.total - a.total)
 
-  return { standingOrders, installments, refunds, recurring, subscriptions }
+  const insurances: { desc: string; amount: number; count: number; total: number; category: string }[] = []
+  for (const [, group] of Object.entries(insurancesMap)) {
+    const total = group.reduce((s, t) => s + t.amount, 0)
+    insurances.push({
+      desc:     group[0].desc,
+      amount:   Math.round(total / group.length),
+      count:    group.length,
+      total:    Math.round(total),
+      // Keep each merchant's actual insurance category (ביטוח רכב vs ביטוח לאומי
+      // etc.) so subtractFrom in handleSend hits the correct aggregated row.
+      category: group[0].category,
+    })
+  }
+  insurances.sort((a, b) => b.total - a.total)
+
+  return { standingOrders, installments, refunds, recurring, subscriptions, insurances }
 }
 
 function fmt(n: number) {
@@ -234,6 +257,31 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
           ? `חיוב יחיד · ${fmt(s.total)}`
           : `${s.count} חיובים · סה"כ ${fmt(s.total)}`,
         tag:    'מנוי', tagColor: 'border-purple-400/50 text-purple-300',
+        category: s.category,
+        count:    s.count,
+        total:    s.total,
+      })),
+      sendActions: [
+        { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },
+        { label: 'מנויים', target: 'sub'   as const, buttonClass: subBtn   },
+        { label: 'ביטוחים', target: 'ins'  as const, buttonClass: insBtn   },
+      ],
+    },
+    // Insurances section — mirror of "מנויים מזוהים" for INSURANCE_CATEGORIES.
+    // Each row carries its real category (ביטוח רכב / חיים / לאומי / ...) so
+    // the carve-out subtractFrom hits the correct aggregated row, not a
+    // generic "ביטוח" bucket that might not exist.
+    {
+      icon: '🛡️',
+      title: 'ביטוחים מזוהים',
+      color: 'bg-orange-500/20 text-orange-300',
+      items: p.insurances.map(s => ({
+        desc:   s.desc,
+        amount: s.amount,
+        meta:   s.count === 1
+          ? `${s.category} · חיוב יחיד · ${fmt(s.total)}`
+          : `${s.category} · ${s.count} חיובים · סה"כ ${fmt(s.total)}`,
+        tag:    'ביטוח', tagColor: 'border-orange-400/50 text-orange-300',
         category: s.category,
         count:    s.count,
         total:    s.total,
