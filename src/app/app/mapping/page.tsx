@@ -58,6 +58,23 @@ export default function MappingPage() {
         />
       </div>
 
+      {/* Profile snapshot — credit cards + checking account; grouped at top
+          alongside the credit score (all are point-in-time client facts, not
+          monthly recurring amounts). */}
+      <CreditCardsPanel
+        cards={store.creditCards}
+        onAdd={store.addCreditCardRow}
+        onUpdate={(id, field, value) => store.updateCreditCardRow(id, field, value)}
+        onDelete={store.deleteCreditCardRow}
+      />
+
+      <BankAccountsPanel
+        accounts={store.bankAccounts}
+        onAdd={store.addBankAccountRow}
+        onUpdate={(id, field, value) => store.updateBankAccountRow(id, field, value)}
+        onDelete={store.deleteBankAccountRow}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}
@@ -220,20 +237,6 @@ export default function MappingPage() {
         onAdd={store.addSavingRow}
         onUpdate={(id, field, value) => store.updateSavingRow(id, field, value)}
         onDelete={store.deleteSavingRow}
-      />
-
-      <CreditCardsPanel
-        cards={store.creditCards}
-        onAdd={store.addCreditCardRow}
-        onUpdate={(id, field, value) => store.updateCreditCardRow(id, field, value)}
-        onDelete={store.deleteCreditCardRow}
-      />
-
-      <BankAccountsPanel
-        accounts={store.bankAccounts}
-        onAdd={store.addBankAccountRow}
-        onUpdate={(id, field, value) => store.updateBankAccountRow(id, field, value)}
-        onDelete={store.deleteBankAccountRow}
       />
 
       {/* Live cashflow summary */}
