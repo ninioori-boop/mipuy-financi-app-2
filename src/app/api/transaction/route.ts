@@ -4,6 +4,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
+import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).
 export const runtime = 'nodejs'
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'bad request body' }, { status: 400 })
   }
-  const { token, merchant, amount, date, ref } = body as Record<string, unknown>
+  const { token, merchant, amount, date, ref, category: catOverride } = body as Record<string, unknown>
 
   const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
   if (!uid) {
@@ -50,14 +51,19 @@ export async function POST(req: NextRequest) {
   const refStr = typeof ref === 'string' ? ref.slice(0, 64) : null
 
   const cleanMerchant = merchant.trim()
-  // Learned corrections (shared — same DB the credit/import/expenses tabs teach)
-  // → BUSINESS_DB → AI fallback. One correction fixes this merchant for every
-  // future ingested charge.
-  const learnedDB = await loadSharedLearned(db)
-  let category = categorize(cleanMerchant, learnedDB)
-  if (category === 'שונות') {
-    const ai = await aiCategorizeOne(cleanMerchant)
-    if (ai) category = ai
+  // Explicit category (manual entry from the app) wins. Otherwise: learned
+  // corrections (shared — same DB the credit/import/expenses tabs teach) →
+  // BUSINESS_DB → AI fallback.
+  let category: string
+  if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
+    category = catOverride
+  } else {
+    const learnedDB = await loadSharedLearned(db)
+    category = categorize(cleanMerchant, learnedDB)
+    if (category === 'שונות') {
+      const ai = await aiCategorizeOne(cleanMerchant)
+      if (ai) category = ai
+    }
   }
 
   await db
