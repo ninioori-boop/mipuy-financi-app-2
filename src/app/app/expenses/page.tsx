@@ -7,7 +7,7 @@ import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
-import { CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
+import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
 
 function today() {
@@ -47,6 +47,7 @@ export default function ExpensesPage() {
   const learn = useCreditStore(s => s.learn)   // shared learnedDB — same teaching as credit/import
 
   const [selMonth, setSelMonth] = useState(currentMonth())
+  const [showBudgetEditor, setShowBudgetEditor] = useState(false)
   const [amount, setAmount]     = useState('')
   const [category, setCategory] = useState('')
   const [note, setNote]         = useState('')
@@ -121,6 +122,20 @@ export default function ExpensesPage() {
       .sort((a, b) => b.pct - a.pct),
     [catTotals, budgets],
   )
+
+  // Quick category -> spent-this-month lookup, for the budget editor list.
+  const spentByCat = useMemo(() => new Map(catTotals), [catTotals])
+
+  // Rows for the breakdown = every category spent this month, PLUS any budgeted
+  // category with no spend yet (so the user sees the full budget picture at 0%).
+  const breakdownRows = useMemo(() => {
+    const rows = catTotals.map(([cat, sum]) => ({ cat, sum }))
+    const present = new Set(catTotals.map(([c]) => c))
+    for (const cat of Object.keys(budgets)) {
+      if (!present.has(cat)) rows.push({ cat, sum: 0 })
+    }
+    return rows
+  }, [catTotals, budgets])
 
   // Map the viewed YYYY-MM to a monthly-tab month (jan..dec, year-agnostic).
   const targetMonth = MONTHS_LIST[parseInt(selMonth.slice(5, 7), 10) - 1]
@@ -272,42 +287,67 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* Category breakdown — with optional per-category monthly budget */}
-      {catTotals.length > 0 && (
-        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-semibold text-txt">פילוח לפי קטגוריה</span>
-            <span className="text-[11px] text-muted-txt">הגדירו תקציב חודשי בשדה שליד כל קטגוריה →</span>
-          </div>
-          {catTotals.map(([cat, sum]) => {
-            const budget = budgets[cat]
-            const pct = budget ? sum / budget : 0
-            const barColor = !budget ? 'bg-gold/60' : pct >= 1 ? 'bg-expense' : pct >= 0.8 ? 'bg-gold' : 'bg-income'
-            const textColor = !budget ? 'text-muted-txt' : pct >= 1 ? 'text-expense' : pct >= 0.8 ? 'text-gold' : 'text-income'
-            const barWidth = budget ? Math.min(100, pct * 100) : (sum / monthTotal) * 100
-            return (
-              <div key={cat} className="space-y-1">
-                <div className="flex items-center justify-between text-xs gap-2">
-                  <span className="text-txt shrink-0">{icon(cat)} {cat}</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`tabular-nums whitespace-nowrap ${textColor}`}>
-                      {budget
-                        ? `${fmt(sum)} / ${fmt(budget)} · ${Math.round(pct * 100)}%`
-                        : `${fmt(sum)} · ${Math.round((sum / monthTotal) * 100)}%`}
+      {/* Budget editor — pick ANY category from the full list and set its monthly budget */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
+        <button
+          onClick={() => setShowBudgetEditor(v => !v)}
+          className="flex items-center justify-between w-full"
+        >
+          <span className="text-sm font-semibold text-txt">🎯 תקצוב קטגוריות</span>
+          <span className="text-xs text-gold/80">{showBudgetEditor ? 'סגירה ▲' : 'פתיחה ▼'}</span>
+        </button>
+        {showBudgetEditor && (
+          <div className="space-y-2">
+            <p className="text-[11px] text-muted-txt">
+              קבעו תקציב חודשי לכל קטגוריה. השאירו ריק = ללא תקציב. התקציב חל על כל חודש.
+            </p>
+            <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
+              {ALL_CATEGORIES.map(cat => {
+                const spent = spentByCat.get(cat) ?? 0
+                return (
+                  <div key={cat} className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-txt min-w-0 truncate">
+                      {icon(cat)} {cat}
+                      {spent > 0 && <span className="text-muted-txt"> · {fmt(spent)} החודש</span>}
                     </span>
                     <input
                       type="number"
                       inputMode="numeric"
-                      defaultValue={budget || ''}
+                      defaultValue={budgets[cat] || ''}
                       onBlur={e => setBudget(cat, parseFloat(e.target.value) || 0)}
                       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      placeholder="תקציב"
+                      placeholder="תקציב ₪"
                       min={0}
                       style={{ direction: 'ltr' }}
-                      title="תקציב חודשי לקטגוריה (₪) — ריק = ללא תקציב"
-                      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums shrink-0"
+                      className="w-24 shrink-0 rounded-md border border-line bg-surface px-2 py-1 text-xs text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
                     />
                   </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Category breakdown — spend vs budget, color-coded */}
+      {breakdownRows.length > 0 && (
+        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-2.5">
+          <div className="text-sm font-semibold text-txt mb-1">פילוח לפי קטגוריה</div>
+          {breakdownRows.map(({ cat, sum }) => {
+            const budget = budgets[cat]
+            const pct = budget ? sum / budget : 0
+            const barColor = !budget ? 'bg-gold/60' : pct >= 1 ? 'bg-expense' : pct >= 0.8 ? 'bg-gold' : 'bg-income'
+            const textColor = !budget ? 'text-muted-txt' : pct >= 1 ? 'text-expense' : pct >= 0.8 ? 'text-gold' : 'text-income'
+            const barWidth = budget ? Math.min(100, pct * 100) : (monthTotal > 0 ? (sum / monthTotal) * 100 : 0)
+            return (
+              <div key={cat} className="space-y-1">
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-txt shrink-0">{icon(cat)} {cat}</span>
+                  <span className={`tabular-nums whitespace-nowrap ${textColor}`}>
+                    {budget
+                      ? `${fmt(sum)} / ${fmt(budget)} · ${Math.round(pct * 100)}%`
+                      : `${fmt(sum)} · ${monthTotal > 0 ? Math.round((sum / monthTotal) * 100) : 0}%`}
+                  </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-surface overflow-hidden">
                   <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
