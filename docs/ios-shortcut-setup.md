@@ -5,15 +5,6 @@
 ## דרישות
 - iPhone עם **iOS 17 ומעלה** (אז נוספה אוטומציית "Transaction"/"Wallet").
 - Apple Pay מוגדר עם כרטיס.
-- **טוקן-מכשיר** — משיגים אותו לבד דרך דף החיבור (ראה למטה).
-
-## 🔑 איך משיגים את הטוקן (פעם אחת)
-1. ב-iPhone, פתח ב-Safari את:
-   ```
-   https://mipuy-financi-app-2-3nay.vercel.app/connect
-   ```
-2. התחבר עם **המייל והסיסמה של הכלכלן של הבית** (או Google).
-3. יופיע הטוקן + כפתור **"📋 העתק טוקן"** → לחץ עליו. הטוקן בלוח, מוכן להדבקה בשלב 10.
 
 ## מה זה תופס / לא תופס
 - ✅ תשלומי **Apple Pay פיזיים בחנות** (קירוב NFC).
@@ -21,51 +12,79 @@
 
 ---
 
-## ההקמה — צעד אחר צעד
+## ההקמה — 3 שלבים
 
-### חלק א׳ — יצירת האוטומציה
-1. פתח את אפליקציית **Shortcuts** (קיצורים) — מותקנת מראש בכל אייפון.
-2. למטה לחץ על לשונית **Automation** (אוטומציה).
-3. לחץ **+** (למעלה-ימין) → **Create Personal Automation**.
-4. גלול ובחר **Transaction** (ב-iOS 26+ זה נקרא **Wallet**).
-5. תחת **When I tap** — בחר את **הכרטיס/ים** שתרצה לעקוב אחריהם.
-   (אפשר לבחור גם **Category = All** כדי לתפוס הכל.)
-6. סמן **Run Immediately** (כדי שלא יבקש אישור בכל תשלום) → **Next**.
+### שלב 1 — קבל את הטוקן והוסף את ה-Shortcut
+1. ב-iPhone, פתח ב-Safari את:
+   ```
+   https://mipuy-financi-app-2-3nay.vercel.app/connect
+   ```
+   *(או הדומיין `https://app.orimipuy.com/connect` — אותו שרת.)*
+2. התחבר עם **המייל והסיסמה של הכלכלן של הבית** (או Google).
+3. לחץ **"📋 העתק טוקן"** (שלב 1 במסך) — הטוקן עכשיו בלוח.
+4. לחץ **"📲 הוסף את ה-Shortcut"** (שלב 2). אפליקציית Shortcuts תיפתח עם מסך הוספה.
+5. במהלך ההוספה תופיע שאלה — **הדבק שם את הטוקן** (הוא כבר בלוח, לחיצה ארוכה → Paste) → **הוסף Shortcut**.
 
-### חלק ב׳ — הפעולה (שליחה לשרת)
-7. לחץ **Add Action** → חפש **"Get Contents of URL"** ובחר אותו.
-8. בשדה ה-URL הדבק:
-   ```
-   https://mipuy-financi-app-2-3nay.vercel.app/api/transaction
-   ```
-   *(או הדומיין `https://app.orimipuy.com/api/transaction` — שניהם אותו שרת.)*
-9. לחץ על החץ **"Show More"** מתחת ל-URL כדי לפתוח אפשרויות:
-   - **Method:** בחר **POST**
-   - **Headers:** לחץ Add header → Key = `Content-Type`, Value = `application/json`
-   - **Request Body:** בחר **JSON**
-10. תחת Request Body (JSON) הוסף 3 שדות (לחיצה על **Add new field**):
-    | Key | Type | Value |
-    |-----|------|-------|
-    | `token` | Text | *(הדבק כאן את טוקן-המכשיר שלך)* |
-    | `merchant` | Text | המשתנה **Merchant** (מה-Shortcut — לחץ ובחר אותו מהרשימה) |
-    | `amount` | Number | המשתנה **Amount** |
-11. לחץ **Next** → **Done**.
+> ה-Shortcut שנוסף נקרא **Mipuy**. הוא כבר יודע לאן לשלוח ועם איזה טוקן — לא צריך לגעת בו יותר.
+
+### שלב 2 — צור את אוטומציית ה-Wallet (שתפעיל את ה-Shortcut אוטומטית)
+> את החלק הזה אפל מחייבת להגדיר ידנית פעם אחת — אי אפשר לייבא אותו מוכן.
+
+1. פתח את אפליקציית **Shortcuts** (קיצורים) → לשונית **Automation** (אוטומציה).
+2. לחץ **+** (למעלה-ימין) → **Create Personal Automation**.
+3. גלול ובחר **Transaction** (ב-iOS 26+ זה נקרא **Wallet**).
+4. תחת **When I tap** — בחר את **הכרטיס/ים** שתרצה לעקוב אחריהם (ואפשר Category = All) → **Next**.
+5. לחץ **Add Action** → חפש **"Run Shortcut"** ובחר אותו.
+6. בפעולה שנוספה לחץ על המילה **"Shortcut"** ובחר את **Mipuy**.
+7. ודא שהקלט של ה-Transaction מועבר ל-Shortcut (כברירת מחדל זה כך — ה-"Shortcut Input").
+8. לחץ **Next** → **כבה** את **Ask Before Running** (כדי שלא יבקש אישור בכל תשלום) → **Done**.
+
+### שלב 3 — בדיקה
+שלם עם Apple Pay בחנות (קירוב). תוך כמה שניות — פתח את האפליקציה → טאב **תיעוד הוצאות** → התשלום אמור להופיע שם, מקוטלג. ✅
 
 ---
 
-## בדיקה
-שלם עם Apple Pay בחנות (קירוב). תוך כמה שניות — פתח את האפליקציה → טאב **תיעוד הוצאות** → התשלום אמור להופיע שם, מקוטלג. ✅
+<details>
+<summary><b>אם הייבוא לא עובד — הקמה ידנית מלאה (fallback)</b></summary>
 
-## אם הסכום נכנס מוזר
-לפעמים המשתנה **Amount** מגיע עם סימן מטבע. אם צריך — הוסף לפני שלב 7 פעולה **"Get Numbers from Input"** על המשתנה Amount, והשתמש בתוצאה שלה בשדה `amount`.
+אם מסיבה כלשהי ה-Shortcut המוכן לא נוסף או לא רץ, אפשר לבנות את כל הלוגיקה **ישירות בתוך האוטומציה**, בלי לייבא כלום:
+
+#### חלק א׳ — יצירת האוטומציה
+1. **Shortcuts** → **Automation** → **+** → **Create Personal Automation**.
+2. בחר **Transaction** (או **Wallet**).
+3. **When I tap** — בחר כרטיס/ים (או Category = All).
+4. סמן **Run Immediately** → **Next**.
+
+#### חלק ב׳ — הפעולה (שליחה לשרת)
+5. **Add Action** → חפש **"Get Contents of URL"** ובחר אותו.
+6. בשדה ה-URL הדבק:
+   ```
+   https://mipuy-financi-app-2-3nay.vercel.app/api/transaction
+   ```
+7. לחץ **"Show More"** מתחת ל-URL:
+   - **Method:** **POST**
+   - **Headers:** Add header → Key = `Content-Type`, Value = `application/json`
+   - **Request Body:** **JSON**
+8. תחת Request Body (JSON) הוסף 3 שדות (**Add new field**):
+   | Key | Type | Value |
+   |-----|------|-------|
+   | `token` | Text | *(הדבק כאן את טוקן-המכשיר שלך מ-/connect)* |
+   | `merchant` | Text | המשתנה **Merchant** (בחר מתוך Shortcut Input) |
+   | `amount` | Number | המשתנה **Amount** |
+9. **Next** → **Done**.
+
+> אם הסכום נכנס מוזר (עם סימן מטבע): לפני שלב 5 הוסף פעולה **"Get Numbers from Input"** על המשתנה Amount, והשתמש בתוצאה שלה בשדה `amount`.
+
+</details>
 
 ---
 
 ## 🔒 הערת אבטחה
 טוקן-המכשיר מאפשר רק **להזריק הוצאות לחשבון שלך** (לא לקרוא נתונים). עדיין — אל תשתף אותו.
 
-## 📌 ליועץ (Ori) — לעתיד (שלב 5 בתוכנית)
-במוצר הסופי, האפליקציה תפיק ללקוח **Shortcut מותאם עם הטוקן כבר מוטמע** (קישור בלחיצה אחת),
-כך שהלקוח לא יצטרך להעתיק טוקן ידנית. כרגע, לבדיקה — הטוקן מודבק ידנית בשלב 10.
+## 📌 ליועץ (Ori) — סטטוס
+- ה-Shortcut המוכן (`public/mipuy.shortcut`) נחתם בענן דרך GitHub Actions ("Sign iOS Shortcut") ומוגש מ-`/mipuy.shortcut`.
+- **טרם אומת על אייפון אמיתי.** עד אז: אם חיווט ה-Merchant/Amount לא עובד מתוך ה-Shortcut המיובא — השתמשו בהקמה הידנית (ה-fallback למעלה), שמחלצת אותם בתוך האוטומציה.
+- בשדרוג לדומיין production — אין מה לעדכן כאן: כפתור ההוספה ב-/connect וכתובת ה-Shortcut נגזרים אוטומטית מה-origin. רק כתובת ה-`WFURL` בתוך `ios-shortcut/mipuy.plist` (staging) תוחלף ותיחתם מחדש.
 
-_נכתב: 2026-06-20. ראה גם `docs/triggers-work-plan.md`._
+_עודכן: 2026-06-29. ראה גם `docs/triggers-work-plan.md`._

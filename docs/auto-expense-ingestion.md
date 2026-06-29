@@ -21,7 +21,7 @@
 הטוקן מאי-ההתאמה תוקן ע"י ייצורו מהאפליקציה החיה (מעבדה → 🔑) במקום מקומית. `POST /api/transaction` עם הטוקן החזיר **`{"ok":true,"category":"מזון לבית"}`** ("רמי לוי" קוטלג נכון). Ori אישר שהעסקה **הופיעה לבד בטאב תיעוד הוצאות** דרך ה-onSnapshot drain. **כל הצינור מאומת מקצה-לקצה.** (הערה: curl על Windows שולח עברית מקולקלת → "שונות"; node/השולחים-האמיתיים שולחים UTF-8 נקי. דרך לשלוח בדיקה מ-node: `fetch(..., {body: JSON.stringify({token, merchant:'רמי לוי', amount, ref})})`.)
 
 ### 🔲 שלב ג׳ — הטריגרים האמיתיים ("השומר", חוליה ①)
-- **iOS:** Shortcut אוטומציית Wallet → "Get Contents of URL" POST ל-`/api/transaction` עם הטוקן + Merchant + Amount. (בדיקה דורשת אייפון של לקוח.)
+- **iOS — 🟡 הקוד נבנה (2026-06-29):** "הקשה אחת" — Shortcut גנרי חתום (`ios-shortcut/mipuy.plist`), נחתם בענן (`.github/workflows/sign-shortcut.yml`), מיובא מ-`/connect` (כפתור "הוסף Shortcut"), והטוקן מוזן דרך שאלת-ייבוא. נשאר: להריץ את ה-workflow → commit ל-`public/mipuy.shortcut`, ולאמת על אייפון אמיתי. ראה `docs/ios-shortcut-setup.md` + `docs/triggers-work-plan.md` שלב 1.
 - **אנדרואיד (מוצר, היעד):** אפליקציית **native** (Capacitor + NotificationListenerService) שמתקינה מ-Google Play. הלקוח מתקין → מתחבר → מאשר הרשאת-התראות → האפליקציה שולפת את הטוקן לבד ושולחת. **הלקוח לא רואה טוקן.** (MacroDroid היה רק לבדיקה מהירה, לא למוצר.)
 - חוויית-לקוח סופית מתועדת ב-`[[project_auto_expense_ingestion]]`: אנדרואיד = אישור הרשאה בלבד; iOS = הוספת Shortcut מוכן.
 

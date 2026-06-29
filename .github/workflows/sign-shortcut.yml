@@ -1,0 +1,60 @@
+# Signs the iOS expense Shortcut on a cloud Mac.
+#
+# Why: iOS 15+ imports only SIGNED shortcuts, and `shortcuts sign` runs only on
+# macOS. We can't sign from Windows/Vercel, so this one-off manual job signs the
+# unsigned source (ios-shortcut/mipuy.plist) on a hosted macOS runner and uploads
+# the signed mipuy.shortcut as an artifact. Download it and commit to public/.
+#
+# Additive only — does NOT touch the Next.js build or Vercel. Re-run only when the
+# shortcut source changes (rare). Trigger manually: Actions → "Sign iOS Shortcut"
+# → Run workflow.
+#
+# ⚠️ The hosted `shortcuts` CLI may refuse to sign headlessly (no GUI session).
+# If the "Sign" step fails, the fallback is to sign on a real Mac. The diagnostic
+# steps below dump the CLI help and lint output to make that decision quick.
+name: Sign iOS Shortcut
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sign:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate the plist
+        run: plutil -lint ios-shortcut/mipuy.plist
+
+      - name: Show shortcuts CLI capabilities (diagnostic)
+        continue-on-error: true
+        run: |
+          which shortcuts || true
+          shortcuts --help || true
+          shortcuts sign --help || true
+
+      - name: Sign the shortcut
+        run: |
+          set -euo pipefail
+          # The signer expects a .shortcut input; copy the source under that name.
+          cp ios-shortcut/mipuy.plist mipuy-unsigned.shortcut
+          shortcuts sign --mode anyone --input mipuy-unsigned.shortcut --output mipuy.shortcut
+          echo "--- signed output ---"
+          ls -la mipuy.shortcut
+          test -s mipuy.shortcut
+
+      - name: Upload signed shortcut
+        uses: actions/upload-artifact@v4
+        with:
+          name: mipuy-shortcut-signed
+          path: mipuy.shortcut
+          if-no-files-found: error
+
+      - name: Upload unsigned source (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mipuy-shortcut-unsigned
+          path: mipuy-unsigned.shortcut
+          if-no-files-found: ignore

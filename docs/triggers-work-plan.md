@@ -22,37 +22,47 @@
 
 ---
 
-## שלב 1 — 🍎 Shortcut ל-iOS (סיכון כולל: 🟢 אפס)
-| # | צעד | בעלים | סיכון |
+## שלב 1 — 🍎 Shortcut ל-iOS ("הקשה אחת") — ✅ הקוד נבנה (2026-06-29)
+**החלטת ארכיטקטורה:** במקום מדריך ידני בן 11 צעדים — **Shortcut גנרי אחד, חתום**, שהלקוח מייבא בהקשה אחת
+מ-`/connect`, והטוקן מוזן פעם אחת דרך **שאלת-ייבוא** (`WFWorkflowImportQuestions`). מגבלת-אמת: מ-iOS 15 אפל
+מייבאת רק Shortcut **חתום**, וחתימה רצה רק על macOS → חותמים פעם אחת בענן (GitHub Actions).
+| # | צעד | בעלים | סטטוס |
 |---|-----|-------|:-----:|
-| 1.1 | לכתוב מתכון Shortcut מלא (אוטומציית Wallet → "Get Contents of URL" POST ל-`/api/transaction` עם token + merchant + amount) | 🤖 | 🟢 |
-| 1.2 | לתעד את ההקמה החד-פעמית ללקוח (הוספת Shortcut + הפעלת אוטומציה) | 🤖 | 🟢 |
-| 1.3 | בדיקה: לקוח עם אייפון מקים + מקרב Apple Pay → רואים בטאב הוצאות | 👤 (לקוח עם אייפון) | 🟢 |
+| 1.1 | מקור ה-Shortcut `ios-shortcut/mipuy.plist` (Text-טוקן + ניקוי Amount + POST JSON ל-`/api/transaction` + שאלת-ייבוא) | 🤖 | ✅ |
+| 1.2 | workflow חתימה `.github/workflows/sign-shortcut.yml` (macOS, `shortcuts sign --mode anyone` → artifact) | 🤖 | ✅ |
+| 1.3 | `/connect` (ענף iOS) — כפתור "📲 הוסף את ה-Shortcut" (`shortcuts://import-shortcut`) + הצגת טוקן להעתקה | 🤖 | ✅ |
+| 1.4 | מדריך מעודכן `docs/ios-shortcut-setup.md` (זרימה קצרה + הקמה ידנית כ-fallback) | 🤖 | ✅ |
+| 1.5 | להריץ את ה-workflow → להוריד את ה-artifact החתום → commit ל-`public/mipuy.shortcut` | 👤 (Run workflow) + 🤖 (commit) | 🔲 |
+| 1.6 | בדיקה: לקוח עם אייפון מייבא + מקרב Apple Pay → רואים בטאב הוצאות | 👤 (לקוח עם אייפון) | 🔲 |
 
-> הכל הוראות + API קיים. אין קוד, אין build, לא נוגע בכלום.
+> ⚠️ פתוח לאימות-מכשיר: חיווט Merchant/Amount מתוך עסקת ה-Wallet כ-Shortcut Input, ותקינות `shortcuts sign` headless על הראנר.
+> שניהם לא ניתנים לבדיקה בלי אייפון — ה-fallback הידני במדריך מבטיח מסלול עובד בינתיים.
 
 ---
 
-## שלב 2 — 🤖 אפליקציית אנדרואיד native (סיכון לווב: 🟢 אפס אם מבודד)
-ארכיטקטורה: פרויקט **Capacitor נפרד** → WebView טוען את הכתובת החיה + פלאגין מאזין-התראות native.
-| # | צעד | בעלים | סיכון |
+## שלב 2 — 🤖 אפליקציית אנדרואיד native — ✅ הקוד נבנה (2026-06-21)
+**החלטת ארכיטקטורה:** במקום Capacitor+WebView — אפליקציית **native טהורה וקטנה** (פשוט יותר, פחות מה שיכול להישבר, APK קטן). הטוקן מודבק פעם אחת (כמו ב-iOS), בלי גשר-JS. אפשר לשדרג לאוטו-טוקן בעתיד.
+**מיקום:** פרויקט נפרד לגמרי — `../mipuy-expense-tracker` (לא ב-repo הראשי). git מקומי מאותחל + commit ראשון.
+| # | צעד | בעלים | סטטוס |
 |---|-----|-------|:-----:|
-| 2.1 | להקים פרויקט Capacitor ב-**תיקייה/repo נפרד** (לא הראשי!). `capacitor.config` → `server.url` = הכתובת החיה | 🤖 | 🟢 לווב |
-| 2.2 | פלאגין `NotificationListenerService` (Kotlin) — קורא התראות מ-Google Pay / אפליקציית הבנק | 🤖 | 🟢 לווב |
-| 2.3 | מנתח שם-עסק + סכום מטקסט ההתראה (regex/היוריסטיקה לכל אפליקציה) — **דורש דוגמת-התראה אמיתית מהטלפון שלך** | 🤖 + 👤 | 🟢 |
-| 2.4 | גשר-טוקן: הזרקת JS ל-WebView ששולפת את הטוקן ומעבירה ל-native (בלי לגעת בקוד הווב) | 🤖 | 🟢 |
-| 2.5 | ה-native עושה POST ל-`/api/transaction` עם `{token, merchant, amount}` | 🤖 | 🟢 |
+| 2.1 | פרויקט אנדרואיד native ב-**תיקייה נפרדת** (Gradle KTS, AGP 8.5.2, Kotlin 1.9.24, minSdk 24) | 🤖 | ✅ |
+| 2.2 | `NotificationListener.kt` — `NotificationListenerService` שקורא התראות מ-Google Wallet (`com.google.android.apps.walletnfcrel`) | 🤖 | ✅ |
+| 2.3 | `TransactionParser.kt` — שם-עסק = כותרת ההתראה; סכום = regex `בסך ([\d,.]+) ₪`. **מבוסס על התראה אמיתית** (ANIPET LTD / 29.00 ₪) | 🤖 | ✅ |
+| 2.4 | `MainActivity.kt` — מסך הדבקת טוקן + כפתור "אפשר גישה להתראות" | 🤖 | ✅ |
+| 2.5 | POST ל-`/api/transaction` עם `{token, merchant, amount, ref}` (HttpURLConnection, בלי תלויות) | 🤖 | ✅ |
 
 > הסיכון היחיד: האפליקציה ה-native עצמה לא עובדת → מתקנים. הווב החי לא נוגע.
+> **דוגמת ההתראה האמיתית (2026-06-21):** כותרת `ANIPET LTD`, גוף `עסקה בסך 29.00 ₪ בכרטיס max בהצדעה 1128••`.
 
 ---
 
-## שלב 3 — 📦 Build בענן (סיכון: 🟢 אפס-נמוך)
+## שלב 3 — 📦 Build בענן — ✅ ה-workflow נכתב (2026-06-21)
 כי אי אפשר להריץ כלי-אנדרואיד מקומית — בונים APK בענן.
-| # | צעד | בעלים | סיכון |
+| # | צעד | בעלים | סטטוס |
 |---|-----|-------|:-----:|
-| 3.1 | workflow GitHub Actions (ב-repo ה-native הנפרד) שבונה APK חתום | 🤖 | 🟢 |
-| 3.2 | להוריד את ה-APK + sideload (להפעיל "התקנה ממקורות לא מוכרים") | 👤 | 🟢 |
+| 3.1 | workflow GitHub Actions (`.github/workflows/build-apk.yml`) — JDK 17 + setup-android + Gradle 8.7 → `assembleDebug` → מעלה APK כ-Artifact | 🤖 | ✅ |
+| 3.0 | **ליצור repo ב-GitHub** (`ninioori-boop/mipuy-expense-tracker`) ולדחוף — אז ה-Actions רץ אוטומטית | 👤 (יצירה) + 🤖 (push) | 🔲 **כאן עכשיו** |
+| 3.2 | להוריד את ה-APK מ-Actions→Artifacts + sideload | 👤 | 🔲 |
 
 ---
 
