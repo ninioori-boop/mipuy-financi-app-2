@@ -74,6 +74,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { user } = useAuthStore()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // Embed mode: set by the Android in-app WebView (/connect/expenses bootstrap).
+  // Hides all app chrome so only the tab content shows — a clean "expenses only"
+  // view, 1:1 with the web. Normal web users never set this flag → no change.
+  const [embed, setEmbed] = useState(false)
+  useEffect(() => {
+    try { setEmbed(sessionStorage.getItem('embedMode') === '1') } catch {}
+  }, [])
 
   async function handleSignOut() {
     await signOut(auth)
@@ -125,6 +132,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       ))}
     </nav>
   )
+
+  // Embed (in-app WebView): render only the tab content, no header/drawer.
+  if (embed) {
+    return <main className="min-h-screen p-3 sm:p-6">{children}</main>
+  }
 
   return (
     <div className="flex flex-col min-h-screen">

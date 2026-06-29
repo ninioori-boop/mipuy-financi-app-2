@@ -1,18 +1,21 @@
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app'
 import { getFirestore, type Firestore } from 'firebase-admin/firestore'
+import { getAuth, type Auth } from 'firebase-admin/auth'
 
-// Server-side Firestore (admin SDK). Used ONLY by API routes to deliver
-// externally-pushed transactions into a user's private inbox. The service
-// account bypasses Security Rules, so it never runs in the browser and the key
-// is read from a server-only env var (NEVER NEXT_PUBLIC_).
+// Server-side Firebase admin SDK. Used ONLY by API routes (deliver pushed
+// transactions into a user's inbox; mint an app session from a device token).
+// The service account bypasses Security Rules, so it never runs in the browser
+// and the key is read from a server-only env var (NEVER NEXT_PUBLIC_).
 //
-// Returns null when the service account isn't configured yet, so callers can
-// fail gracefully (503) — this lets the code deploy before the backend is set up
-// without breaking anything.
-let cached: Firestore | null = null
+// All getters return null when the service account isn't configured yet, so
+// callers can fail gracefully (503) — this lets the code deploy before the
+// backend is set up without breaking anything.
+let cachedApp: App | null = null
+let cachedDb: Firestore | null = null
+let cachedAuth: Auth | null = null
 
-export function getAdminDb(): Firestore | null {
-  if (cached) return cached
+function getAdminApp(): App | null {
+  if (cachedApp) return cachedApp
 
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT
   if (!raw) return null
@@ -25,7 +28,7 @@ export function getAdminDb(): Firestore | null {
   }
   if (!sa.project_id || !sa.client_email || !sa.private_key) return null
 
-  const app: App = getApps().length
+  cachedApp = getApps().length
     ? getApps()[0]
     : initializeApp({
         credential: cert({
@@ -36,6 +39,21 @@ export function getAdminDb(): Firestore | null {
         }),
       })
 
-  cached = getFirestore(app)
-  return cached
+  return cachedApp
+}
+
+export function getAdminDb(): Firestore | null {
+  if (cachedDb) return cachedDb
+  const app = getAdminApp()
+  if (!app) return null
+  cachedDb = getFirestore(app)
+  return cachedDb
+}
+
+export function getAdminAuth(): Auth | null {
+  if (cachedAuth) return cachedAuth
+  const app = getAdminApp()
+  if (!app) return null
+  cachedAuth = getAuth(app)
+  return cachedAuth
 }
