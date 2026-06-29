@@ -22,6 +22,7 @@ import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
 import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
 import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
+import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -74,6 +75,9 @@ export interface Snapshot {
   expenseLog: {
     entries: ReturnType<typeof useExpenseLogStore.getState>['entries']
   }
+  categoryBudgets: {
+    budgets: ReturnType<typeof useCategoryBudgetStore.getState>['budgets']
+  }
   business: {
     businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
     revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
@@ -116,6 +120,7 @@ export function collectSnapshot(): Snapshot {
   const c = useCreditStore.getState()
   const mt = useMeetingsStore.getState()
   const el = useExpenseLogStore.getState()
+  const cb = useCategoryBudgetStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
 
@@ -146,6 +151,7 @@ export function collectSnapshot(): Snapshot {
     },
     meetings: { meetings: mt.meetings },
     expenseLog: { entries: el.entries },
+    categoryBudgets: { budgets: cb.budgets },
     business: {
       businessType: b.businessType,
       revenue: b.revenue, cogs: b.cogs, opex: b.opex,
@@ -318,6 +324,19 @@ export function applySnapshot(raw: unknown): void {
     useExpenseLogStore.setState({ entries: raw.expenseLog.entries as ExpenseEntry[] })
   }
 
+  // categoryBudgets (per-category monthly limits for the expense-log tab).
+  // Snapshots saved before budgets existed simply lack the key — the guard
+  // skips them and the store keeps its default (empty map). Coerce to a clean
+  // { category -> positive number } map so a malformed value can't poison the UI.
+  if (isObject(raw.categoryBudgets) && isObject(raw.categoryBudgets.budgets)) {
+    const src = raw.categoryBudgets.budgets as Record<string, unknown>
+    const budgets: Record<string, number> = {}
+    for (const [cat, lim] of Object.entries(src)) {
+      if (typeof lim === 'number' && Number.isFinite(lim) && lim > 0) budgets[cat] = lim
+    }
+    useCategoryBudgetStore.setState({ budgets })
+  }
+
   // business
   if (isObject(raw.business)) {
     const b = raw.business as Partial<Snapshot['business']>
@@ -386,6 +405,7 @@ export function resetAllStores(): void {
   })
   useMeetingsStore.setState({ meetings: [] })
   useExpenseLogStore.setState({ entries: [] })
+  useCategoryBudgetStore.setState({ budgets: {} })
   useBusinessStore.setState({
     businessType: DEFAULT_BUSINESS.businessType,
     revenue: [], cogs: [], opex: [],

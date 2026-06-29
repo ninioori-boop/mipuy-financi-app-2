@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST } from '@/lib/constants'
@@ -41,6 +42,7 @@ const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 export default function ExpensesPage() {
   const router = useRouter()
   const { entries, add, update, remove } = useExpenseLogStore()
+  const { budgets, setBudget } = useCategoryBudgetStore()
   const { initMonth, applyExpenseLog } = useMonthlyStore()
   const learn = useCreditStore(s => s.learn)   // shared learnedDB — same teaching as credit/import
 
@@ -54,13 +56,30 @@ export default function ExpensesPage() {
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { toast.error('הזן סכום'); return }
     if (!category)        { toast.error('בחר קטגוריה'); return }
-    add({ date, amount: Math.round(amt), category, note: note.trim() })
+    const rounded = Math.round(amt)
+    add({ date, amount: rounded, category, note: note.trim() })
     // Keep category + date for fast repeated logging; clear amount + note.
     setAmount('')
     setNote('')
     // Jump the viewed month to where the entry landed, so it's visible.
     setSelMonth(date.slice(0, 7))
     toast.success(`נרשם: ${icon(category)} ${category} · ${fmt(amt)}`)
+
+    // Budget alert — does this expense push the category near/over its monthly cap?
+    // `entries` here is the pre-add list (closure), so + rounded = the new total.
+    const budget = budgets[category]
+    if (budget) {
+      const ym = date.slice(0, 7)
+      const spent = entries
+        .filter(e => e.category === category && e.date.slice(0, 7) === ym)
+        .reduce((s, e) => s + e.amount, 0) + rounded
+      const pct = spent / budget
+      if (pct >= 1) {
+        toast.error(`⚠️ חריגה מהתקציב ל${category}: ${fmt(spent)} מתוך ${fmt(budget)} (${Math.round(pct * 100)}%)`)
+      } else if (pct >= 0.8) {
+        toast.warning(`מתקרב לתקציב ל${category}: ${Math.round(pct * 100)}% (${fmt(spent)} מתוך ${fmt(budget)})`)
+      }
+    }
   }
 
   const monthEntries = useMemo(
@@ -78,6 +97,30 @@ export default function ExpensesPage() {
     for (const e of monthEntries) map.set(e.category, (map.get(e.category) ?? 0) + e.amount)
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [monthEntries])
+
+  // All months that have any entries, each with its total — for the month dropdown.
+  // The current month is always included (even if empty) so you can land on it.
+  const monthsWithData = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of entries) {
+      const ym = e.date.slice(0, 7)
+      map.set(ym, (map.get(ym) ?? 0) + e.amount)
+    }
+    if (!map.has(currentMonth())) map.set(currentMonth(), 0)
+    // The viewed month might be a future month jumped to via the › arrow — keep it selectable.
+    if (!map.has(selMonth)) map.set(selMonth, 0)
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+  }, [entries, selMonth])
+
+  // Categories at/over 80% of their monthly budget THIS viewed month — for the banner.
+  const budgetAlerts = useMemo(
+    () => catTotals
+      .filter(([cat]) => budgets[cat])
+      .map(([cat, sum]) => ({ cat, sum, budget: budgets[cat], pct: sum / budgets[cat] }))
+      .filter(b => b.pct >= 0.8)
+      .sort((a, b) => b.pct - a.pct),
+    [catTotals, budgets],
+  )
 
   // Map the viewed YYYY-MM to a monthly-tab month (jan..dec, year-agnostic).
   const targetMonth = MONTHS_LIST[parseInt(selMonth.slice(5, 7), 10) - 1]
@@ -171,13 +214,24 @@ export default function ExpensesPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
-              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">›</button>
-            <span className="text-sm font-semibold text-txt min-w-[120px] text-center">{monthLabel(selMonth)}</span>
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold shrink-0">›</button>
+            <select
+              value={selMonth}
+              onChange={e => setSelMonth(e.target.value)}
+              title="בחר חודש לצפייה"
+              className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-txt focus:outline-none focus:border-gold/60 cursor-pointer min-w-[150px]"
+            >
+              {monthsWithData.map(([ym, total]) => (
+                <option key={ym} value={ym}>
+                  {monthLabel(ym)}{total > 0 ? ` · ${fmt(total)}` : ''}
+                </option>
+              ))}
+            </select>
             <button onClick={() => setSelMonth(shiftMonth(selMonth, 1))}
-              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold">‹</button>
+              className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold shrink-0">‹</button>
             {selMonth !== currentMonth() && (
               <button onClick={() => setSelMonth(currentMonth())}
-                className="text-xs text-gold/80 hover:text-gold transition-colors ms-1">חזרה לחודש הנוכחי</button>
+                className="text-xs text-gold/80 hover:text-gold transition-colors ms-1 whitespace-nowrap">חזרה לחודש הנוכחי</button>
             )}
           </div>
           <div className="text-end">
@@ -201,23 +255,66 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {/* Category breakdown */}
-      {catTotals.length > 0 && (
-        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-2.5">
-          <div className="text-sm font-semibold text-txt mb-1">פילוח לפי קטגוריה</div>
-          {catTotals.map(([cat, sum]) => (
-            <div key={cat} className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
+      {/* Budget alert banner — categories at/over 80% of their monthly cap */}
+      {budgetAlerts.length > 0 && (
+        <div className="rounded-xl border border-gold/40 bg-gold/10 p-4 space-y-2">
+          <div className="text-sm font-semibold text-gold">⚠️ קרוב או חורג מהתקציב</div>
+          <div className="space-y-1">
+            {budgetAlerts.map(({ cat, sum, budget, pct }) => (
+              <div key={cat} className="flex items-center justify-between text-xs gap-2">
                 <span className="text-txt">{icon(cat)} {cat}</span>
-                <span className="text-muted-txt tabular-nums">
-                  {fmt(sum)} · {Math.round((sum / monthTotal) * 100)}%
+                <span className={`tabular-nums whitespace-nowrap ${pct >= 1 ? 'text-expense' : 'text-gold'}`}>
+                  {fmt(sum)} / {fmt(budget)} · {Math.round(pct * 100)}%
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-surface overflow-hidden">
-                <div className="h-full bg-gold/60 rounded-full" style={{ width: `${(sum / monthTotal) * 100}%` }} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Category breakdown — with optional per-category monthly budget */}
+      {catTotals.length > 0 && (
+        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-2.5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm font-semibold text-txt">פילוח לפי קטגוריה</span>
+            <span className="text-[11px] text-muted-txt">הגדירו תקציב חודשי בשדה שליד כל קטגוריה →</span>
+          </div>
+          {catTotals.map(([cat, sum]) => {
+            const budget = budgets[cat]
+            const pct = budget ? sum / budget : 0
+            const barColor = !budget ? 'bg-gold/60' : pct >= 1 ? 'bg-expense' : pct >= 0.8 ? 'bg-gold' : 'bg-income'
+            const textColor = !budget ? 'text-muted-txt' : pct >= 1 ? 'text-expense' : pct >= 0.8 ? 'text-gold' : 'text-income'
+            const barWidth = budget ? Math.min(100, pct * 100) : (sum / monthTotal) * 100
+            return (
+              <div key={cat} className="space-y-1">
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-txt shrink-0">{icon(cat)} {cat}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`tabular-nums whitespace-nowrap ${textColor}`}>
+                      {budget
+                        ? `${fmt(sum)} / ${fmt(budget)} · ${Math.round(pct * 100)}%`
+                        : `${fmt(sum)} · ${Math.round((sum / monthTotal) * 100)}%`}
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      defaultValue={budget || ''}
+                      onBlur={e => setBudget(cat, parseFloat(e.target.value) || 0)}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      placeholder="תקציב"
+                      min={0}
+                      style={{ direction: 'ltr' }}
+                      title="תקציב חודשי לקטגוריה (₪) — ריק = ללא תקציב"
+                      className="w-20 rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums shrink-0"
+                    />
+                  </div>
+                </div>
+                <div className="h-1.5 rounded-full bg-surface overflow-hidden">
+                  <div className={`h-full rounded-full ${barColor}`} style={{ width: `${barWidth}%` }} />
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
