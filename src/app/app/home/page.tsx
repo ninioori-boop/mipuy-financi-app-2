@@ -43,6 +43,7 @@ export default function HomePage() {
   const tiles = [
     { href: '/app/expenses',    emoji: '🧾', label: 'תיעוד הוצאות', desc: 'רישום וקטלוג' },
     { href: '/app/monthly/jan', emoji: '📅', label: 'תקציב חודשי', desc: 'תכנון מול ביצוע' },
+    { href: '/app/checking',    emoji: '💧', label: 'התנהלות עו"ש', desc: 'כמה להשאיר / לחסוך' },
     { href: '/app/trends',      emoji: '📊', label: 'מגמות',        desc: 'גרפים לאורך זמן' },
     { href: '/app/goals',       emoji: '🎯', label: 'יעדים',         desc: 'חיסכון ומטרות' },
     { href: '/app/meetings',    emoji: '📝', label: 'פגישות',       desc: 'סיכומים ומשימות' },
