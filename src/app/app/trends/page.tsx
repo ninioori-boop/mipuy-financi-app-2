@@ -168,8 +168,8 @@ export default function TrendsPage() {
               tickFormatter={tickFmt} width={44} />
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
             <Legend iconSize={8} wrapperStyle={{ color: '#8A8178', fontSize: 11, paddingTop: 8 }} />
-            <Bar dataKey="הכנסות" fill="#4ade80" radius={[4, 4, 0, 0]} maxBarSize={44} />
-            <Bar dataKey="הוצאות" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={44} />
+            <Bar dataKey="הכנסות" fill="#4ade80" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
+            <Bar dataKey="הוצאות" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -185,10 +185,10 @@ export default function TrendsPage() {
               tickFormatter={tickFmt} width={44} />
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
             <Legend iconSize={8} wrapperStyle={{ color: '#8A8178', fontSize: 11, paddingTop: 8 }} />
-            <Bar dataKey="קבוע"    fill="#6366f1" stackId="a" maxBarSize={44} />
-            <Bar dataKey="משתנה"  fill="#a78bfa" stackId="a" maxBarSize={44} />
-            <Bar dataKey="מנויים" fill="#22d3ee" stackId="a" maxBarSize={44} />
-            <Bar dataKey="ביטוחים" fill="#fb923c" stackId="a" radius={[4, 4, 0, 0]} maxBarSize={44} />
+            <Bar dataKey="קבוע"    fill="#6366f1" stackId="a" maxBarSize={44} isAnimationActive={false} />
+            <Bar dataKey="משתנה"  fill="#a78bfa" stackId="a" maxBarSize={44} isAnimationActive={false} />
+            <Bar dataKey="מנויים" fill="#22d3ee" stackId="a" maxBarSize={44} isAnimationActive={false} />
+            <Bar dataKey="ביטוחים" fill="#fb923c" stackId="a" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -212,7 +212,7 @@ export default function TrendsPage() {
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTipCash} />
             <Area type="monotone" dataKey="תזרים" stroke="#C9A86C" strokeWidth={2}
               fill="url(#cfGrad)" dot={{ fill: '#C9A86C', r: 4, strokeWidth: 0 }}
-              activeDot={{ r: 8, strokeWidth: 0 }} />
+              activeDot={{ r: 8, strokeWidth: 0 }} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -236,7 +236,7 @@ export default function TrendsPage() {
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
               <Area type="monotone" dataKey="חיסכון" stroke="#4ade80" strokeWidth={2}
                 fill="url(#savGrad)" dot={{ fill: '#4ade80', r: 4, strokeWidth: 0 }}
-                activeDot={{ r: 8, strokeWidth: 0 }} />
+                activeDot={{ r: 8, strokeWidth: 0 }} isAnimationActive={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
