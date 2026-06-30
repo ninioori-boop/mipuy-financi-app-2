@@ -56,20 +56,20 @@ function SectionPanel({
               value={row.name}
               onChange={e => onUpdate(row.id, 'name', e.target.value)}
               placeholder={colName}
-              className="flex-1 min-w-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+              className="flex-1 min-w-0 rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
             />
             <input
-              type="number" inputMode="numeric" value={row.amount || ''} min={0}
+              type="number" inputMode="decimal" value={row.amount || ''} min={0}
               onChange={e => onUpdate(row.id, 'amount', parseFloat(e.target.value) || 0)}
               placeholder="₪" style={{ direction: 'ltr' }}
-              className="w-24 sm:w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+              className="w-24 sm:w-28 rounded-lg border border-line bg-surface px-2 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
             />
             {showVat && (
-              <label className="w-14 py-2 flex items-center justify-center gap-1 text-[10px] text-muted-txt cursor-pointer select-none" title="מזכה במע&quot;מ תשומות">
+              <label className="w-14 py-3 min-h-[44px] flex items-center justify-center gap-1 text-[10px] text-muted-txt cursor-pointer select-none" title="מזכה במע&quot;מ תשומות">
                 <input
                   type="checkbox" checked={row.vatDeductible}
                   onChange={e => onUpdate(row.id, 'vatDeductible', e.target.checked)}
-                  className="accent-gold size-3.5"
+                  className="accent-gold size-4"
                 />
                 מע&quot;מ
               </label>
@@ -84,7 +84,7 @@ function SectionPanel({
         {rows.length === 0 && <p className="text-xs text-muted-txt py-2">אין שורות</p>}
       </div>
 
-      <button onClick={onAdd} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף שורה</button>
+      <button onClick={onAdd} className="text-xs text-muted-txt hover:text-gold transition-colors py-3 min-h-[44px] inline-flex items-center">+ הוסף שורה</button>
     </div>
   )
 }
@@ -111,7 +111,7 @@ function TaxLine({ label, hint, value, overridden, onOverride, onReset }: {
         <button
           onClick={onReset}
           title={overridden ? 'אפס לחישוב אוטומטי' : 'מחושב אוטומטית'}
-          className={`px-2 py-2 text-base leading-none transition-colors ${overridden ? 'text-gold hover:text-gold-light' : 'text-muted-txt/40 cursor-default'}`}
+          className={`px-2 py-2 min-h-[44px] text-base leading-none transition-colors ${overridden ? 'text-gold hover:text-gold-light' : 'text-muted-txt/40 cursor-default'}`}
           disabled={!overridden}
         >↺</button>
       </div>
@@ -271,7 +271,7 @@ export default function BusinessAnnualPage() {
       {/* Tax config */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
         <h2 className="font-semibold text-txt text-sm">⚙️ הגדרות מס</h2>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {!isCompany && (
             <div className="space-y-1">
               <label className="text-xs text-muted-txt">נקודות זיכוי</label>
@@ -347,7 +347,7 @@ export default function BusinessAnnualPage() {
       {!isPatur ? (
         <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-2.5">
           <h2 className="font-semibold text-txt text-sm">🧮 מע&quot;מ שנתי <span className="text-[11px] font-normal text-muted-txt">(מעבר — לא חלק מרווחי העסק)</span></h2>
-          <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
             <div className="rounded-lg bg-surface p-2.5">
               <div className="text-[10px] text-muted-txt">עסקאות</div>
               <div className="text-sm font-bold text-txt tabular-nums">{fmt(vatCalc.output)}</div>
@@ -356,7 +356,7 @@ export default function BusinessAnnualPage() {
               <div className="text-[10px] text-muted-txt">תשומות</div>
               <div className="text-sm font-bold text-txt tabular-nums">{fmt(vatCalc.input)}</div>
             </div>
-            <div className="rounded-lg border border-gold/30 bg-gold/5 p-2.5">
+            <div className="col-span-full sm:col-span-1 rounded-lg border border-gold/30 bg-gold/5 p-2.5">
               <div className="text-[10px] text-muted-txt">לתשלום</div>
               <div className={`text-sm font-black tabular-nums ${vatPayable >= 0 ? 'text-gold' : 'text-income'}`}>{fmt(vatPayable)}</div>
             </div>

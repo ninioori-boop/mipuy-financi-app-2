@@ -83,7 +83,7 @@ export default function MeetingsPage() {
             <button
               key={t}
               onClick={() => handleAdd(t)}
-              className="text-xs sm:text-sm bg-surface border border-line hover:border-gold/60 hover:text-gold rounded-lg px-3 py-1.5 text-txt font-medium transition-colors"
+              className="text-xs sm:text-sm bg-surface border border-line hover:border-gold/60 hover:text-gold rounded-lg px-3 py-2.5 min-h-[44px] inline-flex items-center text-txt font-medium transition-colors"
             >
               + {TYPE_ICON[t]} {MEETING_LABELS[t]}
             </button>
@@ -166,14 +166,14 @@ export default function MeetingsPage() {
                     <button
                       onClick={() => handleExport(m)}
                       disabled={exportingId === m.id}
-                      className="text-xs bg-surface border border-line hover:border-gold/60 hover:text-gold rounded-lg px-2.5 py-1 text-txt transition-colors disabled:opacity-50"
+                      className="text-xs bg-surface border border-line hover:border-gold/60 hover:text-gold rounded-lg px-2.5 py-1 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-txt transition-colors disabled:opacity-50"
                       title="ייצוא PDF"
                     >
                       {exportingId === m.id ? '⏳' : '📄'}
                     </button>
                     <button
                       onClick={() => handleDelete(m)}
-                      className="text-xs bg-surface border border-line hover:border-expense/60 hover:text-expense rounded-lg px-2.5 py-1 text-txt transition-colors"
+                      className="text-xs bg-surface border border-line hover:border-expense/60 hover:text-expense rounded-lg px-2.5 py-1 min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-txt transition-colors"
                       title="מחיקה"
                     >
                       🗑️
