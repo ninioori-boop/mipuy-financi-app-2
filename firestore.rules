@@ -65,9 +65,17 @@ service cloud.firestore {
       }
     }
 
+    // ── Server-only collections (admin SDK; clients fully blocked) ────
+    // `rateLimits`   — per-uid + global AI rate-limit counters (src/lib/rateLimit.ts).
+    // `deviceTokens` — per-user device-token minVersion for revocation
+    //                  (src/lib/deviceTokenRevocation.ts).
+    // Both are written ONLY by API routes via the admin SDK (which bypasses rules);
+    // no client ever touches them, so the catch-all below already denies all client
+    // access. Documented here only — additive, the old live app never references them.
+
     // ── Everything else: blocked ──────────────────────────────────────
-    // Includes `allowlist` (advisor-managed via console/admin only) and the
-    // unused advisor/invites/maps collections.
+    // Includes `allowlist` (advisor-managed via console/admin only), the new
+    // server-only `rateLimits`/`deviceTokens`, and the unused advisor/invites/maps.
     match /{document=**} {
       allow read, write: if false;
     }

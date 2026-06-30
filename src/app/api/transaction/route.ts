@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
 import { ALL_CATEGORIES } from '@/lib/constants'
@@ -11,6 +13,10 @@ export const runtime = 'nodejs'
 
 const MAX_MERCHANT = 200
 const MAX_AMOUNT   = 1_000_000
+
+// Per-user rate limit — generous (Apple/Google Pay bursts are legit), just bounds abuse.
+const TX_LIMIT     = 120
+const TX_WINDOW_MS = 3_600_000 // 1 hour
 
 // Receives a single externally-pushed transaction (from an iOS Shortcut / Android
 // automation), auto-categorizes it, and drops it into the user's private inbox
@@ -33,9 +39,19 @@ export async function POST(req: NextRequest) {
   }
   const { token, merchant, amount, date, ref, category: catOverride } = body as Record<string, unknown>
 
-  const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
-  if (!uid) {
+  const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
+  if (!verified) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+  const { uid, version } = verified
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const rl = await checkRateLimit({ key: `transaction:${uid}`, limit: TX_LIMIT, windowMs: TX_WINDOW_MS })
+  if (!rl.allowed) {
+    console.log(`[transaction] RATE_LIMITED uid=${uid}`)
+    return NextResponse.json({ error: 'rate limited' }, { status: 429 })
   }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {

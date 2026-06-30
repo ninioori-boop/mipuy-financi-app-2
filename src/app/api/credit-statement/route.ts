@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
+import { checkRateLimit } from '@/lib/rateLimit'
+import { checkAiBudget } from '@/lib/aiBudget'
+import { hasLabAccess } from '@/lib/labAccess'
+
+// firebase-admin (via the shared rate limiter) needs the Node runtime, not Edge.
+export const runtime = 'nodejs'
 
 // Client-facing safety net for credit-card statements the deterministic parser
 // can't read. Per-user daily cap (advisors process many clients).
-const userLimitMap = new Map<string, { count: number; start: number }>()
 const USER_LIMIT  = 60
 const WINDOW_MS   = 86_400_000 // 24 hours
 
@@ -26,24 +31,17 @@ const SYSTEM_PROMPT = `אתה קורא דוח כרטיס אשראי ישראלי
 החזר JSON תקין בלבד, ללא טקסט נוסף:
 {"transactions":[{"date":"2026-06-14","desc":"שופרסל","amount":250,"isRefund":false}]}`
 
-function isUserLimited(uid: string): boolean {
-  const now   = Date.now()
-  const entry = userLimitMap.get(uid) ?? { count: 0, start: now }
-  if (now - entry.start > WINDOW_MS) { entry.count = 0; entry.start = now }
-  entry.count++
-  userLimitMap.set(uid, entry)
-  return entry.count > USER_LIMIT
-}
-
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
   if (!auth.startsWith('Bearer ')) {
     return NextResponse.json({ error: 'נדרשת התחברות' }, { status: 401 })
   }
   let uid: string
+  let isAdvisor = false
   try {
     const result = await verifyFirebaseToken(auth.slice(7))
     uid = result.uid
+    isAdvisor = hasLabAccess(result.email)
   } catch {
     return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
   }
@@ -56,10 +54,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (isUserLimited(uid)) {
+  if (!isAdvisor) {
+    const rl = await checkRateLimit({ key: `credit-statement:${uid}`, limit: USER_LIMIT, windowMs: WINDOW_MS })
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'הגעת למגבלת קריאת הדוחות היומית (60) — נסה שוב מחר' },
+        { status: 429 },
+      )
+    }
+  }
+
+  if ((await checkAiBudget({ exempt: isAdvisor })).stopped) {
     return NextResponse.json(
-      { error: 'הגעת למגבלת קריאת הדוחות היומית (60) — נסה שוב מחר' },
-      { status: 429 },
+      { error: 'השירות עמוס כרגע — נסה שוב מאוחר יותר' },
+      { status: 503 },
     )
   }
 

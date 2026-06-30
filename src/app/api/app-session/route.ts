@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { getAdminAuth } from '@/lib/firebaseAdmin'
+
+// firebase-admin needs the Node runtime (not Edge).
+export const runtime = 'nodejs'
+
+// Per-user rate limit — session minting is rare; this just bounds abuse.
+const SESSION_LIMIT     = 30
+const SESSION_WINDOW_MS = 3_600_000 // 1 hour
 
 // Exchanges a device token (the same HMAC token the Android app already holds
 // for POSTing expenses) for a short-lived Firebase **custom token**. The app's
@@ -34,9 +43,19 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const uid = verifyDeviceToken(token, secret)
-  if (!uid) {
+  const verified = verifyDeviceToken(token, secret)
+  if (!verified) {
     return NextResponse.json({ error: 'טוקן לא תקין' }, { status: 401 })
+  }
+  const { uid, version } = verified
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return NextResponse.json({ error: 'טוקן לא תקין' }, { status: 401 })
+  }
+
+  const rl = await checkRateLimit({ key: `app-session:${uid}`, limit: SESSION_LIMIT, windowMs: SESSION_WINDOW_MS })
+  if (!rl.allowed) {
+    console.log(`[app-session] RATE_LIMITED uid=${uid}`)
+    return NextResponse.json({ error: 'יותר מדי בקשות — נסה שוב מאוחר יותר' }, { status: 429 })
   }
 
   try {

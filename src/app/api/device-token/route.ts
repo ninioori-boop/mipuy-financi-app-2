@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { signDeviceToken } from '@/lib/deviceToken'
+import { getCurrentTokenVersion } from '@/lib/deviceTokenRevocation'
+
+// firebase-admin (via the version lookup) needs the Node runtime, not Edge.
+export const runtime = 'nodejs'
 
 // Returns the caller's personal device token (for pasting into an iOS Shortcut /
 // Android automation). Authenticated with the normal Firebase ID token, exactly
@@ -27,5 +31,6 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  return NextResponse.json({ token: signDeviceToken(uid, secret) })
+  const version = await getCurrentTokenVersion(uid)
+  return NextResponse.json({ token: signDeviceToken(uid, secret, version) })
 }

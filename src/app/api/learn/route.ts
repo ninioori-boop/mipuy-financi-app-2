@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { normalizeForLookup } from '@/lib/categorize'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
@@ -8,6 +10,10 @@ import { ALL_CATEGORIES } from '@/lib/constants'
 export const runtime = 'nodejs'
 
 const MAX_MERCHANT = 200
+
+// Per-user rate limit on teaching the shared learnedDB.
+const LEARN_LIMIT     = 60
+const LEARN_WINDOW_MS = 86_400_000 // 24 hours
 
 // Teaches the shared learnedDB from a correction made in the Android tracker app.
 // Authed with the per-user HMAC device token (same as /api/transaction) — NOT a
@@ -27,9 +33,19 @@ export async function POST(req: NextRequest) {
   }
   const { token, merchant, category } = body as Record<string, unknown>
 
-  const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
-  if (!uid) {
+  const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
+  if (!verified) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+  const { uid, version } = verified
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const rl = await checkRateLimit({ key: `learn:${uid}`, limit: LEARN_LIMIT, windowMs: LEARN_WINDOW_MS })
+  if (!rl.allowed) {
+    console.log(`[learn] RATE_LIMITED uid=${uid}`)
+    return NextResponse.json({ error: 'rate limited' }, { status: 429 })
   }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {

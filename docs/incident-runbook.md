@@ -16,9 +16,12 @@
 **עצירה מיידית (לפי סדר עוצמה):**
 1. **תקרת Anthropic** — אם הוגדרה (1.10), היא כבר עוצרת ב-cap. אם לא — הגדר עכשיו.
 2. **נטרל את המשתמש** — [Firebase Auth → Users](https://console.firebase.google.com/project/finance-machine-a36e9/authentication/users) → מצא את ה-uid → **Disable account**. מרגע זה הטוקן שלו נדחה ב-`verifyFirebaseToken` וה-routes יחזירו 401.
-3. **כיבוי מוחלט של ה-AI** — ב-Vercel הסר/שנה את `ANTHROPIC_API_KEY` (ה-routes יחזירו 500 "לא מוגדר"). זה מכבה את כל הסיווג/ניתוח עד שתחזיר.
+3. **kill-switch גלובלי ל-AI** — ב-Vercel הגדר `AI_KILL_SWITCH=true` (או הנמך את `AI_DAILY_LIMIT`) → redeploy. **כל** ה-AI routes יחזירו 503 מיד, בלי לגעת במפתח. הפיך תוך שנייה (מחק את המשתנה כדי להחזיר). זה הצעד הגלובלי המהיר והכי פחות הרסני.
+4. **כיבוי מוחלט של ה-AI** — ב-Vercel הסר/שנה את `ANTHROPIC_API_KEY` (ה-routes יחזירו 500 "לא מוגדר"). הצעד ההרסני ביותר — רק אם ה-kill-switch לא זמin.
 
-**שחזור:** החזר את המפתח / הפעל מחדש את המשתמש אחרי שהאיום חלף.
+> הערה: התקרה per-user כעת מגובת-Firestore (`rateLimits`, `src/lib/rateLimit.ts`) ועמידה בין instances של Vercel — אז משתמש בודד כבר חסום אוטומטית בתקרה שלו. ה-kill-switch הוא החסם הגלובלי מעל זה.
+
+**שחזור:** החזר את המפתח / כבה את `AI_KILL_SWITCH` / הפעל מחדש את המשתמש אחרי שהאיום חלף.
 
 ---
 
@@ -98,6 +101,34 @@ service cloud.firestore {
 אין גיבוי אוטומטי. לרשת ביטחון, שקול ייצוא תקופתי:
 - `gcloud firestore export gs://<bucket>` (דורש bucket ב-GCS), או
 - סקריפט `npm run export:clients` כבר מושך snapshot של כל המשתמשים ל-`clients.md`/`.html` (לא גיבוי מלא, אבל תיעוד מצב).
+
+---
+
+## 9. 📱 דליפת / גניבת device token (קליטת עסקאות אוטומטית)
+
+**רקע:** ה-device token הוא credential אישי לכל משתמש, שמודבק פעם אחת בטלפון (iOS Shortcut /
+אוטומציית Android) ומאפשר POST של עסקאות + מינוף ל-session. הוא מאומת ב-HMAC ועמיד לזיוף,
+אבל אם **הטלפון עצמו נגנב** — הטוקן שעליו תקף.
+
+**עצירה (ביטול ממוקד, בלי לפגוע באף לקוח אחר):**
+1. מצא את ה-uid של המשתמש ב-[Firebase Auth → Users](https://console.firebase.google.com/project/finance-machine-a36e9/authentication/users).
+2. הרץ `npx tsx scripts/revoke-device.ts <uid>` — מעלה את `deviceTokens/{uid}.minVersion` ב-1.
+   כל טוקן ישן של אותו משתמש נדחה מיד (`isDeviceTokenRevoked`), והנתיבים מחזירים 401.
+3. המשתמש מקבל טוקן חדש פשוט ע"י פתיחת האפליקציה (`/api/device-token` חותם בגרסה החדשה).
+
+**אל תסובב את `TRANSACTION_SECRET`** לצורך זה — סיבוב הסוד מבטל את הטוקנים של **כל** הלקוחות
+בבת אחת. שמור אותו רק לתרחיש שהסוד עצמו דלף. הביטול הממוקד (revoke-device) פוגע רק בטלפון אחד.
+
+**הגנת קצב:** הנתיבים `/api/transaction`, `/api/learn`, `/api/app-session` מוגבלים per-uid
+(`rateLimit.ts`), אז טוקן גנוב לא יכול גם להציף — חפש בלוגים `RATE_LIMITED uid=…` לזיהוי.
+
+---
+
+## 🧹 תחזוקה: TTL על `rateLimits`
+מסמכי המונים נכתבים עם שדה `expireAt`. כדי שייווצקו אוטומטית, הפעל **TTL policy** ב-
+[Firestore → TTL](https://console.firebase.google.com/project/finance-machine-a36e9/firestore/ttl)
+על הקולקציה `rateLimits`, שדה `expireAt`. (עד שמופעל — לא נורא: כל חלון משתמש ב-doc id חדש,
+והישנים פשוט נצברים. ה-TTL רק מנקה.) ה-policy מוגבל ל-`rateLimits` בלבד ולא נוגע בשום קולקציה אחרת.
 
 ---
 
