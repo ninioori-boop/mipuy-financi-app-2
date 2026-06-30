@@ -27,7 +27,7 @@ export default function ConnectExpensesPage() {
 
       // Already signed in (re-open without a token) → just go to expenses.
       if (!token) {
-        if (auth.currentUser) { router.replace('/app/expenses'); return }
+        if (auth.currentUser) { router.replace('/app/home'); return }
         setError('פתחו את המסך הזה מתוך האפליקציה (חסר טוקן).')
         return
       }
@@ -45,7 +45,7 @@ export default function ConnectExpensesPage() {
         if (cancelled) return
         // Clear the token from the URL so it isn't left in history.
         try { history.replaceState(null, '', '/connect/expenses') } catch {}
-        router.replace('/app/expenses')
+        router.replace('/app/home')
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'ההתחברות נכשלה')
       }
