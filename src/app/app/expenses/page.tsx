@@ -9,6 +9,7 @@ import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
+import { useClientMode } from '@/hooks/useClientMode'
 
 function today() {
   const d = new Date()
@@ -41,6 +42,7 @@ const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
 export default function ExpensesPage() {
   const router = useRouter()
+  const clientMode = useClientMode()   // in-app: declutter for the phone
   const { entries, add, update, remove } = useExpenseLogStore()
   const { budgets, setBudget } = useCategoryBudgetStore()
   const { initMonth, applyExpenseLog } = useMonthlyStore()
@@ -162,12 +164,12 @@ export default function ExpensesPage() {
   }, [monthEntries])
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="rounded-xl border border-line bg-surface2 p-6">
-        <h1 className="text-2xl font-bold text-gold mb-1">🧾 תיעוד הוצאות</h1>
-        <p className="text-muted-txt text-sm">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-gold">🧾 תיעוד הוצאות</h1>
+        <p className="text-muted-txt text-sm mt-1 hidden sm:block">
           רשמו כל הוצאה ברגע שהיא קורית ושייכו אותה לקטגוריה. יומן עצמאי — לא מתחבר לדוחות או לתקציב החודשי.
         </p>
       </div>
@@ -256,18 +258,21 @@ export default function ExpensesPage() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 flex-wrap border-t border-line pt-3">
-          <span className="text-[11px] text-muted-txt">
-            מעביר את סיכום היומן ל{targetMonth?.name ?? '—'} בטאב החודשי — כסעיף נפרד, בלי להשפיע על הייבוא.
-          </span>
-          <button
-            onClick={transferToMonthly}
-            disabled={monthEntries.length === 0}
-            className="text-sm bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-4 py-1.5 font-semibold transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ⬆ העבר ל{targetMonth?.name ?? ''} בחודשי
-          </button>
-        </div>
+        {/* Advisor power-action — hidden in the in-app client view to declutter. */}
+        {!clientMode && (
+          <div className="flex items-center justify-between gap-2 flex-wrap border-t border-line pt-3">
+            <span className="text-[11px] text-muted-txt">
+              מעביר את סיכום היומן ל{targetMonth?.name ?? '—'} בטאב החודשי — כסעיף נפרד, בלי להשפיע על הייבוא.
+            </span>
+            <button
+              onClick={transferToMonthly}
+              disabled={monthEntries.length === 0}
+              className="text-sm bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-4 py-1.5 font-semibold transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ⬆ העבר ל{targetMonth?.name ?? ''} בחודשי
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Budget alert banner — categories at/over 80% of their monthly cap */}
