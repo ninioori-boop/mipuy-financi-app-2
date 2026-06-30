@@ -18,6 +18,7 @@ const CLIENT_TABS = [
   { href: '/app/home',        emoji: '🏠', label: 'בית' },
   { href: '/app/expenses',    emoji: '🧾', label: 'הוצאות' },
   { href: '/app/monthly/jan', emoji: '📅', label: 'חודשי' },
+  { href: '/app/checking',    emoji: '💧', label: 'עו"ש' },
   { href: '/app/trends',      emoji: '📊', label: 'מגמות' },
   { href: '/app/goals',       emoji: '🎯', label: 'יעדים' },
   { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
