@@ -15,6 +15,7 @@ import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
 // Business tabs are appended only when the client has a business. Annual is
 // intentionally excluded until its mobile pass is done.
 const CLIENT_TABS = [
+  { href: '/app/home',        emoji: '🏠', label: 'בית' },
   { href: '/app/expenses',    emoji: '🧾', label: 'הוצאות' },
   { href: '/app/monthly/jan', emoji: '📅', label: 'חודשי' },
   { href: '/app/trends',      emoji: '📊', label: 'מגמות' },
