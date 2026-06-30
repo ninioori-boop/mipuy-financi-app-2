@@ -105,7 +105,7 @@ export default function MonthlyPage() {
 
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Month sub-navigation */}
       <div className="rounded-xl border border-line bg-surface2 overflow-hidden">
@@ -130,8 +130,8 @@ export default function MonthlyPage() {
       {/* Header */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6 flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gold">📅 תקציב {monthName}</h1>
-          <p className="text-muted-txt text-sm mt-0.5">תכנון מול ביצוע בפועל</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gold">📅 תקציב {monthName}</h1>
+          <p className="hidden sm:block text-muted-txt text-sm mt-0.5">תכנון מול ביצוע בפועל</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-txt">שנה:</span>
@@ -346,7 +346,7 @@ export default function MonthlyPage() {
               {fmt(data.logged.reduce((s, r) => s + r.amount, 0))}
             </span>
           </div>
-          <p className="text-[11px] text-muted-txt -mt-1">
+          <p className="hidden sm:block text-[11px] text-muted-txt -mt-1">
             סיכום מהטאב &quot;תיעוד הוצאות&quot;. מוצג בנפרד ואינו משפיע על התכנון/ביצוע או על נתוני הייבוא.
           </p>
           <div className="space-y-1">

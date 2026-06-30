@@ -87,17 +87,17 @@ export default function GoalsPage() {
   const isOver    = allocated > savingsBudget.budget && savingsBudget.budget > 0
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="rounded-xl border border-line bg-surface2 p-5">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5">
         <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">🎯 יעדים פיננסיים</h1>
-        <p className="text-muted-txt text-sm">הגדר יעדים לפי טווח זמן — המערכת תחשב כמה לחסוך מדי חודש</p>
+        <p className="hidden sm:block text-muted-txt text-sm">הגדר יעדים לפי טווח זמן — המערכת תחשב כמה לחסוך מדי חודש</p>
       </div>
 
       {/* Savings budget bar — comes from /app/checking */}
       {savingsBudget.hasData && savingsBudget.budget > 0 ? (
-        <div className={`rounded-2xl border-2 p-5 transition-colors ${
+        <div className={`rounded-2xl border-2 p-4 sm:p-5 transition-colors ${
           isOver
             ? 'border-expense/50 bg-expense/5'
             : 'border-gold/40 bg-gradient-to-br from-gold/10 to-transparent'
