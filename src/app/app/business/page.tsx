@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useBusinessStore, type BizSection, type BizRow, type BusinessType } from '@/stores/businessStore'
+import { useClientMode } from '@/hooks/useClientMode'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import {
@@ -34,13 +35,21 @@ function SectionPanel({
   onUpdate: (id: string, field: 'name' | 'amount' | 'vatDeductible', value: string | number | boolean) => void
   onDelete: (id: string) => void
 }) {
+  const clientMode = useClientMode()
+  const [open, setOpen] = useState(true)
+  useEffect(() => { if (clientMode) setOpen(false) }, [clientMode])
   return (
     <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
-      <div className="flex items-center justify-between flex-wrap gap-1">
-        <h2 className="font-semibold text-txt">{icon} {title}</h2>
+      <div onClick={() => setOpen(o => !o)} className="flex items-center justify-between flex-wrap gap-1 cursor-pointer select-none">
+        <h2 className="font-semibold text-txt flex items-center gap-1.5">
+          <span className="text-muted-txt text-xs w-3">{open ? '▾' : '▸'}</span>
+          {icon} {title}
+        </h2>
         <span className={`text-sm font-bold tabular-nums ${color}`}>{fmt(total)}<span className="text-xs font-normal text-muted-txt">/חודש</span></span>
       </div>
 
+      {open && (
+      <>
       {/* column hints (desktop) */}
       <div className="hidden sm:flex items-center gap-2 px-1 text-xs text-muted-txt font-medium">
         <span className="flex-1">{colName}</span>
@@ -85,6 +94,8 @@ function SectionPanel({
       </div>
 
       <button onClick={onAdd} className="text-xs text-muted-txt hover:text-gold transition-colors py-3 min-h-[44px] inline-flex items-center">+ הוסף שורה</button>
+      </>
+      )}
     </div>
   )
 }
