@@ -43,7 +43,7 @@ function numInput(
 ) {
   return (
     <input
-      type="number" value={value || ''} min={0}
+      type="number" inputMode="decimal" value={value || ''} min={0}
       onChange={e => onChange(Math.max(0, parseFloat(e.target.value) || 0))}
       placeholder={placeholder} style={{ direction: 'ltr' }}
       className={`rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums w-full ${cls}`}
@@ -209,7 +209,7 @@ export default function GoalsPage() {
                       />
                       <button
                         onClick={() => deleteGoal(id, row.id)}
-                        className="shrink-0 text-muted-txt hover:text-expense transition-colors text-sm"
+                        className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense transition-colors text-sm"
                       >×</button>
                     </div>
 
@@ -271,7 +271,7 @@ export default function GoalsPage() {
               })}
             </div>
 
-            <button onClick={() => addGoal(id)} className="text-xs text-muted-txt hover:text-gold transition-colors">
+            <button onClick={() => addGoal(id)} className="text-xs text-muted-txt hover:text-gold transition-colors py-3 min-h-[44px] inline-flex items-center">
               + הוסף יעד
             </button>
           </div>

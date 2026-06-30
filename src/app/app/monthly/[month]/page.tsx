@@ -128,7 +128,7 @@ export default function MonthlyPage() {
       </div>
 
       {/* Header */}
-      <div className="rounded-xl border border-line bg-surface2 p-6 flex items-center justify-between flex-wrap gap-4">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6 flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gold">📅 תקציב {monthName}</h1>
           <p className="text-muted-txt text-sm mt-0.5">תכנון מול ביצוע בפועל</p>
@@ -137,12 +137,13 @@ export default function MonthlyPage() {
           <span className="text-xs text-muted-txt">שנה:</span>
           <input
             type="number"
+            inputMode="decimal"
             value={data.year}
             min={2020}
             max={2035}
             onChange={e => setYear(monthId, parseInt(e.target.value) || data.year)}
             style={{ direction: 'ltr' }}
-            className="w-20 text-center bg-bg border border-gold rounded-lg text-gold font-bold py-1 focus:outline-none text-sm"
+            className="w-20 text-center bg-bg border border-gold rounded-lg text-gold font-bold py-2 min-h-[44px] focus:outline-none text-sm"
           />
         </div>
       </div>
@@ -179,7 +180,7 @@ export default function MonthlyPage() {
                 <input value={row.name} onChange={e => updateInstRow(monthId, row.id, 'name', e.target.value)} placeholder="שם העסקה"
                   className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
                 {(['total','monthly','current','totalPay'] as const).map(f => (
-                  <input key={f} type="number" value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
+                  <input key={f} type="number" inputMode={f === 'total' || f === 'monthly' ? 'decimal' : 'numeric'} value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
                     placeholder={f === 'total' || f === 'monthly' ? '₪' : '#'} min={0} style={{ direction: 'ltr' }}
                     className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                 ))}
@@ -190,13 +191,13 @@ export default function MonthlyPage() {
                 <div className="flex items-center gap-2">
                   <input value={row.name} onChange={e => updateInstRow(monthId, row.id, 'name', e.target.value)} placeholder="שם העסקה"
                     className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                  <button onClick={() => deleteInstRow(monthId, row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+                  <button onClick={() => deleteInstRow(monthId, row.id)} className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm">×</button>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {[{f:'total' as const,l:'סכום כולל ₪'},{f:'monthly' as const,l:'חודשי ₪'}].map(({f,l}) => (
                     <div key={f} className="space-y-0.5">
                       <div className="text-[10px] text-muted-txt px-1">{l}</div>
-                      <input type="number" value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
+                      <input type="number" inputMode="decimal" value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
                         placeholder="₪" min={0} style={{ direction: 'ltr' }}
                         className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                     </div>
@@ -206,7 +207,7 @@ export default function MonthlyPage() {
                   {[{f:'current' as const,l:'תשלום נוכחי'},{f:'totalPay' as const,l:'סה"כ תשלומים'}].map(({f,l}) => (
                     <div key={f} className="space-y-0.5">
                       <div className="text-[10px] text-muted-txt px-1">{l}</div>
-                      <input type="number" value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
+                      <input type="number" inputMode="numeric" value={(row[f] as number) || ''} onChange={e => updateInstRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
                         placeholder="#" min={0} style={{ direction: 'ltr' }}
                         className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                     </div>
@@ -217,7 +218,7 @@ export default function MonthlyPage() {
           ))}
           {data.installments.length === 0 && <p className="text-xs text-muted-txt py-2">אין עסקאות בתשלומים</p>}
         </div>
-        <button onClick={() => addInstRow(monthId)} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף עסקה</button>
+        <button onClick={() => addInstRow(monthId)} className="text-xs min-h-[44px] inline-flex items-center text-muted-txt hover:text-gold transition-colors">+ הוסף עסקה</button>
       </div>
 
       {/* Full-width: Debts */}
@@ -235,22 +236,22 @@ export default function MonthlyPage() {
               <div className="hidden sm:grid grid-cols-[1fr_7rem_7rem_6rem_1.5rem] gap-2 items-center">
                 <input value={row.name} onChange={e => updateDebtRow(monthId, row.id, 'name', e.target.value)} placeholder="שם הנושה"
                   className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                <input type="number" value={row.remaining || ''} onChange={e => updateDebtRow(monthId, row.id, 'remaining', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
-                <input type="number" value={row.monthly || ''} onChange={e => updateDebtRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
-                <input type="number" value={row.months || ''} onChange={e => updateDebtRow(monthId, row.id, 'months', parseFloat(e.target.value) || 0)} placeholder="#" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-center tabular-nums" />
+                <input type="number" inputMode="decimal" value={row.remaining || ''} onChange={e => updateDebtRow(monthId, row.id, 'remaining', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                <input type="number" inputMode="decimal" value={row.monthly || ''} onChange={e => updateDebtRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                <input type="number" inputMode="numeric" value={row.months || ''} onChange={e => updateDebtRow(monthId, row.id, 'months', parseFloat(e.target.value) || 0)} placeholder="#" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-center tabular-nums" />
                 <button onClick={() => deleteDebtRow(monthId, row.id)} className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
               </div>
               <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <input value={row.name} onChange={e => updateDebtRow(monthId, row.id, 'name', e.target.value)} placeholder="שם הנושה"
                     className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                  <button onClick={() => deleteDebtRow(monthId, row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+                  <button onClick={() => deleteDebtRow(monthId, row.id)} className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm">×</button>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[{f:'remaining' as const,l:'יתרה ₪'},{f:'monthly' as const,l:'החזר חודשי ₪'},{f:'months' as const,l:'חודשים'}].map(({f,l}) => (
                     <div key={f} className="space-y-0.5">
                       <div className="text-[10px] text-muted-txt px-1">{l}</div>
-                      <input type="number" value={(row[f] as number) || ''} onChange={e => updateDebtRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
+                      <input type="number" inputMode={f === 'months' ? 'numeric' : 'decimal'} value={(row[f] as number) || ''} onChange={e => updateDebtRow(monthId, row.id, f, parseFloat(e.target.value) || 0)}
                         placeholder={f === 'months' ? '#' : '₪'} min={0} style={{ direction: 'ltr' }}
                         className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                     </div>
@@ -261,7 +262,7 @@ export default function MonthlyPage() {
           ))}
           {data.debts.length === 0 && <p className="text-xs text-muted-txt py-2">אין החזרי חובות</p>}
         </div>
-        <button onClick={() => addDebtRow(monthId)} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף חוב</button>
+        <button onClick={() => addDebtRow(monthId)} className="text-xs min-h-[44px] inline-flex items-center text-muted-txt hover:text-gold transition-colors">+ הוסף חוב</button>
       </div>
 
       {/* Full-width: Savings */}
@@ -279,24 +280,24 @@ export default function MonthlyPage() {
               <div className="hidden sm:grid grid-cols-[1fr_8rem_8rem_1.5rem] gap-2 items-center">
                 <input value={row.name} onChange={e => updateSavingRow(monthId, row.id, 'name', e.target.value)} placeholder="חיסכון"
                   className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                <input type="number" value={row.monthly || ''} onChange={e => updateSavingRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
-                <input type="number" value={row.accumulated || ''} onChange={e => updateSavingRow(monthId, row.id, 'accumulated', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                <input type="number" inputMode="decimal" value={row.monthly || ''} onChange={e => updateSavingRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                <input type="number" inputMode="decimal" value={row.accumulated || ''} onChange={e => updateSavingRow(monthId, row.id, 'accumulated', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                 <button onClick={() => deleteSavingRow(monthId, row.id)} className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
               </div>
               <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <input value={row.name} onChange={e => updateSavingRow(monthId, row.id, 'name', e.target.value)} placeholder="שם החיסכון"
                     className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                  <button onClick={() => deleteSavingRow(monthId, row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+                  <button onClick={() => deleteSavingRow(monthId, row.id)} className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm">×</button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-0.5">
                     <div className="text-[10px] text-muted-txt px-1">הפרשה חודשית ₪</div>
-                    <input type="number" value={row.monthly || ''} onChange={e => updateSavingRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                    <input type="number" inputMode="decimal" value={row.monthly || ''} onChange={e => updateSavingRow(monthId, row.id, 'monthly', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                   </div>
                   <div className="space-y-0.5">
                     <div className="text-[10px] text-muted-txt px-1">סך נצבר ₪</div>
-                    <input type="number" value={row.accumulated || ''} onChange={e => updateSavingRow(monthId, row.id, 'accumulated', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
+                    <input type="number" inputMode="decimal" value={row.accumulated || ''} onChange={e => updateSavingRow(monthId, row.id, 'accumulated', parseFloat(e.target.value) || 0)} placeholder="₪" min={0} style={{ direction: 'ltr' }} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                   </div>
                 </div>
               </div>
@@ -304,7 +305,7 @@ export default function MonthlyPage() {
           ))}
           {data.savings.length === 0 && <p className="text-xs text-muted-txt py-2">אין הפרשות חיסכון</p>}
         </div>
-        <button onClick={() => addSavingRow(monthId)} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף חיסכון</button>
+        <button onClick={() => addSavingRow(monthId)} className="text-xs min-h-[44px] inline-flex items-center text-muted-txt hover:text-gold transition-colors">+ הוסף חיסכון</button>
       </div>
 
       {/* עו"ש — יתרה לאורך החודש */}
@@ -324,6 +325,7 @@ export default function MonthlyPage() {
               <div className="text-xs text-muted-txt font-medium text-center">{p.day} לחודש</div>
               <input
                 type="number"
+                inputMode="decimal"
                 value={data.osh?.[p.key] || ''}
                 onChange={e => updateOsh(monthId, p.key, parseFloat(e.target.value) || 0)}
                 placeholder="₪"
@@ -370,7 +372,7 @@ export default function MonthlyPage() {
           ].map(({ label, val, actual, color }) => (
             <div key={label} className="bg-surface border border-line rounded-xl p-3">
               <div className="text-xs text-muted-txt font-medium mb-1">{label}</div>
-              <div className={`text-lg font-black ${color}`}>{fmt(val)}</div>
+              <div className={`text-lg font-black tabular-nums ${color}`}>{fmt(val)}</div>
               {actual !== null && (
                 <div className="text-xs text-muted-txt mt-0.5">ביצוע: {fmt(actual)}</div>
               )}

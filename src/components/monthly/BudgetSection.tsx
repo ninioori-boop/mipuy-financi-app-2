@@ -33,7 +33,7 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
           {hasActual && (
             <>
               <span className="text-muted-txt">ביצוע: <span className="font-bold text-txt">{fmt(totalActual)}</span></span>
-              <span className={`px-1.5 py-0.5 rounded-full font-bold border text-xs ${diffOk ? 'bg-green-400/10 border-green-400/30 text-green-400' : 'bg-expense/10 border-expense/30 text-expense'}`}>
+              <span className={`px-1.5 py-0.5 rounded-full font-bold border text-xs tabular-nums ${diffOk ? 'bg-green-400/10 border-green-400/30 text-green-400' : 'bg-expense/10 border-expense/30 text-expense'}`}>
                 {diffOk ? '+' : ''}{fmt(diff)}
               </span>
             </>
@@ -56,10 +56,10 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
             <div className="hidden sm:grid grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 items-center">
               <input value={row.name} onChange={e => onUpdate(row.id, 'name', e.target.value)} placeholder="פריט"
                 className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-              <input type="number" value={row.plan || ''} onChange={e => onUpdate(row.id, 'plan', parseFloat(e.target.value) || 0)}
+              <input type="number" inputMode="decimal" value={row.plan || ''} onChange={e => onUpdate(row.id, 'plan', parseFloat(e.target.value) || 0)}
                 placeholder="₪" min={0} style={{ direction: 'ltr' }}
                 className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
-              <input type="number" value={row.actual || ''} onChange={e => onUpdate(row.id, 'actual', parseFloat(e.target.value) || 0)}
+              <input type="number" inputMode="decimal" value={row.actual || ''} onChange={e => onUpdate(row.id, 'actual', parseFloat(e.target.value) || 0)}
                 placeholder="₪" min={0} style={{ direction: 'ltr' }}
                 className="rounded-lg border border-green-400/30 bg-surface px-2 py-1.5 text-sm text-green-400/90 placeholder:text-muted-txt focus:outline-none focus:border-green-400/60 text-left tabular-nums" />
               <button onClick={() => onDelete(row.id)} className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none">×</button>
@@ -70,18 +70,18 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
               <div className="flex items-center gap-2">
                 <input value={row.name} onChange={e => onUpdate(row.id, 'name', e.target.value)} placeholder="פריט"
                   className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
-                <button onClick={() => onDelete(row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
+                <button onClick={() => onDelete(row.id)} className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm">×</button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-0.5">
                   <div className="text-[10px] text-gold/70 px-1">תכנון ₪</div>
-                  <input type="number" value={row.plan || ''} onChange={e => onUpdate(row.id, 'plan', parseFloat(e.target.value) || 0)}
+                  <input type="number" inputMode="decimal" value={row.plan || ''} onChange={e => onUpdate(row.id, 'plan', parseFloat(e.target.value) || 0)}
                     placeholder="₪" min={0} style={{ direction: 'ltr' }}
                     className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
                 </div>
                 <div className="space-y-0.5">
                   <div className="text-[10px] text-green-400/70 px-1">ביצוע ₪</div>
-                  <input type="number" value={row.actual || ''} onChange={e => onUpdate(row.id, 'actual', parseFloat(e.target.value) || 0)}
+                  <input type="number" inputMode="decimal" value={row.actual || ''} onChange={e => onUpdate(row.id, 'actual', parseFloat(e.target.value) || 0)}
                     placeholder="₪" min={0} style={{ direction: 'ltr' }}
                     className="w-full rounded-lg border border-green-400/30 bg-surface px-2 py-1.5 text-sm text-green-400/90 placeholder:text-muted-txt focus:outline-none focus:border-green-400/60 text-left tabular-nums" />
                 </div>
@@ -93,10 +93,10 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
       </div>
 
       <div className="flex items-center justify-between pt-1 border-t border-line">
-        <button onClick={onAdd} className="text-xs text-muted-txt hover:text-gold transition-colors">+ הוסף</button>
+        <button onClick={onAdd} className="text-xs min-h-[44px] inline-flex items-center text-muted-txt hover:text-gold transition-colors">+ הוסף</button>
         <span className="text-xs text-muted-txt">
           תכנון: <span className="font-medium text-gold">{fmt(totalPlan)}</span>
-          {hasActual && <span className="mr-2">ביצוע: <span className="font-medium text-txt">{fmt(totalActual)}</span></span>}
+          {hasActual && <span className="me-2">ביצוע: <span className="font-medium text-txt">{fmt(totalActual)}</span></span>}
         </span>
       </div>
     </div>
