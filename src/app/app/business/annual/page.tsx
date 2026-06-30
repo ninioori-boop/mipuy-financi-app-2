@@ -192,7 +192,7 @@ export default function BusinessAnnualPage() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">📆 תכנון שנתי לעסק</h1>
-            <p className="text-muted-txt text-xs sm:text-sm leading-relaxed">
+            <p className="hidden sm:block text-muted-txt text-xs sm:text-sm leading-relaxed">
               דו&quot;ח רווח והפסד על פני שנה שלמה. הסכומים שנתיים ולפני מע&quot;מ; כל שורה מוצגת גם ÷12 לחודש. מס ומע&quot;מ מחושבים אוטומטית וניתנים לדריסה ידנית.
             </p>
           </div>

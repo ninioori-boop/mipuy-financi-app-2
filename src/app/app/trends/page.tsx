@@ -109,10 +109,10 @@ export default function TrendsPage() {
 
   if (rows.length === 0) {
     return (
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
         <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6">
-          <h1 className="text-2xl font-bold text-gold mb-1">📊 מגמות</h1>
-          <p className="text-muted-txt text-sm">ניתוח שנתי על בסיס נתוני התקציב החודשי</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">📊 מגמות</h1>
+          <p className="hidden sm:block text-muted-txt text-sm">ניתוח שנתי על בסיס נתוני התקציב החודשי</p>
         </div>
         <div className="rounded-xl border border-line bg-surface2 p-8 sm:p-14 text-center">
           <div className="text-4xl sm:text-5xl mb-4">📊</div>
@@ -124,12 +124,12 @@ export default function TrendsPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6">
-        <h1 className="text-2xl font-bold text-gold mb-1">📊 מגמות</h1>
-        <p className="text-muted-txt text-sm">
+        <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">📊 מגמות</h1>
+        <p className="hidden sm:block text-muted-txt text-sm">
           ניתוח שנתי על בסיס {rows.length} חודשים
           {activeMonths > 0 && ` · ${activeMonths} עם ביצוע בפועל`}
         </p>
@@ -158,7 +158,7 @@ export default function TrendsPage() {
       </div>
 
       {/* Chart 1 — Income vs Expenses */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3 sm:space-y-4">
         <h2 className="font-semibold text-txt">💰 הכנסות מול הוצאות</h2>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={incomeExpData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
@@ -175,7 +175,7 @@ export default function TrendsPage() {
       </div>
 
       {/* Chart 2 — Expense breakdown stacked */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3 sm:space-y-4">
         <h2 className="font-semibold text-txt">📋 פירוט הוצאות לפי קטגוריה</h2>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={stackData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
@@ -194,7 +194,7 @@ export default function TrendsPage() {
       </div>
 
       {/* Chart 3 — Monthly cashflow area */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3 sm:space-y-4">
         <h2 className="font-semibold text-txt">📈 תזרים חודשי</h2>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={cashflowData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
@@ -219,7 +219,7 @@ export default function TrendsPage() {
 
       {/* Chart 4 — Cumulative savings (only if savings exist) */}
       {ytdSavings > 0 && (
-        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
+        <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3 sm:space-y-4">
           <h2 className="font-semibold text-txt">🏦 חיסכון מצטבר</h2>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={savingsData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>

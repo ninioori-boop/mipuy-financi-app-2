@@ -189,7 +189,7 @@ export default function BusinessPage() {
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6 space-y-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">🏢 תקציב עסקי</h1>
-          <p className="text-muted-txt text-xs sm:text-sm leading-relaxed">
+          <p className="hidden sm:block text-muted-txt text-xs sm:text-sm leading-relaxed">
             כלי לעצמאים — הפרדה בין תקציב העסק לתקציב הבית. כל הסכומים חודשיים ולפני מע&quot;מ. מס ומע&quot;מ מחושבים אוטומטית, וניתן לדרוס ידנית.
           </p>
         </div>

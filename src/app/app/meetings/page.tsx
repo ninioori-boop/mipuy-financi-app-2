@@ -66,14 +66,14 @@ export default function MeetingsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
       <div className="rounded-xl border border-line bg-surface2 p-5 sm:p-6 space-y-4">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gold">📝 סיכומי פגישות</h1>
-            <p className="text-muted-txt text-sm mt-0.5">תיעוד תהליך הליווי — לפי סוג פגישה</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-gold">📝 סיכומי פגישות</h1>
+            <p className="hidden sm:block text-muted-txt text-sm mt-0.5">תיעוד תהליך הליווי — לפי סוג פגישה</p>
           </div>
         </div>
 
