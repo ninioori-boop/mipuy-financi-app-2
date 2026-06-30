@@ -97,10 +97,18 @@ service cloud.firestore {
 
 ---
 
-## 8. 🛟 גיבוי (מומלץ — לא קיים כרגע)
-אין גיבוי אוטומטי. לרשת ביטחון, שקול ייצוא תקופתי:
-- `gcloud firestore export gs://<bucket>` (דורש bucket ב-GCS), או
-- סקריפט `npm run export:clients` כבר מושך snapshot של כל המשתמשים ל-`clients.md`/`.html` (לא גיבוי מלא, אבל תיעוד מצב).
+## 8. 🛟 גיבוי ושחזור Firestore
+
+**גיבוי אוטומטי — פעיל (מאז 2026-06-30):** Scheduled backups מנוהל, **יומי, שמירה 7 ימים**.
+[Firestore → Disaster Recovery](https://console.firebase.google.com/project/finance-machine-a36e9/firestore/databases/-default-/backups). מגבה את **כל** המסד (כולל קולקציות האפליקציה הישנה). העלות זניחה.
+
+**שחזור (אם נמחקו/הושחתו נתונים):**
+1. [Firestore → Disaster Recovery](https://console.firebase.google.com/project/finance-machine-a36e9/firestore/databases/-default-/backups) → **View all backups** → בחר את הגיבוי מהיום הרצוי.
+2. **Restore** → השחזור יוצר **מסד נתונים חדש** (תן לו מזהה, למשל `restore-2026-06-30`). הוא **לא** דורס את ה‑`(default)` החי — אז זה בטוח.
+3. פתח את המסד המשוחזר, אתר את הנתונים שאבדו, והעתק אותם חזרה ל‑`(default)` (ידנית בקונסולה לכמות קטנה, או דרך סקריפט admin לכמות גדולה).
+4. בתרחיש אסון מלא בלבד: אפשר להפנות את האפליקציה למסד המשוחזר במקום להעתיק.
+
+**עוד תיעוד מצב (לא גיבוי):** `npm run export:clients` מושך snapshot של כל המשתמשים ל‑`clients.md`/`.html`.
 
 ---
 
