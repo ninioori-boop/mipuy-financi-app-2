@@ -1,6 +1,8 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import type { BudgetRow } from '@/stores/monthlyStore'
+import { useClientMode } from '@/hooks/useClientMode'
 
 function fmt(n: number) {
   return '₪' + Math.round(n).toLocaleString('he-IL')
@@ -23,11 +25,21 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
   const diff        = isIncome ? totalActual - totalPlan : totalPlan - totalActual
   const diffOk      = diff >= 0
 
+  // In the in-app client view, sections start COLLAPSED → a short, clean summary
+  // (each header shows its totals); tap a header to expand its rows. Desktop/
+  // advisor keeps everything open.
+  const clientMode = useClientMode()
+  const [open, setOpen] = useState(true)
+  useEffect(() => { if (clientMode) setOpen(false) }, [clientMode])
+
   return (
     <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="font-semibold text-txt">{icon} {title}</h2>
+      {/* Header — tap to collapse/expand */}
+      <div onClick={() => setOpen(o => !o)} className="flex items-center justify-between flex-wrap gap-2 cursor-pointer select-none">
+        <h2 className="font-semibold text-txt flex items-center gap-1.5">
+          <span className="text-muted-txt text-xs w-3">{open ? '▾' : '▸'}</span>
+          {icon} {title}
+        </h2>
         <div className="flex items-center gap-2 text-xs flex-wrap">
           <span className="text-muted-txt">תכנון: <span className="font-bold text-gold">{fmt(totalPlan)}</span></span>
           {hasActual && (
@@ -41,6 +53,8 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
         </div>
       </div>
 
+      {open && (
+      <>
       {/* Desktop column headers */}
       <div className="hidden sm:grid grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 px-1 text-xs text-muted-txt font-medium">
         <span>פריט</span>
@@ -99,6 +113,8 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
           {hasActual && <span className="me-2">ביצוע: <span className="font-medium text-txt">{fmt(totalActual)}</span></span>}
         </span>
       </div>
+      </>
+      )}
     </div>
   )
 }
