@@ -23,6 +23,7 @@ import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
 import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
 import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
+import { useClientProfileStore } from '@/stores/clientProfileStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -78,6 +79,9 @@ export interface Snapshot {
   categoryBudgets: {
     budgets: ReturnType<typeof useCategoryBudgetStore.getState>['budgets']
   }
+  clientProfile: {
+    hasBusiness: ReturnType<typeof useClientProfileStore.getState>['hasBusiness']
+  }
   business: {
     businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
     revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
@@ -121,6 +125,7 @@ export function collectSnapshot(): Snapshot {
   const mt = useMeetingsStore.getState()
   const el = useExpenseLogStore.getState()
   const cb = useCategoryBudgetStore.getState()
+  const clp = useClientProfileStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
 
@@ -152,6 +157,7 @@ export function collectSnapshot(): Snapshot {
     meetings: { meetings: mt.meetings },
     expenseLog: { entries: el.entries },
     categoryBudgets: { budgets: cb.budgets },
+    clientProfile: { hasBusiness: clp.hasBusiness },
     business: {
       businessType: b.businessType,
       revenue: b.revenue, cogs: b.cogs, opex: b.opex,
@@ -337,6 +343,14 @@ export function applySnapshot(raw: unknown): void {
     useCategoryBudgetStore.setState({ budgets })
   }
 
+  // clientProfile — the one-time "has business" answer. Accept only a real
+  // boolean; anything else (incl. missing key on old snapshots) leaves the
+  // default null, so the client is asked once.
+  if (isObject(raw.clientProfile)) {
+    const hb = (raw.clientProfile as { hasBusiness?: unknown }).hasBusiness
+    if (typeof hb === 'boolean') useClientProfileStore.setState({ hasBusiness: hb })
+  }
+
   // business
   if (isObject(raw.business)) {
     const b = raw.business as Partial<Snapshot['business']>
@@ -406,6 +420,7 @@ export function resetAllStores(): void {
   useMeetingsStore.setState({ meetings: [] })
   useExpenseLogStore.setState({ entries: [] })
   useCategoryBudgetStore.setState({ budgets: {} })
+  useClientProfileStore.setState({ hasBusiness: null })
   useBusinessStore.setState({
     businessType: DEFAULT_BUSINESS.businessType,
     revenue: [], cogs: [], opex: [],
