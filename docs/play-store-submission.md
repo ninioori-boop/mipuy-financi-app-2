@@ -87,22 +87,23 @@ or shared with any third party.
 
 ---
 
-## 🖼️ נכסים שאתה צריך לספק (גרפיקה)
-| נכס | מידות | מקור |
+## 🖼️ נכסים — ✅ מוכנים ב-`play-store-assets/`
+| נכס | מידות | קובץ |
 |-----|-------|------|
-| אייקון חנות | 512×512 PNG | לשנות גודל של `public/logo.png` ל-512×512 |
-| צילומי מסך טלפון (2–8) | ~1080×1920 | מהאפליקציה: מסך ראשי (סטטוס+עסקאות+פילוח), מסך חיבור, דיאלוג הוצאה ידנית |
-| Feature graphic (אופציונלי) | 1024×500 | מהמותג (זהב/אנתרציט) |
+| אייקון חנות | 512×512 PNG | ✅ `play-store-assets/icon-512-clean.png` (חצים בלבד — **בלי שגיאת הכתיב** שבלוגו) |
+| Feature graphic | 1024×500 PNG | ✅ `play-store-assets/feature-graphic-1024x500.png` (חצים נקיים + מותג) |
+| צילומי מסך טלפון | 412×915 PNG | ✅ `play-store-assets/screenshots/` — בית · תיעוד הוצאות · התנהלות עו"ש |
 
-> לצילומי מסך: פתח את האפליקציה במכשיר, צלם, ושלח לי — או נשתמש בצילומים שכבר יש.
+> צילומי המסך נוצרו מהאפליקציה במצב-לקוח (נקי). אפשר להעלות אותם כמו שהם, או לצלם מהמכשיר ל-1080×1920 לרזולוציה גבוהה יותר.
+> ⚠️ אל תשתמש ב-`icon-512.png` הישן (יש בו את שגיאת "ECNOMIST"). השתמש ב-`icon-512-clean.png`.
 
 ---
 
 ## סדר הפעולות ב-Play Console (חלק ג׳)
 1. פתיחת חשבון מפתח ($25 חד-פעמי) → **play.google.com/console**.
 2. **Create app** → שם, עברית, Free, אישור מדיניות.
-3. **Internal testing** → Create release → העלאת ה-AAB (`mipuy-expense-tracker-v3.0.aab`).
-4. מילוי: App content → Privacy policy / Data safety / Permissions / Content rating.
+3. **Internal testing** → Create release → העלאת ה-AAB (`mipuy-expense-tracker-v3.3.aab`, מ-Releases).
+4. מילוי: App content → Privacy policy / Data safety / Permissions / Content rating / **App access** (חשבון בדיקה לבודקים — מלכוד נפוץ).
 5. הוספת מיילים של לקוחות-בודקים → שיתוף קישור הצטרפות.
 6. Submit לבדיקה.
 
