@@ -6,8 +6,22 @@ import { usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
+import { useSyncStore } from '@/stores/syncStore'
+import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { hasLabAccess } from '@/lib/labAccess'
 import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
+
+// Curated client-mobile tab set (shown in the in-app WebView's bottom nav).
+// Business tabs are appended only when the client has a business. Annual is
+// intentionally excluded until its mobile pass is done.
+const CLIENT_TABS = [
+  { href: '/app/expenses',    emoji: '🧾', label: 'הוצאות' },
+  { href: '/app/monthly/jan', emoji: '📅', label: 'חודשי' },
+  { href: '/app/trends',      emoji: '📊', label: 'מגמות' },
+  { href: '/app/goals',       emoji: '🎯', label: 'יעדים' },
+  { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
+]
+const BUSINESS_TAB = { href: '/app/business', emoji: '🏢', label: 'עסק' }
 
 type TabItem  = { href: string; emoji: string; label: string; advisorOnly?: boolean }
 type TabGroup = { title: string; items: TabItem[] }
@@ -82,12 +96,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     try { setEmbed(sessionStorage.getItem('embedMode') === '1') } catch {}
   }, [])
 
+  // Client-mode profile (gates the business tabs) + hydration flag, so we only
+  // ask the "has business?" question once the real saved value has loaded.
+  const hasBusiness = useClientProfileStore(s => s.hasBusiness)
+  const setHasBusiness = useClientProfileStore(s => s.setHasBusiness)
+  const hydrated = useSyncStore(s => s.hydrated)
+
   async function handleSignOut() {
     await signOut(auth)
   }
 
   function isActive(href: string) {
     if (href === '/app/monthly/jan') return pathname.startsWith('/app/monthly')
+    if (href === '/app/business')    return pathname.startsWith('/app/business')
     return pathname === href
   }
 
@@ -133,9 +154,69 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </nav>
   )
 
-  // Embed (in-app WebView): render only the tab content, no header/drawer.
+  // Embed (in-app WebView) = client mode: no header/drawer, a slim bottom nav of
+  // the curated client tabs. Business tabs appear only if the client has one.
   if (embed) {
-    return <main className="min-h-screen p-3 sm:p-6">{children}</main>
+    // Wait for the saved profile to load before deciding what to show — avoids
+    // flashing the "has business?" question to a client who already answered.
+    if (!hydrated) {
+      return (
+        <div className="min-h-screen bg-surface flex items-center justify-center">
+          <span className="size-8 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+        </div>
+      )
+    }
+
+    // One-time question — gates the business tabs.
+    if (hasBusiness === null) {
+      return (
+        <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-5 p-6 text-center">
+          <div className="text-5xl">🏢</div>
+          <h1 className="text-xl font-bold text-gold">יש לך עסק?</h1>
+          <p className="text-muted-txt text-sm max-w-xs">
+            כדי שנציג לך גם תקציב עסקי ותכנון שנתי עסקי. אפשר לשנות בהמשך.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setHasBusiness(true)}
+              className="bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-xl px-6 py-3 font-semibold transition-colors min-h-[44px]"
+            >
+              כן, יש לי עסק
+            </button>
+            <button
+              onClick={() => setHasBusiness(false)}
+              className="bg-surface2 hover:bg-surface3 text-txt border border-line rounded-xl px-6 py-3 font-semibold transition-colors min-h-[44px]"
+            >
+              לא
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    const clientTabs = hasBusiness ? [...CLIENT_TABS, BUSINESS_TAB] : CLIENT_TABS
+    return (
+      <div className="flex flex-col min-h-screen">
+        <main className="flex-1 p-3 sm:p-6 pb-24">{children}</main>
+        <nav className="fixed bottom-0 inset-x-0 bg-surface2/95 backdrop-blur border-t border-line flex items-stretch z-40">
+          {clientTabs.map(t => {
+            const active = isActive(t.href)
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] transition-colors ${
+                  active ? 'text-gold' : 'text-muted-txt hover:text-txt'
+                }`}
+              >
+                <span className="text-lg leading-none">{t.emoji}</span>
+                <span>{t.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+      </div>
+    )
   }
 
   return (
