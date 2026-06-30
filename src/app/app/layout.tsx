@@ -154,8 +154,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </nav>
   )
 
-  // Embed (in-app WebView) = client mode: no header/drawer, a slim bottom nav of
-  // the curated client tabs. Business tabs appear only if the client has one.
+  // Embed (in-app WebView) = client mode: a slim header with a ☰ side menu of the
+  // curated client tabs — like the system. Business tabs appear only with a business.
   if (embed) {
     // Wait for the saved profile to load before deciding what to show — avoids
     // flashing the "has business?" question to a client who already answered.
@@ -197,24 +197,64 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const clientTabs = hasBusiness ? [...CLIENT_TABS, BUSINESS_TAB] : CLIENT_TABS
     return (
       <div className="flex flex-col min-h-screen">
-        <main className="flex-1 p-3 sm:p-6 pb-24">{children}</main>
-        <nav className="fixed bottom-0 inset-x-0 bg-surface2/95 backdrop-blur border-t border-line flex items-stretch z-40">
-          {clientTabs.map(t => {
-            const active = isActive(t.href)
-            return (
-              <Link
-                key={t.href}
-                href={t.href}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] transition-colors ${
-                  active ? 'text-gold' : 'text-muted-txt hover:text-txt'
-                }`}
-              >
-                <span className="text-lg leading-none">{t.emoji}</span>
-                <span>{t.label}</span>
-              </Link>
-            )
-          })}
-        </nav>
+        {/* Slim header with the ☰ menu — same idea as the system */}
+        <header className="border-b border-line bg-surface2 px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="פתח תפריט"
+            className="text-txt text-xl leading-none w-10 h-10 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
+          >
+            ☰
+          </button>
+          <span className="font-bold text-gold tracking-wide">הכלכלן של הבית</span>
+        </header>
+
+        {/* Side drawer — RTL, opens from the right (like the system) */}
+        {drawerOpen && (
+          <>
+            <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setDrawerOpen(false)} />
+            <aside className="fixed top-0 bottom-0 end-0 w-72 max-w-[85vw] bg-surface2 border-s border-line z-50 overflow-y-auto flex flex-col shadow-2xl">
+              <div className="flex items-center justify-between p-4 border-b border-line">
+                <span className="font-bold text-gold">תפריט</span>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label="סגור תפריט"
+                  className="text-txt text-lg leading-none w-9 h-9 flex items-center justify-center rounded hover:bg-surface3 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <nav className="flex flex-col gap-0.5 p-3">
+                {clientTabs.map(t => {
+                  const active = isActive(t.href)
+                  return (
+                    <Link
+                      key={t.href}
+                      href={t.href}
+                      className={[
+                        'flex items-center gap-3 px-3 py-3 rounded-lg text-sm transition-colors',
+                        active ? 'bg-gold/15 text-gold font-semibold' : 'text-txt/80 hover:bg-surface3 hover:text-txt',
+                      ].join(' ')}
+                    >
+                      <span className="text-base leading-none">{t.emoji}</span>
+                      <span>{t.label}</span>
+                    </Link>
+                  )
+                })}
+                {/* Settings — bridges to the native app's settings screen */}
+                <a
+                  href="mipuytracker://settings"
+                  className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-line pt-4 rounded-lg text-sm text-muted-txt hover:bg-surface3 hover:text-txt transition-colors"
+                >
+                  <span className="text-base leading-none">⚙️</span>
+                  <span>הגדרות</span>
+                </a>
+              </nav>
+            </aside>
+          </>
+        )}
+
+        <main className="flex-1 p-3 sm:p-6">{children}</main>
       </div>
     )
   }
