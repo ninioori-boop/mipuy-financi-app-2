@@ -399,10 +399,14 @@ export default function ExpensesPage() {
                       <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
                       <button
                         onClick={() => {
-                          if (confirm(`למחוק את ההוצאה?\n${icon(e.category)} ${e.category} · ${fmt(e.amount)}`)) {
-                            remove(e.id)
-                            toast.success('ההוצאה נמחקה')
-                          }
+                          const gone = e
+                          remove(e.id)
+                          toast.success('ההוצאה נמחקה', {
+                            action: {
+                              label: 'ביטול',
+                              onClick: () => add({ date: gone.date, amount: gone.amount, category: gone.category, note: gone.note }),
+                            },
+                          })
                         }}
                         className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-expense active:text-expense sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"
                         title="מחק הוצאה"
