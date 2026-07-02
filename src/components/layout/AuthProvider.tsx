@@ -22,7 +22,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
       setAuthReady(true)
 
-      if (!user && !pathname.startsWith('/auth') && !pathname.startsWith('/privacy') && !pathname.startsWith('/connect')) {
+      if (!user && !pathname.startsWith('/auth') && !pathname.startsWith('/privacy') && !pathname.startsWith('/connect') && !pathname.startsWith('/delete-account')) {
         router.replace('/auth')
       }
       if (user && pathname.startsWith('/auth')) {
