@@ -398,9 +398,15 @@ export default function ExpensesPage() {
                       </div>
                       <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
                       <button
-                        onClick={() => remove(e.id)}
-                        className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none shrink-0"
-                        title="מחק"
+                        onClick={() => {
+                          if (confirm(`למחוק את ההוצאה?\n${icon(e.category)} ${e.category} · ${fmt(e.amount)}`)) {
+                            remove(e.id)
+                            toast.success('ההוצאה נמחקה')
+                          }
+                        }}
+                        className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-expense active:text-expense sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"
+                        title="מחק הוצאה"
+                        aria-label="מחק הוצאה"
                       >
                         ×
                       </button>
