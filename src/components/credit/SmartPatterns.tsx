@@ -196,7 +196,13 @@ function SectionBlock({
   )
 }
 
-export function SmartPatterns({ transactions }: { transactions: Transaction[] }) {
+// showSend (default true): render the per-item "send to mapping" buttons
+// (קבועות/מנויים/ביטוחים) — the credit tab's carve-into-mapping flow.
+// In the import tab we pass showSend={false}: the section becomes pure
+// display-only insight. Import routes everything to the chosen month's
+// budget through its own "📤 שלח ביצוע לתקציב" CTA, so leaking single
+// merchants into mapping (and from there into every month's plan) is wrong.
+export function SmartPatterns({ transactions, showSend = true }: { transactions: Transaction[]; showSend?: boolean }) {
   const p = detectPatterns(transactions)
   const importFromBank = useMappingStore(s => s.importFromBank)
   // Source-of-truth set of merchants already carved out into mapping. Built
@@ -360,7 +366,11 @@ export function SmartPatterns({ transactions }: { transactions: Transaction[] })
   // re-offering the same merchant once it's been moved). Only sections with
   // sendActions get this treatment; refunds/installments are reference info,
   // not actionable, so they pass through unchanged.
+  // Display-only mode (showSend=false, import tab): strip every section's
+  // sendActions so no buttons render, and skip the already-mapped filtering —
+  // we show every detected pattern as pure insight, unrelated to mapping.
   const filteredSections = sections.map(s => {
+    if (!showSend) return { ...s, sendActions: undefined, hidden: 0 }
     if (!s.sendActions) return { ...s, hidden: 0 }
     const filtered = s.items.filter(it => !alreadyMappedKeys.has(normalizeForLookup(it.desc)))
     return { ...s, items: filtered, hidden: s.items.length - filtered.length }
