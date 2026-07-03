@@ -22,6 +22,17 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
     }
 
+    // ── Version history — per-user snapshot subcollection ─────────────
+    // Rolling backups (up to 20 per user) written after each successful save,
+    // throttled to ~one every 5 minutes. Same protection as the parent user
+    // doc: owner-only + invite-only allowlist. Additive collection — the old
+    // live app never touches it, so zero-risk to it.
+    match /users/{userId}/versions/{versionId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+    }
+
     // ── Shared category-learning DB ───────────────────────────────────
     // Cross-account merchant→category memory. Reads open to any signed-in user;
     // writes can only add/update keys inside `db`, never remove keys or replace

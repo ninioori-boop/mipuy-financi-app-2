@@ -1,4 +1,7 @@
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import {
+  doc, getDoc, setDoc, serverTimestamp,
+  addDoc, collection, query, orderBy, limit, getDocs, deleteDoc,
+} from 'firebase/firestore'
 import { db } from './firebase'
 
 /* ── User data ──────────────────────────────────────────────────── */
@@ -23,6 +26,54 @@ export async function loadUserData(uid: string): Promise<LoadedUserData | null> 
     ? raw.updatedAt.toMillis()
     : 0
   return { data: raw.data, updatedAt }
+}
+
+/* ── Version history ────────────────────────────────────────────── */
+// Rolling per-user backup subcollection: /users/{uid}/versions/{versionId}.
+// The debounced save in DataSync creates a version at most once per 5 minutes
+// after a successful write; only the last MAX_VERSIONS are kept — anything
+// older is deleted. Rules mirror the parent user doc (owner+allowlist).
+
+export const MAX_VERSIONS = 20
+
+export interface VersionSummary {
+  id:      string
+  savedAt: number  // epoch ms (0 if serverTimestamp hadn't landed yet)
+  size:    number  // bytes of the JSON snapshot
+}
+
+export async function createVersion(uid: string, snapshot: unknown, size: number): Promise<void> {
+  const col = collection(db, 'users', uid, 'versions')
+  await addDoc(col, { savedAt: serverTimestamp(), snapshot, size })
+  // Trim asynchronously — creation succeeds even if trim fails. A stray extra
+  // version is harmless; the next createVersion will trim it.
+  trimVersions(uid).catch(() => {})
+}
+
+async function trimVersions(uid: string): Promise<void> {
+  const col  = collection(db, 'users', uid, 'versions')
+  // Fetch id + savedAt for ALL versions (no limit) so we can drop everything
+  // beyond MAX_VERSIONS in one pass. In practice this is ≤ 21 docs.
+  const snap = await getDocs(query(col, orderBy('savedAt', 'desc')))
+  const excess = snap.docs.slice(MAX_VERSIONS)
+  await Promise.all(excess.map(d => deleteDoc(d.ref)))
+}
+
+export async function listVersions(uid: string): Promise<VersionSummary[]> {
+  const col  = collection(db, 'users', uid, 'versions')
+  const snap = await getDocs(query(col, orderBy('savedAt', 'desc'), limit(MAX_VERSIONS)))
+  return snap.docs.map(d => {
+    const data = d.data()
+    const ts   = typeof data.savedAt?.toMillis === 'function' ? data.savedAt.toMillis() : 0
+    const size = typeof data.size === 'number' ? data.size : 0
+    return { id: d.id, savedAt: ts, size }
+  })
+}
+
+export async function getVersion(uid: string, versionId: string): Promise<unknown | null> {
+  const snap = await getDoc(doc(db, 'users', uid, 'versions', versionId))
+  if (!snap.exists()) return null
+  return snap.data().snapshot ?? null
 }
 
 /* ── Shared category-learning DB ────────────────────────────────── */
