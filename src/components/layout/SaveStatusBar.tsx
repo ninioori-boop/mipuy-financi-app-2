@@ -16,6 +16,7 @@ export function SaveStatusBar() {
   const status        = useSyncStore(s => s.status)
   const lastSavedAt   = useSyncStore(s => s.lastSavedAt)
   const errorMessage  = useSyncStore(s => s.errorMessage)
+  const isDirty       = useSyncStore(s => s.isDirty)
   const user          = useAuthStore(s => s.user)
   const authLoading   = useAuthStore(s => s.loading)
 
@@ -55,12 +56,6 @@ export function SaveStatusBar() {
     pillBorder = 'border-gold/40'
     textColor  = 'text-gold'
     label      = 'שומר…'
-  } else if (status === 'saved') {
-    dotColor   = 'bg-green-400'
-    pillBg     = 'bg-green-400/10'
-    pillBorder = 'border-green-400/30'
-    textColor  = 'text-green-400'
-    label      = lastSavedAt ? `נשמר ${timeAgo(lastSavedAt)}` : 'נשמר'
   } else if (status === 'error') {
     dotColor   = 'bg-expense'
     pillBg     = 'bg-expense/10'
@@ -73,6 +68,21 @@ export function SaveStatusBar() {
     pillBorder = 'border-yellow-400/30'
     textColor  = 'text-yellow-300'
     label      = 'מצב לא מקוון — שמירה מושהית'
+  } else if (isDirty) {
+    // Explicit "there are changes waiting to be saved" signal. Kept between
+    // the last keystroke and the debounced save landing (up to 2s), and
+    // also shown when the user typed more while a save was in flight.
+    dotColor   = 'bg-orange-400 animate-pulse'
+    pillBg     = 'bg-orange-400/10'
+    pillBorder = 'border-orange-400/30'
+    textColor  = 'text-orange-300'
+    label      = 'שינויים לא-שמורים…'
+  } else if (status === 'saved') {
+    dotColor   = 'bg-green-400'
+    pillBg     = 'bg-green-400/10'
+    pillBorder = 'border-green-400/30'
+    textColor  = 'text-green-400'
+    label      = lastSavedAt ? `נשמר ${timeAgo(lastSavedAt)}` : 'נשמר'
   } else if (lastSavedAt) {
     dotColor   = 'bg-green-400/70'
     pillBg     = 'bg-green-400/5'

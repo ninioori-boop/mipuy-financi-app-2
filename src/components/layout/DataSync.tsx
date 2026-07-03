@@ -34,8 +34,41 @@ import { saveUserData, loadUserData, loadSharedLearnedDB } from '@/lib/firestore
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 
-const DEBOUNCE_MS = 2000
-const MAX_BYTES   = 900_000  // ≈900KB; Firestore doc hard cap is ~1MB
+const DEBOUNCE_MS       = 2000
+const BACKUP_DEBOUNCE_MS = 500     // localStorage mirror — faster than the network save
+const MAX_BYTES         = 900_000  // ≈900KB; Firestore doc hard cap is ~1MB
+// Server clock skew tolerance: only offer restore when localStorage is
+// meaningfully newer than the Firestore doc (5s buffer avoids false positives).
+const RESTORE_SKEW_MS   = 5_000
+
+// localStorage key for the per-user snapshot backup. Kept per-uid so
+// switching accounts on the same device doesn't cross the streams.
+const backupKey = (uid: string) => `snapshot-backup:${uid}`
+
+interface LocalBackup {
+  ts:       number
+  snapshot: unknown
+}
+
+function readLocalBackup(uid: string): LocalBackup | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(backupKey(uid))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as LocalBackup
+    if (typeof parsed?.ts !== 'number' || !parsed.snapshot) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeLocalBackup(uid: string, snapshot: unknown) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(backupKey(uid), JSON.stringify({ ts: Date.now(), snapshot }))
+  } catch { /* quota exceeded — non-fatal, network save is still primary */ }
+}
 
 export function DataSync({ children }: { children: React.ReactNode }) {
   const user            = useAuthStore(s => s.user)
@@ -48,7 +81,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const markSaved       = useSyncStore(s => s.markSaved)
 
   const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const backupTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
+  const lastBackupJson  = useRef<string>('')
   // Cached Firebase ID token — needed by the beacon-save handler at tab close
   // (sendBeacon runs synchronously; we can't await getIdToken() there).
   const cachedIdToken   = useRef<string>('')
@@ -88,13 +123,46 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       .catch(() => {})
 
     loadUserData(user.uid)
-      .then(data => {
+      .then(result => {
         if (cancelled) return
-        if (data) applySnapshot(data)
+        if (result?.data) applySnapshot(result.data)
         // baseline snapshot prevents an immediate auto-save right after load
         lastSavedJson.current = JSON.stringify(collectSnapshot())
+        // Seed the localStorage-backup baseline too so a fresh load doesn't
+        // immediately trigger a redundant mirror write.
+        lastBackupJson.current = lastSavedJson.current
         setHydrated(true)
         setStatus('idle')
+
+        // Safety-net restore: if there's a localStorage backup that's newer
+        // than what Firestore returned, offer to reapply it. Covers the case
+        // where the previous session ended before Firestore was updated
+        // (tab crash, closed within the 2s debounce, beacon rejected, etc.).
+        const uid = user.uid
+        const backup = readLocalBackup(uid)
+        const remoteTs = result?.updatedAt ?? 0
+        if (backup && backup.ts > remoteTs + RESTORE_SKEW_MS) {
+          const label = new Date(backup.ts).toLocaleString('he-IL', {
+            hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit',
+          })
+          toast.info(
+            `💾 נמצא גיבוי מקומי חדש יותר מהענן (${label}) — לשחזר?`,
+            {
+              duration: Infinity,
+              closeButton: true,
+              action: {
+                label: 'שחזר',
+                onClick: () => {
+                  applySnapshot(backup.snapshot)
+                  // Force the next debounced save to push this restored state
+                  // upstream so the local + cloud converge.
+                  lastSavedJson.current = ''
+                  toast.success('✅ הנתונים שוחזרו מהגיבוי המקומי')
+                },
+              },
+            },
+          )
+        }
       })
       .catch(err => {
         if (cancelled) return
@@ -109,11 +177,27 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true }
   }, [user, authLoading, setStatus, setHydrated, retryCount])
 
-  // ── 2. Subscribe to data stores → debounced save ──
+  // ── 2. Subscribe to data stores → debounced save + local backup ──
   useEffect(() => {
     if (!user || !hydrated) return
 
     const triggerSave = () => {
+      // Flip isDirty (only if not already dirty — avoids re-renders on every keystroke).
+      if (!useSyncStore.getState().isDirty) useSyncStore.getState().setDirty(true)
+
+      // ── Local safety-net backup (500ms debounce, sync write, no network).
+      // This is the "always latest" copy. Even if Firestore fails, the tab
+      // crashes, or the beacon is blocked, next login can restore from here.
+      if (backupTimer.current) clearTimeout(backupTimer.current)
+      backupTimer.current = setTimeout(() => {
+        const snap = collectSnapshot()
+        const json = JSON.stringify(snap)
+        if (json === lastBackupJson.current) return
+        writeLocalBackup(user.uid, snap)
+        lastBackupJson.current = json
+      }, BACKUP_DEBOUNCE_MS)
+
+      // ── Firestore debounced save (unchanged from before) ──
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
         // Belt-and-suspenders: even if the cleanup race somehow leaves a stale
@@ -125,7 +209,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
 
         const snap = collectSnapshot()
         const json = JSON.stringify(snap)
-        if (json === lastSavedJson.current) return  // no real change
+        if (json === lastSavedJson.current) {
+          // Nothing to write — we're already clean.
+          if (useSyncStore.getState().isDirty) useSyncStore.getState().setDirty(false)
+          return
+        }
 
         const size = snapshotSize(snap)
         if (size > MAX_BYTES) {
@@ -143,6 +231,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           await saveUserData(user.uid, snap)
           lastSavedJson.current = json
           markSaved()
+          // Only clear the dirty flag if nothing else changed WHILE the save
+          // was in flight. If it did, isDirty stays true — the next debounce
+          // will catch it up.
+          const nowJson = JSON.stringify(collectSnapshot())
+          if (nowJson === json) useSyncStore.getState().setDirty(false)
         } catch (err) {
           setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
         }
@@ -165,7 +258,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubs.forEach(unsub => unsub())
-      if (saveTimer.current) clearTimeout(saveTimer.current)
+      if (saveTimer.current)   clearTimeout(saveTimer.current)
+      if (backupTimer.current) clearTimeout(backupTimer.current)
     }
   }, [user, hydrated, setStatus, markSaved])
 
@@ -238,13 +332,22 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   // which the browser guarantees to deliver even mid-close.
   useEffect(() => {
     if (!user || !hydrated) return
+    const uid = user.uid
 
     function flushIfDirty() {
       const snap = collectSnapshot()
       const json = JSON.stringify(snap)
       if (json === lastSavedJson.current) return   // nothing to save
+
+      // FIRST: mirror to localStorage synchronously. This is our ironclad
+      // guarantee — even if the network beacon is blocked/refused/offline,
+      // the next login on this device can restore from here. Runs even if
+      // we don't have a token to send the beacon.
+      writeLocalBackup(uid, snap)
+      lastBackupJson.current = json
+
       const token = cachedIdToken.current
-      if (!token) return                             // can't authenticate; skip
+      if (!token) return                             // can't authenticate; local backup will save us
 
       const size = snapshotSize(snap)
       if (size > MAX_BYTES) return                   // same guard as the debounced save
