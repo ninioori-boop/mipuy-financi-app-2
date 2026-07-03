@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useAuthStore }    from '@/stores/authStore'
 import { useSyncStore }    from '@/stores/syncStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
@@ -48,6 +49,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
 
   const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
+  // Cached Firebase ID token — needed by the beacon-save handler at tab close
+  // (sendBeacon runs synchronously; we can't await getIdToken() there).
+  const cachedIdToken   = useRef<string>('')
   const [retryCount, setRetryCount] = useState(0)
 
   // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
@@ -202,6 +206,115 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     return () => {
       window.removeEventListener('offline', onOffline)
       window.removeEventListener('online',  onOnline)
+    }
+  }, [])
+
+  // ── 5. Keep the Firebase ID token cached (for the beacon flush) ──
+  // getIdToken() is async and does a fetch — can't run inside the pagehide
+  // handler because sendBeacon must fire synchronously. Refresh proactively
+  // every 30 min; Firebase tokens are valid for 60 min so we always have a
+  // fresh one when the tab closes.
+  useEffect(() => {
+    if (!user) { cachedIdToken.current = ''; return }
+    let cancelled = false
+    async function refresh() {
+      if (!user) return
+      try {
+        const t = await user.getIdToken()
+        if (!cancelled) cachedIdToken.current = t
+      } catch { /* ignore — beacon flush will simply skip until we get one */ }
+    }
+    refresh()
+    const id = setInterval(refresh, 30 * 60 * 1000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [user])
+
+  // ── 6. Tab-close flush via sendBeacon ──
+  // The 2s debounce is great for reducing writes during normal work, but
+  // it's catastrophic if the user closes the tab within that window — the
+  // pending timer dies with the tab and the write never happens. This
+  // handler catches that: on pagehide OR when the tab becomes hidden, if
+  // there are unsaved changes we push the snapshot via navigator.sendBeacon,
+  // which the browser guarantees to deliver even mid-close.
+  useEffect(() => {
+    if (!user || !hydrated) return
+
+    function flushIfDirty() {
+      const snap = collectSnapshot()
+      const json = JSON.stringify(snap)
+      if (json === lastSavedJson.current) return   // nothing to save
+      const token = cachedIdToken.current
+      if (!token) return                             // can't authenticate; skip
+
+      const size = snapshotSize(snap)
+      if (size > MAX_BYTES) return                   // same guard as the debounced save
+
+      try {
+        const payload = JSON.stringify({ token, snapshot: snap })
+        const blob = new Blob([payload], { type: 'application/json' })
+        // sendBeacon returns false if the browser refused to queue it (rare —
+        // usually only if the payload is above browser's beacon size limit).
+        // Fall back to fetch({keepalive:true}) which has similar guarantees.
+        const ok = navigator.sendBeacon('/api/save-snapshot', blob)
+        if (!ok) {
+          fetch('/api/save-snapshot', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    payload,
+            keepalive: true,
+          }).catch(() => {})
+        }
+        // Optimistic update — assume it went through, so a subsequent hide
+        // event in the same session doesn't re-send an identical payload.
+        lastSavedJson.current = json
+      } catch { /* worst case, the debounced save on next re-open still fires */ }
+    }
+
+    function onPageHide() { flushIfDirty() }
+    function onVisibility() {
+      if (document.visibilityState === 'hidden') flushIfDirty()
+    }
+
+    window.addEventListener('pagehide',            onPageHide)
+    document.addEventListener('visibilitychange',  onVisibility)
+    return () => {
+      window.removeEventListener('pagehide',           onPageHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [user, hydrated])
+
+  // ── 7. Prominent error notifications ──
+  // The SaveStatusBar pill is easy to miss when the advisor is heads-down
+  // with a client. On any transition INTO 'error' or 'offline', pop a
+  // persistent toast — it stays until the user acknowledges it or the
+  // status transitions away.
+  useEffect(() => {
+    let currentToastId: string | number | null = null
+    let lastStatus = useSyncStore.getState().status
+    const unsub = useSyncStore.subscribe(state => {
+      if (state.status === lastStatus) return
+      // Transitioning OUT of a bad state → clear any lingering toast.
+      if ((lastStatus === 'error' || lastStatus === 'offline') && currentToastId != null) {
+        toast.dismiss(currentToastId)
+        currentToastId = null
+      }
+      // Transitioning INTO a bad state → show one.
+      if (state.status === 'error') {
+        currentToastId = toast.error(
+          `⚠️ שגיאת שמירה: ${state.errorMessage ?? 'שינויים אחרונים ייתכן שלא נשמרו'}. אל תסגור את הטאב — נסה שוב.`,
+          { duration: Infinity, closeButton: true },
+        )
+      } else if (state.status === 'offline') {
+        currentToastId = toast.warning(
+          '📡 אין חיבור לאינטרנט — שינויים חדשים לא יישמרו עד שהחיבור יחזור.',
+          { duration: Infinity, closeButton: true },
+        )
+      }
+      lastStatus = state.status
+    })
+    return () => {
+      unsub()
+      if (currentToastId != null) toast.dismiss(currentToastId)
     }
   }, [])
 
