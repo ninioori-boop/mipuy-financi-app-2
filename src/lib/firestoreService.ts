@@ -7,10 +7,22 @@ export async function saveUserData(uid: string, data: unknown): Promise<void> {
   await setDoc(doc(db, 'users', uid), { data, updatedAt: serverTimestamp() }, { merge: true })
 }
 
-export async function loadUserData(uid: string): Promise<unknown | null> {
+export interface LoadedUserData {
+  data:      unknown
+  updatedAt: number   // epoch ms; 0 if the doc predates serverTimestamp tracking
+}
+
+export async function loadUserData(uid: string): Promise<LoadedUserData | null> {
   const snap = await getDoc(doc(db, 'users', uid))
-  if (snap.exists() && snap.data().data) return snap.data().data
-  return null
+  if (!snap.exists() || !snap.data().data) return null
+  const raw = snap.data()
+  // Server timestamps arrive as Firestore Timestamp objects; convert to ms.
+  // Old docs written before this field existed → treat as ancient (0) so any
+  // local backup beats it in the restore-prompt comparison.
+  const updatedAt = typeof raw.updatedAt?.toMillis === 'function'
+    ? raw.updatedAt.toMillis()
+    : 0
+  return { data: raw.data, updatedAt }
 }
 
 /* ── Shared category-learning DB ────────────────────────────────── */
