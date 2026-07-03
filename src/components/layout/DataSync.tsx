@@ -30,7 +30,7 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
-import { saveUserData, loadUserData, loadSharedLearnedDB } from '@/lib/firestoreService'
+import { saveUserData, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 
@@ -40,6 +40,10 @@ const MAX_BYTES         = 900_000  // ≈900KB; Firestore doc hard cap is ~1MB
 // Server clock skew tolerance: only offer restore when localStorage is
 // meaningfully newer than the Firestore doc (5s buffer avoids false positives).
 const RESTORE_SKEW_MS   = 5_000
+// Snapshot version cadence — a fresh entry in /users/{uid}/versions gets
+// written at most this often. Keeps history granular enough to rewind
+// a bad edit without inflating storage costs.
+const VERSION_INTERVAL_MS = 5 * 60 * 1000
 
 // localStorage key for the per-user snapshot backup. Kept per-uid so
 // switching accounts on the same device doesn't cross the streams.
@@ -84,6 +88,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const backupTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
   const lastBackupJson  = useRef<string>('')
+  const lastVersionAt   = useRef<number>(0)
   // Cached Firebase ID token — needed by the beacon-save handler at tab close
   // (sendBeacon runs synchronously; we can't await getIdToken() there).
   const cachedIdToken   = useRef<string>('')
@@ -236,6 +241,18 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           // will catch it up.
           const nowJson = JSON.stringify(collectSnapshot())
           if (nowJson === json) useSyncStore.getState().setDirty(false)
+
+          // Rolling version history (throttled). Runs after the main save
+          // succeeded so a version is only created when we know the state
+          // was persistable. Failures here are silent — they don't affect
+          // the primary save flow.
+          const now = Date.now()
+          if (now - lastVersionAt.current > VERSION_INTERVAL_MS) {
+            lastVersionAt.current = now
+            createVersion(user.uid, snap, size).catch(err => {
+              console.warn('[DataSync] version creation failed:', err)
+            })
+          }
         } catch (err) {
           setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
         }
@@ -384,6 +401,24 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       window.removeEventListener('pagehide',           onPageHide)
       document.removeEventListener('visibilitychange', onVisibility)
     }
+  }, [user, hydrated])
+
+  // ── 6b. beforeunload confirmation when there are unsaved changes ──
+  // Belt-and-suspenders on top of the pagehide beacon: if the browser somehow
+  // doesn't fire pagehide reliably (Chrome mobile foreground/background is
+  // flaky), the native dialog prompts the user before the tab actually closes.
+  // Only fires when isDirty is true — a clean save state closes silently.
+  useEffect(() => {
+    if (!user || !hydrated) return
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!useSyncStore.getState().isDirty) return
+      // Modern browsers ignore returnValue but require preventDefault + a
+      // truthy returnValue to actually show the confirmation.
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [user, hydrated])
 
   // ── 7. Prominent error notifications ──

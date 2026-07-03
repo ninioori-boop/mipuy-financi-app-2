@@ -75,6 +75,7 @@ const groups: TabGroup[] = [
     title: 'ליווי',
     items: [
       { href: '/app/meetings', emoji: '📝', label: 'פגישות' },
+      { href: '/app/versions', emoji: '🕰️', label: 'היסטוריה' },
     ],
   },
   {
