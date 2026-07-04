@@ -533,3 +533,52 @@ describe('applyImport — respects monthly deletions (import brings actual, not 
     expect(useMonthlyStore.getState().months['mar'].installments.find(r => r.name === 'TV')).toBeUndefined()
   })
 })
+
+describe('applyImport — per-business actual fills named rows in fixed/sub/ins', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  it('fills a named business row from its own total; unmatched folds into the category (total preserved)', () => {
+    const insCat = [...INSURANCE_CATEGORIES][0]
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan')
+
+    // A mapping-derived named insurance row: plan 400, no actual yet.
+    store.applyImport('jan', {}, [], [], [], [{ name: 'ביטוח הראל', amount: 400 }], [], [], [], 1)
+
+    // Import a report: הראל 420 (matches the named row) + מגדל 180 (no row),
+    // both insurance. catSums carries the category total (600).
+    store.applyImport(
+      'jan',
+      { [insCat]: 600 },
+      [], [], [], [], [], [], [], 1,
+      [
+        { name: 'ביטוח הראל', amount: 420, category: insCat },
+        { name: 'מגדל',        amount: 180, category: insCat },
+      ],
+    )
+
+    const ins = useMonthlyStore.getState().months['jan'].ins
+    const harel = ins.find(r => r.name === 'ביטוח הראל')
+    expect(harel?.plan).toBe(400)
+    expect(harel?.actual).toBe(420)               // per-business actual, sits next to its plan
+
+    const catRow = ins.find(r => r.name === insCat)
+    expect(catRow?.actual).toBe(180)              // leftover: 600 total − 420 consumed by named row
+
+    // No money invented or lost across the whole section.
+    expect(ins.reduce((s, r) => s + r.actual, 0)).toBe(600)
+  })
+
+  it('with no merchantSums, actuals stay category-level (backward-compatible)', () => {
+    const insCat = [...INSURANCE_CATEGORIES][0]
+    const store = useMonthlyStore.getState()
+    store.initMonth('feb')
+    store.applyImport('feb', { [insCat]: 500 }, [], [], [], [{ name: 'ביטוח הראל', amount: 400 }], [], [], [], 1)
+
+    const ins = useMonthlyStore.getState().months['feb'].ins
+    // Named row gets no per-business actual when merchantSums isn't passed.
+    expect(ins.find(r => r.name === 'ביטוח הראל')?.actual).toBe(0)
+    // The whole category total lands on the category row, exactly as before.
+    expect(ins.find(r => r.name === insCat)?.actual).toBe(500)
+  })
+})

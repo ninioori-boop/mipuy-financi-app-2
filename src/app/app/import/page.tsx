@@ -195,12 +195,26 @@ export default function ImportPage() {
     const catSums: Record<string, number> = {}
     filtered.forEach(t => { catSums[t.category] = (catSums[t.category] || 0) + t.amount })
 
+    // Per-business totals (name + category) so applyImport can fill the ACTUAL of
+    // matching named rows in קבועות/מנויים/ביטוחים per specific business; anything
+    // unmatched folds into its category total. Grouped by normalized business name.
+    const merchantMap = new Map<string, { name: string; amount: number; category: string }>()
+    filtered.forEach(t => {
+      const k = normalizeForLookup(t.desc)
+      if (!k) return
+      const e = merchantMap.get(k) ?? { name: t.desc, amount: 0, category: t.category }
+      e.amount += t.amount
+      merchantMap.set(k, e)
+    })
+    const merchantSums = [...merchantMap.values()]
+
     initMonth(targetMonth)
     applyImport(
       targetMonth, catSums,
       mapping.fixed, mapping.variable, mapping.sub, mapping.ins,
       mapping.installments, mapping.debts, mapping.savings,
       mapping.varMonths,
+      merchantSums,
     )
 
     const monthName = MONTHS_LIST.find(m => m.id === targetMonth)?.name

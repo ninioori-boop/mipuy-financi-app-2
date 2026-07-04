@@ -2,6 +2,7 @@
 
 import { create } from 'zustand'
 import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES } from '@/lib/constants'
+import { normalizeForLookup } from '@/lib/categorize'
 
 function uid() { return Math.random().toString(36).slice(2) }
 
@@ -152,6 +153,11 @@ interface MonthlyState {
     mappingDebts:        { name: string; remainingBalance: number; monthlyPayment: number; remainingMonths: number }[],
     mappingSavings:      { name: string; monthlyContribution: number; accumulated: number }[],
     varMonths: number,
+    // Per-business actuals (from the imported report) used to fill the ACTUAL of
+    // matching NAMED rows in fixed/sub/ins by business name; unmatched businesses
+    // fold into their category total. Optional — when omitted, actuals stay
+    // category-level (backward-compatible with older callers/tests).
+    merchantSums?: { name: string; amount: number; category: string }[],
   ) => void
 
   /**
@@ -343,7 +349,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         return { ...m, savings: filtered }
       }),
 
-    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths) => {
+    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths, merchantSums) => {
       updateMonth(monthId, m => {
         const del = m.deletedFromMapping
         // Step 1: merge mapping plan rows. Skip rows already present by name OR
@@ -385,13 +391,72 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           })
           return updated
         }
+
+        // Per-ITEM actual for fixed/sub/ins: match each report business to a NAMED
+        // budget row (a mapping-derived per-business row like "ביטוח הראל") by
+        // normalized business name and fill THAT row's actual — so the month shows
+        // plan-vs-actual per specific insurance / subscription / fixed commitment.
+        // Whatever isn't matched to a named row folds into its category row
+        // (leftover = category total − amounts already consumed by named rows), so
+        // the grand total is preserved and nothing is double-counted. Category rows
+        // and unmatched businesses behave exactly like fillActual. When merchantSums
+        // is absent this degrades to category-level (identical to fillActual).
+        const merchants = merchantSums ?? []
+        function fillActualPerItem(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
+          // This section's businesses (selected by their category), summed per
+          // normalized name so multiple charges of the same business collapse.
+          const byKey = new Map<string, { sum: number; category: string }>()
+          for (const mrc of merchants) {
+            if (!cats.has(mrc.category) || mrc.amount <= 0) continue
+            const k = normalizeForLookup(mrc.name)
+            if (!k) continue
+            const e = byKey.get(k) ?? { sum: 0, category: mrc.category }
+            e.sum += mrc.amount
+            byKey.set(k, e)
+          }
+          // Normalized names of this section's NAMED (non-category) rows.
+          const namedKeys = new Set(
+            rows.filter(r => !cats.has(r.name)).map(r => normalizeForLookup(r.name)).filter(Boolean),
+          )
+          // Amount consumed by named rows, per category — subtracted from leftover.
+          const consumed: Record<string, number> = {}
+          for (const [k, { sum, category }] of byKey) {
+            if (namedKeys.has(k)) consumed[category] = (consumed[category] ?? 0) + sum
+          }
+          // Pass 1 — fill named (per-business) rows from their matched total.
+          // No match in this import → leave the row's existing actual untouched.
+          let out = rows.map(r => {
+            if (cats.has(r.name)) return r
+            const hit = byKey.get(normalizeForLookup(r.name))
+            return hit ? { ...r, actual: Math.round(hit.sum) } : r
+          })
+          // Pass 2 — fill category rows from the leftover (total − consumed).
+          const present = new Set(out.map(r => r.name))
+          out = out.map(r => {
+            if (!cats.has(r.name)) return r
+            const total = catSums[r.name]
+            if (total === undefined) return r
+            return { ...r, actual: Math.max(0, Math.round(total - (consumed[r.name] ?? 0))) }
+          })
+          // Category with leftover spending but no row yet → add it (plan 0).
+          Object.entries(catSums).forEach(([cat, total]) => {
+            if (!cats.has(cat) || present.has(cat)) return
+            const leftover = Math.max(0, Math.round(total - (consumed[cat] ?? 0)))
+            if (leftover > 0) out.push({ id: uid(), name: cat, plan: 0, actual: leftover })
+          })
+          return out
+        }
+
         // Annual categories (e.g. חופשה וטיול) have no dedicated monthly section;
         // fold them into variable expenses so the amount isn't silently dropped.
         const variableCats = new Set([...VAR_CATEGORIES, ...ANNUAL_CATEGORIES])
-        fixed    = fillActual(fixed,    FIXED_CATEGORIES)
+        // Per-item actual for the three "named row" sections; variable stays
+        // category-level (only fixed/sub/ins carry per-business rows worth
+        // reconciling against the report).
+        fixed    = fillActualPerItem(fixed,    FIXED_CATEGORIES)
         variable = fillActual(variable, variableCats)
-        sub      = fillActual(sub,      SUB_CATEGORIES)
-        ins      = fillActual(ins,      INSURANCE_CATEGORIES)
+        sub      = fillActualPerItem(sub,      SUB_CATEGORIES)
+        ins      = fillActualPerItem(ins,      INSURANCE_CATEGORIES)
 
         // Step 3: merge installments / debts / savings from mapping into the
         // month's own sections. Skip rows already present in the month by name
