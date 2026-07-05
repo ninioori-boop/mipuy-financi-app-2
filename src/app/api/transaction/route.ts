@@ -80,7 +80,53 @@ export async function POST(req: NextRequest) {
   // uid + bucket only — no merchant/amount detail logged.
   console.log(`[transaction] uid=${uid} cat=${category}`)
 
-  return NextResponse.json({ ok: true, category })
+  // Budget-aware confirmation for the phone app to show as a LOCAL notification
+  // (no FCM). Best-effort — ingest already succeeded; never fails the request.
+  // NOTE: `category` must stay the FIRST "category" key in the JSON — old APKs
+  // extract it by scanning for the first occurrence.
+  const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+
+  return NextResponse.json({ ok: true, category, notify })
+}
+
+/**
+ * Builds the notification text: "recorded ✓" + where the category's monthly
+ * budget now stands, read from the user's saved snapshot (users/{uid}.data —
+ * expenseLog entries + categoryBudgets). The snapshot may lag a charge or two
+ * still in the inbox; close enough for a heads-up. warn=true → the app posts
+ * it on the high-importance channel (heads-up) instead of the silent one.
+ */
+async function buildNotify(
+  db: Firestore, uid: string, category: string, amount: number, merchant: string, ym: string,
+): Promise<{ title: string; body: string; warn: boolean }> {
+  const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
+  const title = `נרשם: ${merchant} · ${nis(amount)}`
+  let body = `קוטלג ל${category} ✓`
+  let warn = false
+  try {
+    const snap = await db.collection('users').doc(uid).get()
+    const data = snap.exists ? snap.data()?.data : null
+    if (data && typeof data === 'object') {
+      const d = data as { categoryBudgets?: { budgets?: Record<string, unknown> }; expenseLog?: { entries?: unknown[] } }
+      const rawBudget = d.categoryBudgets?.budgets?.[category]
+      const budget    = typeof rawBudget === 'number' && rawBudget > 0 ? rawBudget : 0
+      const entries   = Array.isArray(d.expenseLog?.entries) ? d.expenseLog.entries : []
+      if (budget > 0) {
+        const spent = entries.reduce((s: number, e) => {
+          const en = e as { category?: unknown; date?: unknown; amount?: unknown }
+          return en && en.category === category
+            && typeof en.date === 'string' && en.date.slice(0, 7) === ym
+            && typeof en.amount === 'number'
+            ? s + en.amount : s
+        }, 0) + amount
+        const pct = Math.round((spent / budget) * 100)
+        if (pct >= 100)     { body = `⚠️ חריגה מתקציב ${category}: ${nis(spent)} מתוך ${nis(budget)}`; warn = true }
+        else if (pct >= 80) { body = `לתשומת ליבך: ${pct}% מתקציב ${category} (${nis(spent)} מתוך ${nis(budget)})`; warn = true }
+        else                { body = `${category}: נוצלו ${pct}% מהתקציב החודשי · נשארו ${nis(budget - spent)}` }
+      }
+    }
+  } catch { /* best-effort — the default text is fine */ }
+  return { title, body, warn }
 }
 
 // Reads the shared merchant→category corrections (admin SDK) so a fix made once

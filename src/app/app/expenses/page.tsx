@@ -115,6 +115,32 @@ export default function ExpensesPage() {
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
   }, [entries, selMonth])
 
+  // Auto-captured entries the categorizer couldn't place (landed on 'שונות',
+  // note carries the ingestion #ref) — surfaced for a one-tap fix that learns.
+  const pendingReview = useMemo(
+    () => monthEntries.filter(e => e.category === 'שונות' && / #\S+$/.test(e.note)),
+    [monthEntries],
+  )
+
+  // One-tap suggestion chips: the user's most-used categories, padded with
+  // sensible defaults — so the likely fix is always a single tap away.
+  const suggestedCats = useMemo(() => {
+    const freq = new Map<string, number>()
+    for (const e of entries) {
+      if (e.category !== 'שונות') freq.set(e.category, (freq.get(e.category) ?? 0) + 1)
+    }
+    const top = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c)
+    const defaults = ['מזון לבית', 'אוכל בחוץ ובילויים', 'דלק וחניה', 'פארם', 'הוצאות בית', 'בריאות']
+    return [...new Set([...top, ...defaults])].slice(0, 6)
+  }, [entries])
+
+  function fixCategory(id: string, note: string, cat: string) {
+    update(id, { category: cat })
+    const merchant = note.replace(/ #\S+$/, '').trim()
+    if (merchant) learn(merchant, cat)
+    toast.success(`${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓`)
+  }
+
   // Categories at/over 80% of their monthly budget THIS viewed month — for the banner.
   const budgetAlerts = useMemo(
     () => catTotals
@@ -182,6 +208,7 @@ export default function ExpensesPage() {
             <label className="text-[11px] text-muted-txt">סכום ₪</label>
             <input
               type="number"
+              inputMode="numeric"
               value={amount}
               onChange={e => setAmount(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
@@ -229,7 +256,7 @@ export default function ExpensesPage() {
       {/* Month switcher + total + transfer */}
       <div className="rounded-xl border border-line bg-surface2 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
               className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold shrink-0">›</button>
             <select
@@ -248,7 +275,7 @@ export default function ExpensesPage() {
               className="w-8 h-8 rounded-lg bg-line text-txt hover:bg-gold/20 transition-colors font-bold shrink-0">‹</button>
             {selMonth !== currentMonth() && (
               <button onClick={() => setSelMonth(currentMonth())}
-                className="text-xs text-gold/80 hover:text-gold transition-colors ms-1 whitespace-nowrap">חזרה לחודש הנוכחי</button>
+                className="text-xs text-gold/80 hover:text-gold transition-colors ms-1 whitespace-nowrap py-2 min-h-[36px]">חזרה לחודש הנוכחי</button>
             )}
           </div>
           <div className="text-end">
@@ -275,6 +302,47 @@ export default function ExpensesPage() {
         )}
       </div>
 
+      {/* One-tap review — auto-captured charges awaiting a precise category */}
+      {pendingReview.length > 0 && (
+        <div className="rounded-xl border border-gold/40 bg-gold/5 p-4 space-y-3">
+          <div className="text-sm font-semibold text-gold">
+            🏷️ {pendingReview.length === 1 ? 'הוצאה אחת ממתינה' : `${pendingReview.length} הוצאות ממתינות`} לקטלוג — הקש על הקטגוריה הנכונה
+          </div>
+          <div className="space-y-3">
+            {pendingReview.map(e => {
+              const merchant = e.note.replace(/ #\S+$/, '').trim()
+              return (
+                <div key={e.id} className="space-y-1.5 border-t border-line/60 pt-2.5 first:border-t-0 first:pt-0">
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-txt truncate">{merchant || 'ללא שם'}</span>
+                    <span className="font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {suggestedCats.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => fixCategory(e.id, e.note, cat)}
+                        className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-txt hover:border-gold/60 hover:text-gold active:bg-gold/10 transition-colors min-h-[36px]"
+                      >
+                        {icon(cat)} {cat}
+                      </button>
+                    ))}
+                    <div className="min-w-[7.5rem]">
+                      <CategoryPicker
+                        value=""
+                        onChange={cat => fixCategory(e.id, e.note, cat)}
+                        variant="field"
+                        placeholder="עוד…"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Budget alert banner — categories at/over 80% of their monthly cap */}
       {budgetAlerts.length > 0 && (
         <div className="rounded-xl border border-gold/40 bg-gold/10 p-4 space-y-2">
@@ -296,7 +364,7 @@ export default function ExpensesPage() {
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
         <button
           onClick={() => setShowBudgetEditor(v => !v)}
-          className="flex items-center justify-between w-full"
+          className="flex items-center justify-between w-full py-2 min-h-[44px]"
         >
           <span className="text-sm font-semibold text-txt">🎯 תקצוב קטגוריות</span>
           <span className="text-xs text-gold/80">{showBudgetEditor ? 'סגירה ▲' : 'פתיחה ▼'}</span>
@@ -304,7 +372,7 @@ export default function ExpensesPage() {
         {showBudgetEditor && (
           <div className="space-y-2">
             <p className="text-[11px] text-muted-txt">
-              קבעו תקציב חודשי לכל קטגוריה. השאירו ריק = ללא תקציב. התקציב חל על כל חודש.
+              קבע תקציב חודשי לכל קטגוריה. השאר ריק = ללא תקציב. התקציב חל על כל חודש.
             </p>
             <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
               {ALL_CATEGORIES.map(cat => {
@@ -347,7 +415,7 @@ export default function ExpensesPage() {
             return (
               <div key={cat} className="space-y-1">
                 <div className="flex items-center justify-between text-xs gap-2">
-                  <span className="text-txt shrink-0">{icon(cat)} {cat}</span>
+                  <span className="text-txt min-w-0 truncate">{icon(cat)} {cat}</span>
                   <span className={`tabular-nums whitespace-nowrap ${textColor}`}>
                     {budget
                       ? `${fmt(sum)} / ${fmt(budget)} · ${Math.round(pct * 100)}%`
@@ -365,9 +433,9 @@ export default function ExpensesPage() {
 
       {/* Entries list */}
       {byDay.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line bg-surface2/50 p-10 text-center">
+        <div className="rounded-xl border border-dashed border-line bg-surface2/50 p-6 sm:p-10 text-center">
           <div className="text-4xl mb-2">🧾</div>
-          <p className="text-muted-txt text-sm">אין רישומים בחודש זה. הוסיפו הוצאה למעלה כדי להתחיל.</p>
+          <p className="text-muted-txt text-sm">אין רישומים בחודש זה. הוסף הוצאה למעלה כדי להתחיל.</p>
         </div>
       ) : (
         <div className="space-y-4">
