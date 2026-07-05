@@ -6,6 +6,7 @@ import {
   VAR_CATEGORIES, ANNUAL_CATEGORIES, FIXED_CATEGORIES,
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
+import { normalizeForLookup } from '@/lib/categorize'
 
 export interface MappingRow {
   id: string
@@ -279,9 +280,22 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     // glance. Individual merchants get "carved out" of their category row on
     // demand via the SmartPatterns "send to mapping" buttons (which subtract
     // the merchant's historical contribution from the category total).
+    //
+    // Merchants that already have their own carved-out row (fromBank:true)
+    // are excluded from the aggregated totals — otherwise re-running import
+    // would double-count them (once in the standalone row + once in the
+    // category total). This is what SmartPatterns' subtractFrom achieves
+    // for the LIVE row; here we do the same for a fresh rebuild.
+    const carvedOutMerchants = new Set<string>()
+    for (const r of [...s.fixed, ...s.sub, ...s.ins, ...s.variable, ...s.annual]) {
+      if (!r.fromBank) continue
+      const key = normalizeForLookup(r.name)
+      if (key) carvedOutMerchants.add(key)
+    }
     const totals: Record<string, number> = {}
     transactions.forEach(t => {
       if (t.isRefund) return
+      if (carvedOutMerchants.has(normalizeForLookup(t.desc))) return
       totals[t.category] = (totals[t.category] ?? 0) + t.amount
     })
 
@@ -439,7 +453,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
         // (b) SUBTRACT from source category row, if requested
         if (!r.subtractFrom) return
-        const { category, amount: subAmt } = r.subtractFrom
+        const { category, amount: rawSubAmt } = r.subtractFrom
 
         let sourceSection: 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | null = null
         if      (FIXED_CATEGORIES.has(category))     sourceSection = 'fixed'
@@ -448,6 +462,18 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         else if (INSURANCE_CATEGORIES.has(category)) sourceSection = 'ins'
         else if (ANNUAL_CATEGORIES.has(category))    sourceSection = 'annual'
         if (!sourceSection) return  // category not classifiable — silently skip
+
+        // Scale the raw period total to match how the target row is stored.
+        // importFromCredit divides fixed/sub/ins totals by `varMonths` (monthly
+        // average), so the merchant's carve-out must be scaled the same way
+        // to hit the row at the right magnitude. Without this scaling a raw
+        // 150₪ period total gets subtracted from a 100₪/mo aggregated row →
+        // row deleted entirely, including OTHER merchants that also lived in
+        // it. Variable + annual store raw period totals (no scaling needed).
+        const m = Math.max(1, s.varMonths)
+        const subAmt = (sourceSection === 'fixed' || sourceSection === 'sub' || sourceSection === 'ins')
+          ? Math.round(rawSubAmt / m)
+          : rawSubAmt
 
         if (sourceSection === 'annual') {
           const idx = annual.findIndex(row => row.fromCredit && !row.fromBank && row.name === category)
