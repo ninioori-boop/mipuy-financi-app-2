@@ -173,4 +173,82 @@ describe('importFromBank — subtractFrom carves a merchant out of its source ca
     expect(useMappingStore.getState().sub.find(r => r.name === 'Netflix')!.amount).toBe(50)
     expect(useMappingStore.getState().fixed.find(r => r.name === 'משכנתא')!.amount).toBe(4500)
   })
+
+  it('3-month report: subtractFrom scales the raw period total to monthly avg for sub/fixed/ins', () => {
+    // Real-world scenario: user uploaded a 3-month credit report. importFromCredit
+    // stored the אופנה sub category as monthly avg (period total / 3). When
+    // SmartPatterns sends Netflix (3 × 50 = 150 period total) it must scale
+    // that 150 → 50/mo to hit the row at the right magnitude. Without the fix
+    // 100/mo - 150 = -50 → the whole row gets deleted, wiping Spotify too.
+    useMappingStore.setState({
+      varMonths: 3,
+      sub: [{ id: 'cat-row', name: 'חדר כושר', amount: 100, fromCredit: true }],
+    })
+
+    useMappingStore.getState().importFromBank([{
+      name: 'Netflix',
+      amount: 50,                                              // monthly cost basis for the new row
+      section: 'sub',
+      subtractFrom: { category: 'חדר כושר', amount: 150 },      // period-total for the source
+    }])
+
+    const sub = useMappingStore.getState().sub
+    const gym = sub.find(r => r.name === 'חדר כושר')
+    expect(gym, 'gym row must survive — Netflix is only PART of the category').toBeDefined()
+    expect(gym!.amount).toBe(50)                               // 100/mo - (150/3)=50 → 50/mo remaining
+  })
+
+  it('variable section keeps raw period totals: subtractFrom does NOT scale', () => {
+    // Sanity check on the sibling case: variable rows store raw period totals
+    // (VariablePanel displays ÷months for the monthly view), so subtractFrom
+    // must NOT divide there. Fix must ONLY scale fixed/sub/ins.
+    useMappingStore.setState({
+      varMonths: 3,
+      variable: [{ id: 'v-row', name: 'מזון לבית', amount: 1500, fromCredit: true }],
+    })
+
+    useMappingStore.getState().importFromBank([{
+      name: 'Shufersal',
+      amount: 200,
+      section: 'variable',
+      subtractFrom: { category: 'מזון לבית', amount: 600 },   // raw period total, not per-month
+    }])
+
+    const v = useMappingStore.getState().variable
+    const food = v.find(r => r.name === 'מזון לבית')
+    expect(food, 'food row must survive').toBeDefined()
+    expect(food!.amount).toBe(900)                             // 1500 - 600 = 900 raw
+  })
+})
+
+describe('importFromCredit — excludes merchants already carved out into their own rows', () => {
+  beforeEach(resetMapping)
+
+  it('re-running credit import after a SmartPatterns carve-out does NOT double-count', () => {
+    // Step 1: user carved Netflix out via SmartPatterns → its own fromBank row.
+    useMappingStore.setState({
+      varMonths: 1,
+      sub: [{ id: 'netflix', name: 'Netflix', amount: 50, fromCredit: true, fromBank: true }],
+    })
+
+    // Step 2: user re-runs "🗂️ עדכן מיפוי" (importFromCredit) with fresh txns
+    // that INCLUDE the Netflix charges the carve-out was based on.
+    const txns: Transaction[] = [
+      makeTxn('Netflix',  50, 'חדר כושר'),
+      makeTxn('Spotify',  30, 'חדר כושר'),
+      makeTxn('ChatGPT',  73, 'חדר כושר'),
+    ]
+    useMappingStore.getState().importFromCredit(txns, 1)
+
+    // Netflix's own row must survive AND the aggregated חדר כושר row must
+    // EXCLUDE Netflix's 50 (otherwise Netflix is counted twice: once in its
+    // own row and once inside the aggregated total).
+    const sub = useMappingStore.getState().sub
+    const netflix = sub.find(r => r.name === 'Netflix')
+    const gym     = sub.find(r => r.name === 'חדר כושר')
+    expect(netflix, 'carved-out Netflix row must survive re-import').toBeDefined()
+    expect(netflix!.amount).toBe(50)
+    expect(gym,     'aggregated חדר כושר row must be re-created').toBeDefined()
+    expect(gym!.amount).toBe(103)                              // Spotify 30 + ChatGPT 73, Netflix excluded
+  })
 })
