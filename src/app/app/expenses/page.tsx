@@ -46,7 +46,7 @@ export default function ExpensesPage() {
   const clientMode = useClientMode()   // in-app: declutter for the phone
   const { entries, add, update, remove } = useExpenseLogStore()
   const { budgets, setBudget } = useCategoryBudgetStore()
-  const { initMonth, applyExpenseLog } = useMonthlyStore()
+  const { months, initMonth, applyExpenseLog } = useMonthlyStore()
   const learn = useCreditStore(s => s.learn)   // shared learnedDB — same teaching as credit/import
   const { rules, add: addRule, update: updateRule, remove: removeRule } = useRecurringStore()
 
@@ -160,6 +160,26 @@ export default function ExpensesPage() {
     const merchant = note.replace(/ #\S+$/, '').trim()
     if (merchant) learn(merchant, cat)
     toast.success(`${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓`)
+  }
+
+  // One-tap budget adoption: pull the current calendar month's PLAN values from
+  // the monthly-budget tab (the advisor already built them there) into the
+  // per-category budgets here. Only rows whose name is a real category are
+  // taken; multiple rows of the same category sum up.
+  function adoptFromMonthly() {
+    const mid = MONTHS_LIST[new Date().getMonth()]?.id
+    const m = mid ? months[mid] : undefined
+    if (!m) { toast.error('אין עדיין תקציב חודשי לחודש הנוכחי'); return }
+    const catSet = new Set(ALL_CATEGORIES)
+    const plans = new Map<string, number>()
+    for (const sec of ['fixed', 'variable', 'sub', 'ins'] as const) {
+      for (const r of m[sec] ?? []) {
+        if (r.plan > 0 && catSet.has(r.name)) plans.set(r.name, (plans.get(r.name) ?? 0) + r.plan)
+      }
+    }
+    if (plans.size === 0) { toast.error('לא נמצאו סעיפים עם תקציב מתוכנן בחודש הנוכחי'); return }
+    for (const [cat, plan] of plans) setBudget(cat, Math.round(plan))
+    toast.success(`⚡ אומצו ${plans.size} תקציבים מהתקציב החודשי`)
   }
 
   // Categories at/over 80% of their monthly budget THIS viewed month — for the banner.
@@ -392,9 +412,17 @@ export default function ExpensesPage() {
         </button>
         {showBudgetEditor && (
           <div className="space-y-2">
-            <p className="text-[11px] text-muted-txt">
-              קבע תקציב חודשי לכל קטגוריה. השאר ריק = ללא תקציב. התקציב חל על כל חודש.
-            </p>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11px] text-muted-txt">
+                קבע תקציב חודשי לכל קטגוריה. השאר ריק = ללא תקציב. התקציב חל על כל חודש.
+              </p>
+              <button
+                onClick={adoptFromMonthly}
+                className="text-xs bg-gold/15 hover:bg-gold/25 text-gold border border-gold/40 rounded-lg px-3 py-2 min-h-[36px] font-semibold transition-colors whitespace-nowrap"
+              >
+                ⚡ אמץ מהתקציב החודשי
+              </button>
+            </div>
             <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
               {ALL_CATEGORIES.map(cat => {
                 const spent = spentByCat.get(cat) ?? 0
@@ -405,6 +433,7 @@ export default function ExpensesPage() {
                       {spent > 0 && <span className="text-muted-txt"> · {fmt(spent)} החודש</span>}
                     </span>
                     <input
+                      key={`${cat}:${budgets[cat] ?? ''}`}
                       type="number"
                       inputMode="numeric"
                       defaultValue={budgets[cat] || ''}
