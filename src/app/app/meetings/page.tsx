@@ -26,6 +26,92 @@ function formatDate(iso: string) {
   return `${d}/${m}/${y}`
 }
 
+// ── Next-steps checklist ────────────────────────────────────────────────────
+// "משימות לפגישה הבאה" stays a plain string (persisted as-is + rendered in the
+// PDF export), but we surface it as a checklist: each line is a task and a
+// leading "✓ " marks it done. Toggling / editing / adding / removing all
+// serialize back to the same newline-joined string, so existing notes survive
+// and nothing downstream (sync, PDF) has to change.
+const DONE_RE = /^\s*[✓✔]\s+/
+function taskUid() { return Math.random().toString(36).slice(2) }
+type ChecklistItem = { id: string; text: string; done: boolean }
+
+function parseChecklist(value: string): ChecklistItem[] {
+  return (value ?? '')
+    .split('\n')
+    .filter(line => line.trim() !== '')
+    .map(line => ({ id: taskUid(), done: DONE_RE.test(line), text: line.replace(DONE_RE, '') }))
+}
+function serializeChecklist(items: ChecklistItem[]): string {
+  return items
+    .filter(it => it.text.trim() !== '')
+    .map(it => (it.done ? '✓ ' : '') + it.text.trim())
+    .join('\n')
+}
+
+function NextStepsChecklist({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  // Seeded from `value` once (parent remounts per meeting via key={m.id}). While
+  // editing, local state drives and every change is pushed up for persistence.
+  const [items, setItems] = useState<ChecklistItem[]>(() => parseChecklist(value))
+
+  function commit(next: ChecklistItem[]) {
+    setItems(next)
+    onChange(serializeChecklist(next))
+  }
+  const toggle   = (id: string) => commit(items.map(it => it.id === id ? { ...it, done: !it.done } : it))
+  const editText = (id: string, text: string) => commit(items.map(it => it.id === id ? { ...it, text } : it))
+  const remove   = (id: string) => commit(items.filter(it => it.id !== id))
+  // A fresh empty row lives in local state only until it gets text (serialize
+  // drops empties), so an accidental "add" never persists a blank task.
+  const add = () => setItems(prev => [...prev, { id: taskUid(), text: '', done: false }])
+
+  return (
+    <div className="space-y-1.5">
+      {items.length === 0 && (
+        <p className="text-xs text-muted-txt/70 italic px-1 py-1">אין עדיין משימות — לחצו &quot;הוסף משימה&quot; כדי להתחיל.</p>
+      )}
+      {items.map(it => (
+        <div key={it.id} className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => toggle(it.id)}
+            aria-pressed={it.done}
+            aria-label={it.done ? 'בטל סימון הושלם' : 'סמן כהושלם'}
+            className={`shrink-0 size-7 rounded-md border flex items-center justify-center text-sm transition-colors ${
+              it.done ? 'bg-gold/20 border-gold/60 text-gold' : 'bg-surface border-line hover:border-gold/60'
+            }`}
+          >
+            {it.done ? '✓' : ''}
+          </button>
+          <input
+            value={it.text}
+            onChange={e => editText(it.id, e.target.value)}
+            placeholder="תיאור המשימה…"
+            className={`flex-1 min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:border-gold/60 ${
+              it.done ? 'line-through text-muted-txt' : 'text-txt'
+            }`}
+          />
+          <button
+            type="button"
+            onClick={() => remove(it.id)}
+            aria-label="מחק משימה"
+            className="shrink-0 size-9 flex items-center justify-center rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="mt-1 text-xs px-3 py-2 rounded-lg border border-dashed border-line text-muted-txt hover:text-gold hover:border-gold/50 transition-colors"
+      >
+        ＋ הוסף משימה
+      </button>
+    </div>
+  )
+}
+
 export default function MeetingsPage() {
   const { meetings, add, update, remove } = useMeetingsStore()
   const [filter, setFilter] = useState<MeetingType | 'all'>('all')
@@ -242,13 +328,13 @@ export default function MeetingsPage() {
 
                     <div>
                       <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
-                      <textarea
-                        value={m.nextSteps ?? ''}
-                        onChange={e => update(m.id, { nextSteps: e.target.value })}
-                        rows={6}
-                        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="כתבו כאן את המשימות לפגישה הבאה…"
-                      />
+                      <div className="mt-1.5">
+                        <NextStepsChecklist
+                          key={m.id}
+                          value={m.nextSteps ?? ''}
+                          onChange={v => update(m.id, { nextSteps: v })}
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
