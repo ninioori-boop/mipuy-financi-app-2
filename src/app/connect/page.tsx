@@ -212,6 +212,14 @@ export default function ConnectPage() {
               >
                 📲 הוסף את ה-Shortcut
               </a>
+
+              <p className="text-txt text-sm font-semibold mb-2 mt-8 text-right">שלב 3 · הוסף את האפליקציה למסך הבית</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed">
+                בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
+                → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
+                <br />
+                מעכשיו «מעקב הוצאות» נפתחת מהמסך הראשי — כמו כל אפליקציה. 🎉
+              </div>
             </>
           ) : (
             <>

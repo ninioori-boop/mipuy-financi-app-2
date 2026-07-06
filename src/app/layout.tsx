@@ -14,6 +14,15 @@ const rubik = Rubik({
 export const metadata: Metadata = {
   title: 'The Home Economist',
   description: 'מיפוי פיננסי חכם',
+  // iPhone "Add to Home Screen" — installs like an app, opens full-screen.
+  appleWebApp: {
+    capable: true,
+    title: 'מעקב הוצאות',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

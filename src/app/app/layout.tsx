@@ -91,12 +91,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { user } = useAuthStore()
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // Embed mode: set by the Android in-app WebView (/connect/expenses bootstrap).
-  // Hides all app chrome so only the tab content shows — a clean "expenses only"
-  // view, 1:1 with the web. Normal web users never set this flag → no change.
-  const [embed, setEmbed] = useState(false)
+  // Client-mode triggers:
+  //  - embedFlag: set by the Android in-app WebView (/connect/expenses bootstrap)
+  //  - standalone: an installed PWA (iPhone "הוסף למסך הבית" / Android PWA)
+  // Either switches to the curated client experience (☰ client tabs). Regular
+  // browser users have neither → nothing changes for them.
+  const [embedFlag, setEmbedFlag] = useState(false)
+  const [standalone, setStandalone] = useState(false)
   useEffect(() => {
-    try { setEmbed(sessionStorage.getItem('embedMode') === '1') } catch {}
+    try { setEmbedFlag(sessionStorage.getItem('embedMode') === '1') } catch {}
+    try {
+      setStandalone(
+        window.matchMedia('(display-mode: standalone)').matches
+        || (navigator as { standalone?: boolean }).standalone === true,   // iOS Safari legacy
+      )
+    } catch {}
   }, [])
 
   // Client-mode profile (gates the business tabs) + hydration flag, so we only
@@ -121,6 +130,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [pathname])
 
   const isAdvisor = hasLabAccess(user?.email)
+  // Advisor exemption: Ori installing the PWA on desktop/phone still gets the
+  // full system. Clients get client mode from either trigger.
+  const embed = embedFlag || (standalone && !isAdvisor)
   const visibleGroups = groups
     .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
     .filter(g => g.items.length > 0)
