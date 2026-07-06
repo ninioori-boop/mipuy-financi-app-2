@@ -16,6 +16,9 @@ import { useGoalsStore } from '@/stores/goalsStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
+import { useClientProfileStore } from '@/stores/clientProfileStore'
+import { useRecurringStore } from '@/stores/recurringStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 
@@ -107,7 +110,7 @@ function populateAllStores() {
       id: 'mt1', type: 'mapping', date: '2026-06-01',
       title: 'session 1', summary: 'first meeting',
       actionItems: 'review docs', nextSteps: 'budget plan',
-      createdAt: 1717200000000,
+      prepNotes: 'prep points', createdAt: 1717200000000, updatedAt: 1717200000000,
     }],
   })
 
@@ -116,6 +119,20 @@ function populateAllStores() {
       { id: 'e1', date: '2026-06-03', amount: 45,  category: 'מזון לבית',          note: 'מכולת',  createdAt: 1717400000000 },
       { id: 'e2', date: '2026-06-05', amount: 120, category: 'אוכל בחוץ ובילויים', note: '',        createdAt: 1717500000000 },
     ],
+  })
+
+  useCategoryBudgetStore.setState({
+    budgets: { 'מזון לבית': 2500, 'אוכל בחוץ ובילויים': 800 },
+  })
+
+  useClientProfileStore.setState({ hasBusiness: true })
+
+  useRecurringStore.setState({
+    rules: [
+      { id: 'rec1', name: 'שכר דירה', amount: 4500, category: 'שכר דירה', dayOfMonth: 1,  active: true },
+      { id: 'rec2', name: 'נטפליקס',  amount: 63,   category: 'מנויים',    dayOfMonth: 15, active: false },
+    ],
+    posted: { rec1: '2026-06' },
   })
 
   useBusinessStore.setState({

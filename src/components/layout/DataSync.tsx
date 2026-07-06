@@ -30,9 +30,11 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
+import { useRecurringStore } from '@/stores/recurringStore'
 import { saveUserData, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
+import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
 
 const DEBOUNCE_MS       = 2000
 const BACKUP_DEBOUNCE_MS = 500     // localStorage mirror — faster than the network save
@@ -97,6 +99,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
   // log. No-op until the transactionInbox rule + backend are enabled.
   useTransactionInbox()
+
+  // Post recurring fixed expenses (rent, subscriptions…) into the expense log
+  // once per month when each rule's day arrives. Gated on hydration inside.
+  useRecurringExpenses()
 
   // ── 1. Load on auth ready / user change ──
   useEffect(() => {
@@ -269,6 +275,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useExpenseLogStore.subscribe(triggerSave),
       useCategoryBudgetStore.subscribe(triggerSave),
       useClientProfileStore.subscribe(triggerSave),
+      useRecurringStore.subscribe(triggerSave),
       useBusinessStore.subscribe(triggerSave),
       useBusinessAnnualStore.subscribe(triggerSave),
     ]
