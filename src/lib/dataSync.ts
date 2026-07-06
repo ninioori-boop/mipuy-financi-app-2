@@ -24,6 +24,7 @@ import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/busine
 import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
+import { useRecurringStore, type RecurringRule } from '@/stores/recurringStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -82,6 +83,10 @@ export interface Snapshot {
   clientProfile: {
     hasBusiness: ReturnType<typeof useClientProfileStore.getState>['hasBusiness']
   }
+  recurring: {
+    rules:  ReturnType<typeof useRecurringStore.getState>['rules']
+    posted: ReturnType<typeof useRecurringStore.getState>['posted']
+  }
   business: {
     businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
     revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
@@ -126,6 +131,7 @@ export function collectSnapshot(): Snapshot {
   const el = useExpenseLogStore.getState()
   const cb = useCategoryBudgetStore.getState()
   const clp = useClientProfileStore.getState()
+  const rc = useRecurringStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
 
@@ -158,6 +164,7 @@ export function collectSnapshot(): Snapshot {
     expenseLog: { entries: el.entries },
     categoryBudgets: { budgets: cb.budgets },
     clientProfile: { hasBusiness: clp.hasBusiness },
+    recurring: { rules: rc.rules, posted: rc.posted },
     business: {
       businessType: b.businessType,
       revenue: b.revenue, cogs: b.cogs, opex: b.opex,
@@ -351,6 +358,16 @@ export function applySnapshot(raw: unknown): void {
     if (typeof hb === 'boolean') useClientProfileStore.setState({ hasBusiness: hb })
   }
 
+  // recurring fixed expenses — rules + the per-month posted markers. Old
+  // snapshots lack the key → guard skips, store keeps defaults (empty).
+  if (isObject(raw.recurring)) {
+    const rec = raw.recurring as { rules?: unknown; posted?: unknown }
+    useRecurringStore.setState({
+      rules:  Array.isArray(rec.rules) ? rec.rules as RecurringRule[] : [],
+      posted: isObject(rec.posted) ? rec.posted as Record<string, string> : {},
+    })
+  }
+
   // business
   if (isObject(raw.business)) {
     const b = raw.business as Partial<Snapshot['business']>
@@ -421,6 +438,7 @@ export function resetAllStores(): void {
   useExpenseLogStore.setState({ entries: [] })
   useCategoryBudgetStore.setState({ budgets: {} })
   useClientProfileStore.setState({ hasBusiness: null })
+  useRecurringStore.setState({ rules: [], posted: {} })
   useBusinessStore.setState({
     businessType: DEFAULT_BUSINESS.businessType,
     revenue: [], cogs: [], opex: [],

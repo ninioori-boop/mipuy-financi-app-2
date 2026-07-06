@@ -10,6 +10,7 @@ import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
 import { useClientMode } from '@/hooks/useClientMode'
+import { useRecurringStore } from '@/stores/recurringStore'
 
 function today() {
   const d = new Date()
@@ -47,13 +48,33 @@ export default function ExpensesPage() {
   const { budgets, setBudget } = useCategoryBudgetStore()
   const { initMonth, applyExpenseLog } = useMonthlyStore()
   const learn = useCreditStore(s => s.learn)   // shared learnedDB — same teaching as credit/import
+  const { rules, add: addRule, update: updateRule, remove: removeRule } = useRecurringStore()
 
   const [selMonth, setSelMonth] = useState(currentMonth())
   const [showBudgetEditor, setShowBudgetEditor] = useState(false)
+  const [showRecurring, setShowRecurring] = useState(false)
   const [amount, setAmount]     = useState('')
   const [category, setCategory] = useState('')
   const [note, setNote]         = useState('')
   const [date, setDate]         = useState(today())
+
+  // Recurring-rule add form
+  const [rName, setRName] = useState('')
+  const [rAmount, setRAmount] = useState('')
+  const [rCategory, setRCategory] = useState('')
+  const [rDay, setRDay] = useState('1')
+
+  function handleAddRule() {
+    const amt = parseFloat(rAmount)
+    const day = parseInt(rDay, 10)
+    if (!rName.trim())            { toast.error('תן שם להוצאה (למשל "שכר דירה")'); return }
+    if (!amt || amt <= 0)         { toast.error('הזן סכום'); return }
+    if (!rCategory)               { toast.error('בחר קטגוריה'); return }
+    if (!day || day < 1 || day > 28) { toast.error('יום בחודש: 1 עד 28'); return }
+    addRule({ name: rName.trim(), amount: Math.round(amt), category: rCategory, dayOfMonth: day })
+    setRName(''); setRAmount('')
+    toast.success(`⟳ נוסף: ${rName.trim()} — יירשם אוטומטית כל חודש ב-${day} בחודש`)
+  }
 
   function handleAdd() {
     const amt = parseFloat(amount)
@@ -397,6 +418,113 @@ export default function ExpensesPage() {
                   </div>
                 )
               })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Recurring fixed expenses — defined once, auto-posted every month */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
+        <button
+          onClick={() => setShowRecurring(v => !v)}
+          className="flex items-center justify-between w-full py-2 min-h-[44px]"
+        >
+          <span className="text-sm font-semibold text-txt">
+            ⟳ הוצאות קבועות{rules.length > 0 ? ` (${rules.length})` : ''}
+          </span>
+          <span className="text-xs text-gold/80">{showRecurring ? 'סגירה ▲' : 'פתיחה ▼'}</span>
+        </button>
+        {showRecurring && (
+          <div className="space-y-3">
+            <p className="text-[11px] text-muted-txt">
+              שכ&quot;ד, מנויים, ביטוחים — מגדיר פעם אחת, וההוצאה נרשמת לבד ביומן כל חודש ביום שקבעת.
+            </p>
+
+            {rules.length > 0 && (
+              <div className="space-y-1">
+                {rules.map(r => (
+                  <div key={r.id} className="flex items-center gap-2 text-xs">
+                    <button
+                      onClick={() => updateRule(r.id, { active: !r.active })}
+                      title={r.active ? 'השהה' : 'הפעל'}
+                      aria-label={r.active ? 'השהה הוצאה קבועה' : 'הפעל הוצאה קבועה'}
+                      className={[
+                        'shrink-0 w-9 h-9 rounded-lg border flex items-center justify-center transition-colors',
+                        r.active
+                          ? 'border-income/40 bg-income/10 text-income'
+                          : 'border-line bg-surface text-muted-txt',
+                      ].join(' ')}
+                    >
+                      {r.active ? '✓' : '⏸'}
+                    </button>
+                    <span className={`flex-1 min-w-0 truncate ${r.active ? 'text-txt' : 'text-muted-txt line-through'}`}>
+                      {icon(r.category)} {r.name} · כל {r.dayOfMonth} בחודש
+                    </span>
+                    <span className="tabular-nums text-txt shrink-0 font-semibold">{fmt(r.amount)}</span>
+                    <button
+                      onClick={() => { removeRule(r.id); toast.success('ההוצאה הקבועה הוסרה') }}
+                      title="הסר"
+                      aria-label="הסר הוצאה קבועה"
+                      className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-muted-txt/70 hover:text-expense transition-colors text-base leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-[1fr_6rem_9rem_5rem_auto] gap-2 items-end border-t border-line pt-3">
+              <div className="space-y-1 col-span-2 sm:col-span-1">
+                <label className="text-[11px] text-muted-txt">שם ההוצאה</label>
+                <input
+                  value={rName}
+                  onChange={e => setRName(e.target.value)}
+                  placeholder='למשל: שכר דירה'
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-txt">סכום ₪</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={rAmount}
+                  onChange={e => setRAmount(e.target.value)}
+                  placeholder="₪"
+                  min={0}
+                  style={{ direction: 'ltr' }}
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-txt">קטגוריה</label>
+                <CategoryPicker
+                  value={rCategory}
+                  onChange={setRCategory}
+                  variant="field"
+                  placeholder="בחר…"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-txt">יום בחודש</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={rDay}
+                  onChange={e => setRDay(e.target.value)}
+                  min={1}
+                  max={28}
+                  style={{ direction: 'ltr' }}
+                  className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                />
+              </div>
+              <button
+                onClick={handleAddRule}
+                className="col-span-2 sm:col-span-1 bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 min-h-[40px] text-sm font-semibold transition-colors whitespace-nowrap"
+              >
+                הוסף
+              </button>
             </div>
           </div>
         )}
