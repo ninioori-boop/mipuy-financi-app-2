@@ -14,6 +14,12 @@ import { auth } from '@/lib/firebase'
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
 
+// One-tap import of the signed iOS Shortcut (hosted at /mipuy.shortcut on this
+// same origin → works on staging and production without edits). The Shortcut's
+// import question prompts the user to paste their token. Client-only call.
+const shortcutImportHref = () =>
+  `shortcuts://import-shortcut?url=${encodeURIComponent(`${window.location.origin}/mipuy.shortcut`)}&name=Mipuy`
+
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
 /**
@@ -184,7 +190,7 @@ export default function ConnectPage() {
 
           {isIOS ? (
             <>
-              <p className="text-muted-txt text-sm mb-3">העתק את הטוקן והדבק אותו ב-Shortcut (פעם אחת):</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 1 · העתק את הטוקן</p>
               <div
                 dir="ltr"
                 className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
@@ -193,10 +199,27 @@ export default function ConnectPage() {
               </div>
               <button
                 onClick={copyToken}
-                className="w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+                className="w-full bg-surface2 text-txt border border-line rounded-xl px-8 py-2.5 hover:bg-surface3 transition-colors mb-6"
               >
                 {copied ? '✓ הועתק' : '📋 העתק טוקן'}
               </button>
+
+              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 2 · הוסף את ה-Shortcut</p>
+              <p className="text-muted-txt text-xs mb-3 text-right">בחלון שייפתח, הדבק את הטוקן כשתתבקש ואשר הוספה.</p>
+              <a
+                href={shortcutImportHref()}
+                className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+              >
+                📲 הוסף את ה-Shortcut
+              </a>
+
+              <p className="text-txt text-sm font-semibold mb-2 mt-8 text-right">שלב 3 · הוסף את האפליקציה למסך הבית</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed">
+                בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
+                → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
+                <br />
+                מעכשיו «מעקב הוצאות» נפתחת מהמסך הראשי — כמו כל אפליקציה. 🎉
+              </div>
             </>
           ) : (
             <>
