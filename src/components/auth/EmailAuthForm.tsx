@@ -26,17 +26,20 @@ export function EmailAuthForm() {
     setError(null)
     setSuccess(null)
 
+    // מחזיר את המשתמש לאפליקציה הזו (ולא למערכת הישנה) אחרי איפוס/אימות
+    const actionCodeSettings = { url: `${window.location.origin}/auth` }
+
     try {
       if (mode === 'signin') {
         await signInWithEmailAndPassword(auth, email.trim(), password)
       } else if (mode === 'signup') {
         const cred = await createUserWithEmailAndPassword(auth, email.trim(), password)
-        await sendEmailVerification(cred.user)
+        await sendEmailVerification(cred.user, actionCodeSettings)
         setSuccess('חשבון נוצר! שלחנו מייל אימות — בדוק את תיבת הדואר שלך לפני הכניסה')
         setLoading(false)
         return
       } else {
-        await sendPasswordResetEmail(auth, email.trim())
+        await sendPasswordResetEmail(auth, email.trim(), actionCodeSettings)
         setSuccess('קישור לאיפוס סיסמה נשלח למייל שלך')
         setLoading(false)
         return
