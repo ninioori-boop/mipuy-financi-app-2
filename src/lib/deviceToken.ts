@@ -11,7 +11,10 @@ export function signDeviceToken(uid: string, secret: string): string {
 }
 
 export function verifyDeviceToken(token: string, secret: string): string | null {
-  const parts = token.split('.')
+  // Tokens pasted by hand (iOS Shortcut text box) often pick up stray
+  // whitespace/newlines or invisible bidi/zero-width marks along the way -
+  // strip them all before verifying, so a visually-correct paste never fails the HMAC.
+  const parts = token.replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '').split('.')
   if (parts.length !== 2) return null
   const [uidB64, mac] = parts
 
