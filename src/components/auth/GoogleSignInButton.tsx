@@ -1,13 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
+import { isEmbeddedBrowser } from '@/lib/isEmbedded'
 
 export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  // Google OAuth is blocked in the in-app WebView / installed PWA
+  // ("disallowed_useragent"), so we hide the button there and steer to
+  // email+password. Detected client-side only (avoids a hydration mismatch).
+  const [embedded, setEmbedded] = useState(false)
+  useEffect(() => { setEmbedded(isEmbeddedBrowser()) }, [])
+
+  if (embedded) {
+    return (
+      <p className="text-white/50 text-xs text-center leading-relaxed">
+        בתוך האפליקציה מתחברים עם <span className="text-white/80 font-medium">מייל וסיסמה</span> (למעלה).
+      </p>
+    )
+  }
 
   async function handleSignIn() {
     setLoading(true)
