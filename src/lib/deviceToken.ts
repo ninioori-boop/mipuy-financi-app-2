@@ -31,7 +31,11 @@ export function signDeviceToken(uid: string, secret: string, version = 0): strin
  * by isDeviceTokenRevoked() so this stays synchronous and easy to test.
  */
 export function verifyDeviceToken(token: string, secret: string): { uid: string; version: number } | null {
-  const parts = token.split('.')
+  // Tokens pasted by hand (iOS Shortcut text box) often pick up stray
+  // whitespace/newlines or invisible bidi/zero-width marks along the way —
+  // strip them all before verifying, so a visually-correct paste never fails
+  // the HMAC. (Escapes: zero-width+LRM/RLM, bidi embeds, bidi isolates, BOM.)
+  const parts = token.replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '').split('.')
   if (parts.length !== 2 && parts.length !== 3) return null
 
   let uid: string
