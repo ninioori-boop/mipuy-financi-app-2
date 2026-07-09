@@ -19,6 +19,8 @@ export function GoogleSignInButton() {
     return (
       <p className="text-white/50 text-xs text-center leading-relaxed">
         בתוך האפליקציה מתחברים עם <span className="text-white/80 font-medium">מייל וסיסמה</span> (למעלה).
+        <br />
+        נרשמת דרך Google? לחצ/י <span className="text-white/80 font-medium">«שכחתי סיסמה»</span> וקבע/י סיסמה לאותו חשבון.
       </p>
     )
   }
