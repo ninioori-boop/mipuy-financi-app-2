@@ -14,11 +14,11 @@ import { auth } from '@/lib/firebase'
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
 
-// One-tap import of the signed iOS Shortcut (hosted at /mipuy.shortcut on this
-// same origin → works on staging and production without edits). The Shortcut's
-// import question prompts the user to paste their token. Client-only call.
-const shortcutImportHref = () =>
-  `shortcuts://import-shortcut?url=${encodeURIComponent(`${window.location.origin}/mipuy.shortcut`)}&name=Mipuy`
+// One-tap import of the shared iOS Shortcut. Authored once on a real iPhone
+// and shared via iCloud (Apple refuses headless signing, so the /mipuy.shortcut
+// CI-signing path was abandoned). After adding, the client pastes their token
+// into the shortcut's Text box — see the on-page instructions.
+const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/859eb60273434daaa96c1a7fe64cbb2e'
 
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
@@ -204,16 +204,32 @@ export default function ConnectPage() {
                 {copied ? '✓ הועתק' : '📋 העתק טוקן'}
               </button>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 2 · הוסף את ה-Shortcut</p>
-              <p className="text-muted-txt text-xs mb-3 text-right">בחלון שייפתח, הדבק את הטוקן כשתתבקש ואשר הוספה.</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 2 · הוסף את ה-Shortcut והדבק את הטוקן</p>
               <a
-                href={shortcutImportHref()}
-                className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
+                href={SHORTCUT_ICLOUD_URL}
+                className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors mb-3"
               >
                 📲 הוסף את ה-Shortcut
               </a>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
+                אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
+                הקש על <span className="text-txt font-semibold">Mipuy</span> →
+                מחק את «הדבק כאן טוקן» מהתיבה הצהובה →
+                <span className="text-txt font-semibold"> הדבק את הטוקן</span> שהעתקת בשלב 1 → סיום.
+              </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 mt-8 text-right">שלב 3 · הוסף את האפליקציה למסך הבית</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 3 · צור את האוטומציה (חד־פעמי, 2 דקות)</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
+                באפליקציית קיצורי דרך: לשונית <span className="text-txt font-semibold">אוטומציה</span> → ＋ →
+                בחר <span className="text-txt font-semibold">«עסקה»</span> (Transaction) →
+                בחר את הכרטיסים → <span className="text-txt font-semibold">«הפעלה מיידית»</span> →
+                הוסף פעולה <span className="text-txt font-semibold">«הפעל קיצור דרך»</span> →
+                בחר <span className="text-txt font-semibold">Mipuy</span> → סיום.
+                <br />
+                מעכשיו כל תשלום Apple Pay נרשם לבד ✨
+              </div>
+
+              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 4 · הוסף את האפליקציה למסך הבית</p>
               <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed">
                 בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
                 → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
