@@ -57,7 +57,22 @@ export async function POST(req: NextRequest) {
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
   }
-  const amt = typeof amount === 'number' ? amount : parseFloat(String(amount))
+  let amt = typeof amount === 'number' ? amount : parseFloat(String(amount))
+  let cleanMerchant = merchant.trim()
+
+  // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
+  // Merchant/Amount properties from the Apple Pay transaction (the editor
+  // offers no "transaction" type), so it sends the WHOLE transaction as text
+  // in `merchant` with no amount. Pull the first money-looking number out and
+  // treat the rest as the merchant name.
+  if (!Number.isFinite(amt) || amt <= 0) {
+    const ext = extractFromRaw(cleanMerchant)
+    if (ext) {
+      amt = ext.amount
+      cleanMerchant = ext.merchant
+    }
+  }
+
   if (!Number.isFinite(amt) || amt <= 0 || amt > MAX_AMOUNT) {
     return NextResponse.json({ error: 'bad amount' }, { status: 400 })
   }
@@ -65,8 +80,6 @@ export async function POST(req: NextRequest) {
     ? date
     : new Date().toISOString().slice(0, 10)
   const refStr = typeof ref === 'string' ? ref.slice(0, 64) : null
-
-  const cleanMerchant = merchant.trim()
   // Explicit category (manual entry from the app) wins. Otherwise: learned
   // corrections (shared — same DB the credit/import/expenses tabs teach) →
   // BUSINESS_DB → AI fallback.
@@ -143,6 +156,29 @@ async function buildNotify(
     }
   } catch { /* best-effort — the default text is fine */ }
   return { title, body, warn }
+}
+
+/**
+ * Extracts amount + merchant from a raw transaction text (Apple Pay via the
+ * shared iOS Shortcut). Currency-anchored patterns first (₪/$/€/ש"ח, before or
+ * after the number), then a bare first-number as last resort. The remainder of
+ * the string, cleaned of separators, becomes the merchant.
+ */
+function extractFromRaw(raw: string): { merchant: string; amount: number } | null {
+  const m =
+    raw.match(/(?:₪|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/)
+    ?? raw.match(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:₪|ש["”״]?ח|\$|€|ILS|NIS)/i)
+    ?? raw.match(/([0-9][0-9,]*(?:\.[0-9]+)?)/)
+  if (!m) return null
+  const amount = parseFloat(m[1].replace(/,/g, ''))
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const merchant = raw
+    .replace(m[0], ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s\-–—·,.:;]+|[\s\-–—·,.:;]+$/g, '')
+    .trim()
+    .slice(0, 200)
+  return { merchant: merchant || 'Apple Pay', amount }
 }
 
 // Reads the shared merchant→category corrections (admin SDK) so a fix made once
