@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'bad request body' }, { status: 400 })
   }
-  const { token, merchant, amount, date, ref, category: catOverride } = body as Record<string, unknown>
+  const { token, merchant, amount, date, ref, category: catOverride, source } = body as Record<string, unknown>
 
   const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
   if (!uid) {
@@ -81,15 +81,25 @@ export async function POST(req: NextRequest) {
   // Explicit category (manual entry from the app) wins. Otherwise: learned
   // corrections (shared — same DB the credit/import/expenses tabs teach) →
   // BUSINESS_DB → AI fallback.
+  // Bit/Paybox person-to-person transfers have no real business name, so the
+  // AI just mis-guesses (e.g. a person's name → "ביטוח לאומי"). Detect them from
+  // the capture source and default UNKNOWN ones to "ביט ללא מעקב" — identifiable,
+  // and easy to re-categorize (the app surfaces it in the one-tap review strip).
+  const isTransfer = typeof source === 'string' && /ביט|פייבוקס|paybox|\bbit\b/i.test(source)
+
   let category: string
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
     category = catOverride
   } else {
     const learnedDB = await loadSharedLearned(db)
-    category = categorize(cleanMerchant, learnedDB)
+    category = categorize(cleanMerchant, learnedDB)   // learned corrections still win
     if (category === 'שונות') {
-      const ai = await aiCategorizeOne(cleanMerchant)
-      if (ai) category = ai
+      if (isTransfer) {
+        category = 'ביט ללא מעקב'   // don't let the AI guess a person's name
+      } else {
+        const ai = await aiCategorizeOne(cleanMerchant)
+        if (ai) category = ai
+      }
     }
   }
 
@@ -128,7 +138,11 @@ async function buildNotify(
 ): Promise<{ title: string; body: string; warn: boolean }> {
   const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
   const title = `נרשם: ${merchant} · ${nis(amount)}`
-  let body = `קוטלג ל${category} ✓`
+  // Categories that beg for a human to pick the right one → invite a tap.
+  const NEEDS_REVIEW = new Set(['שונות', 'ביט ללא מעקב', 'מזומן ללא מעקב'])
+  let body = NEEDS_REVIEW.has(category)
+    ? `קוטלג ל${category} — הקש לעדכון הקטגוריה`
+    : `קוטלג ל${category} ✓`
   let warn = false
   try {
     const snap = await db.collection('users').doc(uid).get()

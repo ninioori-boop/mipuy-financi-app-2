@@ -136,11 +136,14 @@ export default function ExpensesPage() {
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
   }, [entries, selMonth])
 
-  // Auto-captured entries the categorizer couldn't place (landed on 'שונות',
-  // note carries the ingestion #ref) — surfaced for a one-tap fix that learns.
+  // Auto-captured entries that need a human to pick the right category — the
+  // catch-all 'שונות' plus the payment-method placeholders ('ביט ללא מעקב',
+  // 'מזומן ללא מעקב') that Bit/cash transfers land on. Note carries the
+  // ingestion #ref. Surfaced for a one-tap fix that also learns for next time.
+  const REVIEW_CATS = useMemo(() => new Set(['שונות', 'ביט ללא מעקב', 'מזומן ללא מעקב']), [])
   const pendingReview = useMemo(
-    () => monthEntries.filter(e => e.category === 'שונות' && / #\S+$/.test(e.note)),
-    [monthEntries],
+    () => monthEntries.filter(e => REVIEW_CATS.has(e.category) && / #\S+$/.test(e.note)),
+    [monthEntries, REVIEW_CATS],
   )
 
   // One-tap suggestion chips: the user's most-used categories, padded with
