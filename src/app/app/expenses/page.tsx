@@ -41,6 +41,12 @@ function dayLabel(iso: string): string {
 const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
+// Entries sitting on these payment-method placeholders carry a generic string
+// ("העברה בביט", "משיכת מזומן") as their "merchant" — not a real business.
+// Learning it would override the placeholder for every future Bit/ATM charge,
+// and through the shared pool poison every account. Fix the entry, never learn.
+const NO_LEARN_CATS = new Set(['ביט ללא מעקב', 'מזומן ללא מעקב'])
+
 export default function ExpensesPage() {
   const router = useRouter()
   const clientMode = useClientMode()   // in-app: declutter for the phone
@@ -158,11 +164,12 @@ export default function ExpensesPage() {
     return [...new Set([...top, ...defaults])].slice(0, 6)
   }, [entries])
 
-  function fixCategory(id: string, note: string, cat: string) {
+  function fixCategory(id: string, note: string, fromCat: string, cat: string) {
     update(id, { category: cat })
     const merchant = note.replace(/ #\S+$/, '').trim()
-    if (merchant) learn(merchant, cat)
-    toast.success(`${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓`)
+    const teach = Boolean(merchant) && !NO_LEARN_CATS.has(fromCat)
+    if (teach) learn(merchant, cat)
+    toast.success(teach ? `${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓` : `${icon(cat)} קוטלג ל${cat} ✓`)
   }
 
   // One-tap budget adoption: pull the current calendar month's PLAN values from
@@ -365,7 +372,7 @@ export default function ExpensesPage() {
                     {suggestedCats.map(cat => (
                       <button
                         key={cat}
-                        onClick={() => fixCategory(e.id, e.note, cat)}
+                        onClick={() => fixCategory(e.id, e.note, e.category, cat)}
                         className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-txt hover:border-gold/60 hover:text-gold active:bg-gold/10 transition-colors min-h-[36px]"
                       >
                         {icon(cat)} {cat}
@@ -374,7 +381,7 @@ export default function ExpensesPage() {
                     <div className="min-w-[7.5rem]">
                       <CategoryPicker
                         value=""
-                        onChange={cat => fixCategory(e.id, e.note, cat)}
+                        onChange={cat => fixCategory(e.id, e.note, e.category, cat)}
                         variant="field"
                         placeholder="עוד…"
                       />
@@ -617,8 +624,9 @@ export default function ExpensesPage() {
                           onChange={cat => {
                             update(e.id, { category: cat })
                             const merchant = e.note.replace(/ #\S+$/, '').trim()
-                            if (merchant) learn(merchant, cat)
-                            toast.success(merchant ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
+                            const teach = Boolean(merchant) && !NO_LEARN_CATS.has(e.category)
+                            if (teach) learn(merchant, cat)
+                            toast.success(teach ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
                           }}
                           variant="plain"
                         />
