@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { signInWithPopup, signInWithRedirect, GoogleAuthProvider } from 'firebase/auth'
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { embeddedKind, type EmbeddedKind } from '@/lib/isEmbedded'
@@ -15,6 +15,51 @@ export function GoogleSignInButton() {
   // Detected client-side only (avoids a hydration mismatch).
   const [kind, setKind] = useState<EmbeddedKind>(null)
   useEffect(() => { setKind(embeddedKind()) }, [])
+
+  // PWA return handler: after the user signs in with Google in the real browser
+  // (opened from the PWA), the session is written to shared same-origin storage.
+  // When they switch back to the PWA and it becomes visible again, reload once so
+  // Firebase re-reads the now-present session and AuthProvider logs them in.
+  useEffect(() => {
+    function onVisible() {
+      if (
+        document.visibilityState === 'visible'
+        && sessionStorage.getItem('pwaAuthPending') === '1'
+        && !auth.currentUser
+      ) {
+        sessionStorage.removeItem('pwaAuthPending')
+        window.location.reload()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  // Installed PWA: Google OAuth can't complete inside the standalone window
+  // (partitioned storage), so open the sign-in in the REAL browser — which
+  // shares this origin's storage with the PWA on Android. The user signs in
+  // there; on return, the visibility handler above reloads and picks up the
+  // session. (Same idea as the Android app's browser hand-off.)
+  if (kind === 'pwa') {
+    return (
+      <div className="space-y-2">
+        <Button
+          onClick={() => {
+            try { sessionStorage.setItem('pwaAuthPending', '1') } catch {}
+            window.open(`${window.location.origin}/auth`, '_blank')
+          }}
+          variant="outline"
+          className="w-full gap-3 bg-surface2 border-line text-txt hover:bg-surface3 hover:text-txt h-11"
+        >
+          <GoogleIcon />
+          כניסה עם Google
+        </Button>
+        <p className="text-white/40 text-[11px] text-center">
+          ההתחברות תיפתח בדפדפן — התחבר/י שם, ואז חזור/י לכאן ותיכנס/י אוטומטית
+        </p>
+      </div>
+    )
+  }
 
   // Android app: hand Google sign-in to the native shell, which opens the real
   // browser at /connect. The user signs in with Google there (allowed), and the
@@ -40,14 +85,7 @@ export function GoogleSignInButton() {
     setError(null)
     try {
       const provider = new GoogleAuthProvider()
-      // In an installed PWA a popup can't reliably message back to a standalone
-      // window, so use a full-page redirect (AuthProvider's getRedirectResult
-      // completes the sign-in on return). Normal browser tabs keep the popup.
-      if (kind === 'pwa') {
-        await signInWithRedirect(auth, provider)
-      } else {
-        await signInWithPopup(auth, provider)
-      }
+      await signInWithPopup(auth, provider)
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
