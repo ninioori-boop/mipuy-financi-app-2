@@ -59,7 +59,11 @@ export async function POST(req: NextRequest) {
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
   }
-  let amt = typeof amount === 'number' ? amount : parseFloat(String(amount))
+  // The iOS Shortcut's transaction "Amount" arrives as a CURRENCY-FORMATTED
+  // STRING ("₪32.83", "32.83 ₪", "$32.83") — parseFloat("₪32.83") is NaN — so
+  // pull the first money-looking number out of it. (Comma = thousands sep in
+  // he-IL; period = decimal.) Plain numbers still pass straight through.
+  let amt = parseAmountLoose(amount)
   let cleanMerchant = merchant.trim()
 
   // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
@@ -180,6 +184,18 @@ async function buildNotify(
  * after the number), then a bare first-number as last resort. The remainder of
  * the string, cleaned of separators, becomes the merchant.
  */
+/**
+ * Parses an amount that may be a plain number OR a currency-formatted string
+ * from the iOS Shortcut ("₪32.83", "32.83 ₪", "$1,234.56"). Returns NaN if no
+ * number is found. Commas are treated as thousands separators (he-IL uses a
+ * period for the decimal).
+ */
+function parseAmountLoose(v: unknown): number {
+  if (typeof v === 'number') return v
+  const m = String(v ?? '').match(/[0-9][0-9,]*(?:\.[0-9]+)?/)
+  return m ? parseFloat(m[0].replace(/,/g, '')) : NaN
+}
+
 function extractFromRaw(raw: string): { merchant: string; amount: number } | null {
   const m =
     raw.match(/(?:₪|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/)
