@@ -16,46 +16,24 @@ export function GoogleSignInButton() {
   const [kind, setKind] = useState<EmbeddedKind>(null)
   useEffect(() => { setKind(embeddedKind()) }, [])
 
-  // PWA return handler: after the user signs in with Google in the real browser
-  // (opened from the PWA), the session is written to shared same-origin storage.
-  // When they switch back to the PWA and it becomes visible again, reload once so
-  // Firebase re-reads the now-present session and AuthProvider logs them in.
-  useEffect(() => {
-    function onVisible() {
-      if (
-        document.visibilityState === 'visible'
-        && sessionStorage.getItem('pwaAuthPending') === '1'
-        && !auth.currentUser
-      ) {
-        sessionStorage.removeItem('pwaAuthPending')
-        window.location.reload()
-      }
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [])
-
-  // Installed PWA: Google OAuth can't complete inside the standalone window
-  // (partitioned storage), so open the sign-in in the REAL browser — which
-  // shares this origin's storage with the PWA on Android. The user signs in
-  // there; on return, the visibility handler above reloads and picks up the
-  // session. (Same idea as the Android app's browser hand-off.)
+  // Installed PWA: Google OAuth can't complete inside the standalone window, so
+  // the button simply opens the app in the real browser, where Google works —
+  // the user signs in and continues there. (No auto-return gymnastics: those
+  // relied on shared storage that isn't guaranteed and just bounced the user
+  // back to the login screen.)
   if (kind === 'pwa') {
     return (
       <div className="space-y-2">
         <Button
-          onClick={() => {
-            try { sessionStorage.setItem('pwaAuthPending', '1') } catch {}
-            window.open(`${window.location.origin}/auth`, '_blank')
-          }}
+          onClick={() => { window.open(`${window.location.origin}/auth`, '_blank') }}
           variant="outline"
           className="w-full gap-3 bg-surface2 border-line text-txt hover:bg-surface3 hover:text-txt h-11"
         >
           <GoogleIcon />
-          כניסה עם Google
+          כניסה עם Google (בדפדפן)
         </Button>
         <p className="text-white/40 text-[11px] text-center">
-          ההתחברות תיפתח בדפדפן — התחבר/י שם, ואז חזור/י לכאן ותיכנס/י אוטומטית
+          לחיצה תפתח את המערכת בדפדפן — התחבר/י שם עם Google
         </p>
       </div>
     )
