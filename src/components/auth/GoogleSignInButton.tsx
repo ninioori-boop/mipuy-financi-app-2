@@ -16,25 +16,36 @@ export function GoogleSignInButton() {
   const [kind, setKind] = useState<EmbeddedKind>(null)
   useEffect(() => { setKind(embeddedKind()) }, [])
 
-  // Installed PWA: Google OAuth can't complete inside the standalone window, so
-  // the button simply opens the app in the real browser, where Google works —
-  // the user signs in and continues there. (No auto-return gymnastics: those
-  // relied on shared storage that isn't guaranteed and just bounced the user
-  // back to the login screen.)
+  // Installed PWA: Google OAuth can't complete inside the standalone window, and
+  // window.open keeps same-origin links INSIDE the PWA. So on Android we escape
+  // to the REAL external browser via an intent:// URL (with an https fallback);
+  // the user signs in with Google there and continues in the browser. The button
+  // looks identical to the normal one.
+  function openInBrowser() {
+    const path = '/auth'
+    const httpsUrl = `${window.location.origin}${path}`
+    const ua = navigator.userAgent || ''
+    if (/Android/i.test(ua)) {
+      window.location.href =
+        `intent://${window.location.host}${path}` +
+        `#Intent;scheme=https;action=android.intent.action.VIEW;` +
+        `S.browser_fallback_url=${encodeURIComponent(httpsUrl)};end`
+    } else {
+      window.open(httpsUrl, '_blank')
+    }
+  }
   if (kind === 'pwa') {
     return (
       <div className="space-y-2">
         <Button
-          onClick={() => { window.open(`${window.location.origin}/auth`, '_blank') }}
+          onClick={openInBrowser}
           variant="outline"
           className="w-full gap-3 bg-surface2 border-line text-txt hover:bg-surface3 hover:text-txt h-11"
         >
           <GoogleIcon />
-          כניסה עם Google (בדפדפן)
+          כניסה עם Google
         </Button>
-        <p className="text-white/40 text-[11px] text-center">
-          לחיצה תפתח את המערכת בדפדפן — התחבר/י שם עם Google
-        </p>
+        <p className="text-white/40 text-[11px] text-center">ההתחברות תיפתח בדפדפן</p>
       </div>
     )
   }
