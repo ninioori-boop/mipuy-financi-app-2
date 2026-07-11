@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
+import { signInWithPopup, signInWithRedirect, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { embeddedKind, type EmbeddedKind } from '@/lib/isEmbedded'
@@ -9,8 +9,9 @@ import { embeddedKind, type EmbeddedKind } from '@/lib/isEmbedded'
 export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
-  // Google OAuth is blocked inside embedded browsers ("disallowed_useragent").
-  // The Android app can bridge out to the real browser; an installed PWA can't.
+  // Google OAuth is BLOCKED only inside a raw WebView (our Android app) —
+  // "disallowed_useragent". An installed PWA is real Chrome/Safari, so OAuth
+  // works there (via redirect, which is reliable in standalone display mode).
   // Detected client-side only (avoids a hydration mismatch).
   const [kind, setKind] = useState<EmbeddedKind>(null)
   useEffect(() => { setKind(embeddedKind()) }, [])
@@ -34,21 +35,19 @@ export function GoogleSignInButton() {
     )
   }
 
-  // Installed PWA — no native bridge, so steer to email+password.
-  if (kind === 'pwa') {
-    return (
-      <p className="text-white/50 text-xs text-center leading-relaxed">
-        באפליקציה המותקנת מתחברים עם <span className="text-white/80 font-medium">מייל וסיסמה</span> (למעלה).
-      </p>
-    )
-  }
-
   async function handleSignIn() {
     setLoading(true)
     setError(null)
     try {
       const provider = new GoogleAuthProvider()
-      await signInWithPopup(auth, provider)
+      // In an installed PWA a popup can't reliably message back to a standalone
+      // window, so use a full-page redirect (AuthProvider's getRedirectResult
+      // completes the sign-in on return). Normal browser tabs keep the popup.
+      if (kind === 'pwa') {
+        await signInWithRedirect(auth, provider)
+      } else {
+        await signInWithPopup(auth, provider)
+      }
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
