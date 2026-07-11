@@ -38,19 +38,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  // TEMP DIAGNOSTIC (remove after iOS diagnosis): capture the exact raw payload
-  // so we can see what the iOS Shortcut sends at runtime for a real transaction.
-  try {
-    await db.collection('debug').doc('lastTx').set({
-      uid,
-      merchantType:  typeof merchant,
-      merchantValue: (typeof merchant === 'string' ? merchant : String(merchant)).slice(0, 400),
-      amountType:    typeof amount,
-      amountValue:   (amount ?? null) as unknown,
-      bodyKeys:      body && typeof body === 'object' ? Object.keys(body) : [],
-      at:            FieldValue.serverTimestamp(),
-    })
-  } catch { /* best-effort */ }
+  // TEMP DIAGNOSTIC — scoped to ONE test account only (Ori's household / Rotem),
+  // so NO real client's transaction is ever captured. Confirms the iOS amount
+  // fix on that one phone. Remove entirely once verified.
+  const DEBUG_UID = 'LgHUoVC2hMWF6awgQJVeVOQIwqR2'
+  if (uid === DEBUG_UID) {
+    try {
+      await db.collection('debug').doc('lastTx').set({
+        uid,
+        merchantType:  typeof merchant,
+        merchantValue: (typeof merchant === 'string' ? merchant : String(merchant)).slice(0, 400),
+        amountType:    typeof amount,
+        amountValue:   (amount ?? null) as unknown,
+        bodyKeys:      body && typeof body === 'object' ? Object.keys(body) : [],
+        at:            FieldValue.serverTimestamp(),
+      })
+    } catch { /* best-effort */ }
+  }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
