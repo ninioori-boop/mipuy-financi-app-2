@@ -274,6 +274,7 @@ export default function ExpensesPage() {
             <CategoryPicker
               value={category}
               onChange={setCategory}
+              suggested={suggestedCats}
               variant="field"
               placeholder="בחר קטגוריה…"
             />
@@ -382,6 +383,7 @@ export default function ExpensesPage() {
                       <CategoryPicker
                         value=""
                         onChange={cat => fixCategory(e.id, e.note, e.category, cat)}
+                        suggested={suggestedCats}
                         variant="field"
                         placeholder="עוד…"
                       />
@@ -541,6 +543,7 @@ export default function ExpensesPage() {
                 <CategoryPicker
                   value={rCategory}
                   onChange={setRCategory}
+                  suggested={suggestedCats}
                   variant="field"
                   placeholder="בחר…"
                 />
@@ -621,6 +624,7 @@ export default function ExpensesPage() {
                       <div className="flex-1 min-w-0">
                         <CategoryPicker
                           value={e.category}
+                          suggested={suggestedCats}
                           onChange={cat => {
                             update(e.id, { category: cat })
                             const merchant = e.note.replace(/ #\S+$/, '').trim()

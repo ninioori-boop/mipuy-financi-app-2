@@ -6,15 +6,19 @@ import { ALL_CATEGORIES, CATEGORY_ICONS } from '@/lib/constants'
 
 // Searchable category picker.
 //
-// Why custom (not <select> + datalist): the category list is 40+ entries, the
-// advisor often knows the first 2-3 letters, and the native dropdown forces
-// scrolling all the way down. We render a popover with a search box on top
-// and substring-match against the visible Hebrew name. Open behavior is
-// controllable so existing "click chip to edit" flows still work.
+// The list is 40+ entries, so raw scrolling is slow. Three accelerators:
+//  1. `suggested` chips at the top — the caller's most-likely categories (the
+//     user's most-used, or a merchant's learned category) are ONE TAP away, no
+//     typing. This is the fast path for the common case.
+//  2. On phones we open a bottom SHEET with big touch targets instead of a tiny
+//     anchored popover — far easier to tap with a thumb.
+//  3. On phones we DON'T auto-focus the search box, so the soft keyboard doesn't
+//     jump up for what is usually a single chip tap (search stays opt-in).
+// Desktop keeps the compact anchored popover with the search auto-focused.
 //
-// Positioning: the popover is portaled to <body> with position:fixed because
-// many of the places this lives (transaction tables, accordion panels) are
-// inside overflow-y-auto containers that would otherwise clip the dropdown.
+// Positioning (desktop): the popover is portaled to <body> with position:fixed
+// because many hosts (tables, accordion panels) are inside overflow-y-auto
+// containers that would clip a normally-positioned dropdown.
 
 interface Props {
   value:        string
@@ -32,24 +36,31 @@ interface Props {
   /** Open the popover immediately on mount (used by inline "edit" flows). */
   autoOpen?:    boolean
   onClose?:     () => void
+  /**
+   * One-tap chips shown ABOVE the list — the caller's most-likely categories
+   * (most-used overall, and/or the merchant's learned category first). Invalid
+   * or duplicate entries and the current value are filtered out; capped at 8.
+   */
+  suggested?:   string[]
 }
 
 const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 
 // Hebrew-friendly substring matcher — strips spaces/punctuation so "ביטוח לאומי"
-// matches when the advisor types "ביטוחלאומי" or "ביטוח" or "לאומי".
+// matches when the user types "ביטוחלאומי" or "ביטוח" or "לאומי".
 function normalize(s: string) {
   return s.toLowerCase().replace(/[\s\-_'"()/\\]/g, '')
 }
 
 export function CategoryPicker({
   value, onChange, variant = 'chip', placeholder = 'בחר קטגוריה…',
-  className = '', autoOpen = false, onClose,
+  className = '', autoOpen = false, onClose, suggested,
 }: Props) {
   const [open, setOpen]           = useState(autoOpen)
   const [search, setSearch]       = useState('')
   const [highlight, setHighlight] = useState(0)
   const [pos, setPos]             = useState<{ top: number; right: number; width: number } | null>(null)
+  const [isMobile, setIsMobile]   = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popRef     = useRef<HTMLDivElement>(null)
   const inputRef   = useRef<HTMLInputElement>(null)
@@ -57,26 +68,39 @@ export function CategoryPicker({
   // Parent can flip autoOpen from false→true to programmatically open.
   useEffect(() => { if (autoOpen) setOpen(true) }, [autoOpen])
 
+  // De-duped, valid suggested categories (drop the current value + unknowns), cap 8.
+  const chips = useMemo(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const c of suggested ?? []) {
+      if (!c || c === value || seen.has(c) || !ALL_CATEGORIES.includes(c)) continue
+      seen.add(c)
+      out.push(c)
+      if (out.length >= 8) break
+    }
+    return out
+  }, [suggested, value])
+
   const filtered = useMemo(() => {
     const q = normalize(search.trim())
     if (!q) return ALL_CATEGORIES
     return ALL_CATEGORIES.filter(c => normalize(c).includes(q))
   }, [search])
 
-  // Compute popover screen position relative to the trigger. RTL-aware: we
-  // anchor by the trigger's right edge so the popover extends leftward
-  // (in the natural text-flow direction for Hebrew). Clamped to viewport.
+  // Detect phone + (desktop only) compute the popover position — BEFORE paint so
+  // there's no flash of the wrong layout. RTL-aware: anchor by the trigger's
+  // right edge so the popover extends leftward (natural for Hebrew). Clamped to
+  // the viewport (12px gutter so it doesn't kiss the edge on 320-360px phones).
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return
+    const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+    setIsMobile(mobile)
+    if (mobile) return
     const r = triggerRef.current.getBoundingClientRect()
-    // 12px gutter on each side so the picker doesn't kiss the screen edge on
-    // narrow phones (320-360px).
     const M     = 12
     const POP_W = Math.min(280, window.innerWidth - M * 2)
     const POP_H = 320
-    // Use visualViewport.height when available — when the mobile soft keyboard
-    // is up, layout-viewport height stays full-screen but visual-viewport
-    // shrinks, and we want the popover to fit in the visible area.
+    // visualViewport.height shrinks with the soft keyboard; keep the popover visible.
     const vh = window.visualViewport?.height ?? window.innerHeight
     let right = window.innerWidth - r.right
     if (right + POP_W > window.innerWidth - M) right = window.innerWidth - M - POP_W
@@ -89,13 +113,16 @@ export function CategoryPicker({
     setPos({ top, right, width: POP_W })
   }, [open])
 
-  // Outside-click + Esc closes; scroll on any ancestor closes (popover would
-  // otherwise visually detach from its trigger as the page scrolls).
+  // Outside-tap + Esc close. Desktop also closes on scroll/resize (the popover is
+  // anchored to the trigger and would otherwise detach). Mobile does NOT — the
+  // sheet is bottom-fixed, and the search keyboard fires a visualViewport resize
+  // we must ignore. Mobile outside-tap is handled by the backdrop's onClick.
   useEffect(() => {
     if (!open) return
     setSearch('')
     setHighlight(0)
-    requestAnimationFrame(() => inputRef.current?.focus())
+    const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+    if (!mobile) requestAnimationFrame(() => inputRef.current?.focus())
 
     function onDocDown(e: MouseEvent) {
       const target = e.target as Node
@@ -104,23 +131,20 @@ export function CategoryPicker({
       close()
     }
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close() }
-    // Close only on scrolls outside the popover — scrolling the picker's own
-    // result list must not dismiss it. Capture-phase listener so we see
-    // scrolls on any ancestor scroll container.
     function onScroll(e: Event) {
       const target = e.target as Node | null
       if (target && popRef.current?.contains(target)) return
       close()
     }
     function onResize() { close() }
+
     document.addEventListener('mousedown', onDocDown)
     document.addEventListener('keydown',   onKey)
-    document.addEventListener('scroll',    onScroll, true)
-    window.addEventListener  ('resize',    onResize)
-    // Mobile soft-keyboard appearing shrinks visualViewport without firing a
-    // regular resize. Closing the picker is the conservative choice — the
-    // popover would otherwise hide behind the keyboard.
-    window.visualViewport?.addEventListener('resize', onResize)
+    if (!mobile) {
+      document.addEventListener('scroll', onScroll, true)
+      window.addEventListener('resize', onResize)
+      window.visualViewport?.addEventListener('resize', onResize)
+    }
     return () => {
       document.removeEventListener('mousedown', onDocDown)
       document.removeEventListener('keydown',   onKey)
@@ -176,6 +200,73 @@ export function CategoryPicker({
     }
   })()
 
+  // Shared inner content. `big` = larger touch targets for the mobile sheet.
+  // A plain function (not a component) so the search input never remounts mid-typing.
+  function panel(big: boolean) {
+    return (
+      <>
+        {chips.length > 0 && (
+          <div className="p-2 border-b border-line flex flex-wrap gap-1.5">
+            {chips.map(c => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => pick(c)}
+                className={`inline-flex items-center gap-1.5 rounded-full border transition-colors ${
+                  big ? 'px-3.5 py-3 text-sm' : 'px-2.5 py-1 text-xs'
+                } ${
+                  c === value
+                    ? 'border-gold bg-gold/15 text-gold'
+                    : 'border-line bg-surface3 text-txt hover:border-gold/50'
+                }`}
+              >
+                <span>{icon(c)}</span>
+                <span>{c}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="p-2 border-b border-line">
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={e => { setSearch(e.target.value); setHighlight(0) }}
+            onKeyDown={onInputKey}
+            placeholder="חיפוש קטגוריה…"
+            className="w-full rounded-md border border-line bg-surface px-2.5 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+          />
+        </div>
+        <div className={`overflow-y-auto py-1 ${big ? 'flex-1' : 'max-h-64'}`}>
+          {filtered.length === 0 ? (
+            <div className="px-3 py-6 text-center text-xs text-muted-txt">אין תוצאות</div>
+          ) : (
+            filtered.map((c, i) => {
+              const isCurrent = c === value
+              const isHi      = i === highlight
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onMouseEnter={() => setHighlight(i)}
+                  onClick={() => pick(c)}
+                  className={[
+                    `w-full flex items-center gap-2 px-3 text-start ${big ? 'py-3 text-[15px]' : 'py-2.5 text-sm'}`,
+                    isHi      ? 'bg-gold/15'               : 'hover:bg-surface3',
+                    isCurrent ? 'text-gold font-semibold' : 'text-txt',
+                  ].join(' ')}
+                >
+                  <span className="text-base shrink-0">{icon(c)}</span>
+                  <span className="flex-1 truncate">{c}</span>
+                  {isCurrent && <span className="text-gold text-xs">✓</span>}
+                </button>
+              )
+            })
+          )}
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       <button
@@ -197,51 +288,39 @@ export function CategoryPicker({
         )}
       </button>
 
-      {open && pos && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={popRef}
-          dir="rtl"
-          style={{ position: 'fixed', top: pos.top, right: pos.right, width: pos.width }}
-          className="z-[60] rounded-lg border border-line bg-surface2 shadow-xl shadow-black/50 overflow-hidden"
-        >
-          <div className="p-2 border-b border-line">
-            <input
-              ref={inputRef}
-              value={search}
-              onChange={e => { setSearch(e.target.value); setHighlight(0) }}
-              onKeyDown={onInputKey}
-              placeholder="חיפוש קטגוריה…"
-              className="w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
-            />
+      {open && typeof document !== 'undefined' && createPortal(
+        isMobile ? (
+          <div className="fixed inset-0 z-[60] flex flex-col justify-end" dir="rtl">
+            <div className="absolute inset-0 bg-black/50" onClick={close} />
+            <div
+              ref={popRef}
+              className="relative rounded-t-2xl border-t border-line bg-surface2 shadow-xl shadow-black/50 max-h-[80vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
+                <span className="text-sm font-semibold text-txt">בחירת קטגוריה</span>
+                <button
+                  type="button"
+                  onClick={close}
+                  className="text-muted-txt hover:text-txt text-lg leading-none w-11 h-11 flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
+              {panel(true)}
+            </div>
           </div>
-          <div className="max-h-64 overflow-y-auto py-1">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-muted-txt">אין תוצאות</div>
-            ) : (
-              filtered.map((c, i) => {
-                const isCurrent = c === value
-                const isHi      = i === highlight
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    onMouseEnter={() => setHighlight(i)}
-                    onClick={() => pick(c)}
-                    className={[
-                      'w-full flex items-center gap-2 px-3 py-2.5 text-sm text-start',
-                      isHi      ? 'bg-gold/15'         : 'hover:bg-surface3',
-                      isCurrent ? 'text-gold font-semibold' : 'text-txt',
-                    ].join(' ')}
-                  >
-                    <span className="text-base shrink-0">{icon(c)}</span>
-                    <span className="flex-1 truncate">{c}</span>
-                    {isCurrent && <span className="text-gold text-xs">✓</span>}
-                  </button>
-                )
-              })
-            )}
-          </div>
-        </div>,
+        ) : (
+          pos && (
+            <div
+              ref={popRef}
+              dir="rtl"
+              style={{ position: 'fixed', top: pos.top, right: pos.right, width: pos.width }}
+              className="z-[60] rounded-lg border border-line bg-surface2 shadow-xl shadow-black/50 overflow-hidden"
+            >
+              {panel(false)}
+            </div>
+          )
+        ),
         document.body,
       )}
     </>
