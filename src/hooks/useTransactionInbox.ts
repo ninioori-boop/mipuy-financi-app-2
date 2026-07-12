@@ -1,17 +1,53 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { saveUserData } from '@/lib/firestoreService'
 import { collectSnapshot } from '@/lib/dataSync'
+import { computeBudgetStatus } from '@/lib/budgetStatus'
 
 function today() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
+
+// The drain is otherwise silent — tell the client a charge arrived, budget-aware,
+// with a one-tap jump to the expenses tab (where the review banner categorizes it).
+function notifyCaptured(
+  charges: { merchant: string; amount: number; category: string; date: string }[],
+  router: ReturnType<typeof useRouter>,
+) {
+  const view = { label: 'צפה', onClick: () => router.push('/app/expenses') }
+  if (charges.length > 1) {
+    const total = charges.reduce((s, c) => s + c.amount, 0)
+    toast.info(`💳 נקלטו ${charges.length} חיובים חדשים · ${nis(total)}`, { action: view })
+    return
+  }
+  const c = charges[0]
+  const status = computeBudgetStatus({
+    budgets:     useCategoryBudgetStore.getState().budgets,
+    entries:     useExpenseLogStore.getState().entries,
+    category:    c.category,
+    addedAmount: 0,
+    ym:          c.date.slice(0, 7),
+  })
+  const base = `💳 נקלט: ${c.merchant} · ${nis(c.amount)} → ${c.category}`
+  if (status.level === 'over') {
+    toast.error(`${base} · ⚠️ חריגה מתקציב ${c.category}`, { action: view })
+  } else if (status.level === 'near') {
+    toast.warning(`${base} · ${Math.round(status.pct * 100)}% מתקציב ${c.category}`, { action: view })
+  } else {
+    toast.info(base, { action: view })
+  }
 }
 
 /**
@@ -33,6 +69,7 @@ function today() {
  * snapshot listener just errors silently — a no-op that breaks nothing.
  */
 export function useTransactionInbox() {
+  const router   = useRouter()
   const user     = useAuthStore(s => s.user)
   const hydrated = useSyncStore(s => s.hydrated)
 
@@ -49,6 +86,7 @@ export function useTransactionInbox() {
 
         const dropNow: string[] = []        // dup / malformed — nothing to persist, safe to delete
         const dropAfterSave: string[] = []  // newly added — delete ONLY after a confirmed save
+        const newCharges: { merchant: string; amount: number; category: string; date: string }[] = []
 
         for (const change of added) {
           const id = change.doc.id
@@ -73,13 +111,11 @@ export function useTransactionInbox() {
             continue
           }
 
-          useExpenseLogStore.getState().add({
-            date:     typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : today(),
-            amount,
-            category: typeof d.category === 'string' && d.category ? d.category : 'שונות',
-            note,
-          })
+          const chargeDate = typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : today()
+          const category   = typeof d.category === 'string' && d.category ? d.category : 'שונות'
+          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note })
           dropAfterSave.push(id)
+          newCharges.push({ merchant, amount, category, date: chargeDate })
         }
 
         // Dup/malformed: delete immediately — there's nothing to persist for them.
@@ -100,10 +136,12 @@ export function useTransactionInbox() {
             deleteDoc(doc(db, 'transactionInbox', user.uid, 'items', id)).catch(() => {})
           }
         }
+
+        if (newCharges.length > 0) notifyCaptured(newCharges, router)
       },
       () => { /* permission denied (rule not published) / offline — silent no-op */ },
     )
 
     return () => unsub()
-  }, [user, hydrated])
+  }, [user, hydrated, router])
 }

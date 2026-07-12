@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
@@ -9,8 +9,11 @@ import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
+import { EditEntrySheet } from '@/components/expenses/EditEntrySheet'
 import { useClientMode } from '@/hooks/useClientMode'
 import { useRecurringStore } from '@/stores/recurringStore'
+import { computeBudgetStatus } from '@/lib/budgetStatus'
+import { notifyBudget } from '@/lib/budgetToast'
 
 function today() {
   const d = new Date()
@@ -59,10 +62,13 @@ export default function ExpensesPage() {
   const [selMonth, setSelMonth] = useState(currentMonth())
   const [showBudgetEditor, setShowBudgetEditor] = useState(false)
   const [showRecurring, setShowRecurring] = useState(false)
+  const [showAllBudgetCats, setShowAllBudgetCats] = useState(false)
   const [amount, setAmount]     = useState('')
   const [category, setCategory] = useState('')
   const [note, setNote]         = useState('')
   const [date, setDate]         = useState(today())
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const editingEntry = editingId ? entries.find(e => e.id === editingId) ?? null : null
 
   // Recurring-rule add form
   const [rName, setRName] = useState('')
@@ -96,20 +102,11 @@ export default function ExpensesPage() {
     toast.success(`נרשם: ${icon(category)} ${category} · ${fmt(amt)}`)
 
     // Budget alert — does this expense push the category near/over its monthly cap?
-    // `entries` here is the pre-add list (closure), so + rounded = the new total.
-    const budget = budgets[category]
-    if (budget) {
-      const ym = date.slice(0, 7)
-      const spent = entries
-        .filter(e => e.category === category && e.date.slice(0, 7) === ym)
-        .reduce((s, e) => s + e.amount, 0) + rounded
-      const pct = spent / budget
-      if (pct >= 1) {
-        toast.error(`⚠️ חריגה מהתקציב ל${category}: ${fmt(spent)} מתוך ${fmt(budget)} (${Math.round(pct * 100)}%)`)
-      } else if (pct >= 0.8) {
-        toast.warning(`מתקרב לתקציב ל${category}: ${Math.round(pct * 100)}% (${fmt(spent)} מתוך ${fmt(budget)})`)
-      }
-    }
+    // `entries` here is the pre-add list (closure), so addedAmount folds in the new charge.
+    notifyBudget(
+      computeBudgetStatus({ budgets, entries, category, addedAmount: rounded, ym: date.slice(0, 7) }),
+      category,
+    )
   }
 
   const monthEntries = useMemo(
@@ -164,6 +161,13 @@ export default function ExpensesPage() {
     return [...new Set([...top, ...defaults])].slice(0, 6)
   }, [entries])
 
+  // Default the add-form category to the user's top category once (while still
+  // empty), so the hot path is just "type amount → Enter". Once the user picks a
+  // category it sticks — handleAdd keeps category+date between adds.
+  useEffect(() => {
+    if (!category && suggestedCats.length > 0) setCategory(suggestedCats[0])
+  }, [suggestedCats, category])
+
   function fixCategory(id: string, note: string, fromCat: string, cat: string) {
     update(id, { category: cat })
     const merchant = note.replace(/ #\S+$/, '').trim()
@@ -204,6 +208,17 @@ export default function ExpensesPage() {
 
   // Quick category -> spent-this-month lookup, for the budget editor list.
   const spentByCat = useMemo(() => new Map(catTotals), [catTotals])
+
+  // Budget-editor rows: clients get a short list (budgeted + most-used) so they
+  // don't scroll 44 rows on a phone; "הצג הכל" reveals the full list. Advisor = full.
+  const budgetEditorCats = useMemo(() => {
+    if (!clientMode || showAllBudgetCats) return ALL_CATEGORIES
+    const keep = new Set<string>([
+      ...ALL_CATEGORIES.filter(c => (budgets[c] ?? 0) > 0),
+      ...suggestedCats,
+    ])
+    return ALL_CATEGORIES.filter(c => keep.has(c))
+  }, [clientMode, showAllBudgetCats, budgets, suggestedCats])
 
   // Rows for the breakdown = every category spent this month, PLUS any budgeted
   // category with no spend yet (so the user sees the full budget picture at 0%).
@@ -436,7 +451,7 @@ export default function ExpensesPage() {
               </button>
             </div>
             <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
-              {ALL_CATEGORIES.map(cat => {
+              {budgetEditorCats.map(cat => {
                 const spent = spentByCat.get(cat) ?? 0
                 return (
                   <div key={cat} className="flex items-center justify-between gap-2">
@@ -460,6 +475,14 @@ export default function ExpensesPage() {
                 )
               })}
             </div>
+            {clientMode && !showAllBudgetCats && (
+              <button
+                onClick={() => setShowAllBudgetCats(true)}
+                className="text-xs text-gold/80 hover:text-gold transition-colors py-2 min-h-[36px]"
+              >
+                הצג את כל הקטגוריות
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -638,6 +661,14 @@ export default function ExpensesPage() {
                       </div>
                       <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
                       <button
+                        onClick={() => setEditingId(e.id)}
+                        className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-gold active:text-gold sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"
+                        title="ערוך הוצאה"
+                        aria-label="ערוך הוצאה"
+                      >
+                        ✎
+                      </button>
+                      <button
                         onClick={() => {
                           const gone = e
                           remove(e.id)
@@ -661,6 +692,24 @@ export default function ExpensesPage() {
             )
           })}
         </div>
+      )}
+
+      {editingEntry && (
+        <EditEntrySheet
+          entry={editingEntry}
+          suggested={suggestedCats}
+          onClose={() => setEditingId(null)}
+          onSave={patch => {
+            update(editingEntry.id, patch)
+            // If the category changed here, teach the shared DB — same loop as the
+            // inline row picker (guarded against the Bit/cash placeholders).
+            if (patch.category !== editingEntry.category) {
+              const merchant = patch.note.replace(/ #\S+$/, '').trim()
+              if (merchant && !NO_LEARN_CATS.has(editingEntry.category)) learn(merchant, patch.category)
+            }
+            toast.success('ההוצאה עודכנה ✓')
+          }}
+        />
       )}
     </div>
   )

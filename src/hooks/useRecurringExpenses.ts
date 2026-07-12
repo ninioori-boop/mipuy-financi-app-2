@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect } from 'react'
+import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
+import { computeBudgetStatus } from '@/lib/budgetStatus'
 
 /**
  * Materializes recurring fixed expenses into the expense log.
@@ -34,6 +37,7 @@ export function useRecurringExpenses() {
     const { posted, markPosted } = useRecurringStore.getState()
     const { add } = useExpenseLogStore.getState()
 
+    const justPosted: { name: string; category: string }[] = []
     for (const r of rules) {
       if (!r.active) continue
       if (!(r.amount > 0) || !r.category) continue
@@ -48,6 +52,25 @@ export function useRecurringExpenses() {
         note:     `${r.name} · הוצאה קבועה ⟳`,
       })
       markPosted(r.id, ym)
+      justPosted.push({ name: r.name, category: r.category })
+    }
+
+    if (justPosted.length === 0) return
+
+    // One summary toast (never one-per-rule — a month's backlog could post
+    // several at once). Flag any category these charges pushed over its budget.
+    const budgets = useCategoryBudgetStore.getState().budgets
+    const entries = useExpenseLogStore.getState().entries   // now includes the posts
+    const over = [...new Set(justPosted.map(p => p.category))].filter(
+      cat => computeBudgetStatus({ budgets, entries, category: cat, addedAmount: 0, ym }).level === 'over',
+    )
+    const label = justPosted.length === 1
+      ? `⟳ נרשמה הוצאה קבועה: ${justPosted[0].name}`
+      : `⟳ נרשמו ${justPosted.length} הוצאות קבועות`
+    if (over.length) {
+      toast.warning(`${label} · ⚠️ חריגה מתקציב: ${over.join(', ')}`)
+    } else {
+      toast.success(label)
     }
   }, [user, hydrated, rules])
 }
