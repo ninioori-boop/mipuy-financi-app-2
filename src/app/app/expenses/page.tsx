@@ -259,19 +259,17 @@ export default function ExpensesPage() {
     <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gold">🧾 תיעוד הוצאות</h1>
-        <p className="text-muted-txt text-sm mt-1 hidden sm:block">
-          רשמו כל הוצאה ברגע שהיא קורית ושייכו אותה לקטגוריה. יומן עצמאי — לא מתחבר לדוחות או לתקציב החודשי.
-        </p>
+      <div className="flex items-baseline justify-between gap-2 px-1 pt-1">
+        <h1 className="text-2xl font-extrabold text-gold tracking-tight">🧾 תיעוד הוצאות</h1>
+        <p className="text-muted-txt text-sm hidden sm:block">יומן עצמאי — לא מתחבר לדוחות</p>
       </div>
 
-      {/* Quick add */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
-        <div className="text-sm font-semibold text-txt">➕ הוצאה חדשה</div>
-        <div className="grid grid-cols-2 sm:grid-cols-[7rem_1fr_8rem_auto] gap-2 sm:gap-3 items-end">
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">סכום ₪</label>
+      {/* Quick add — the primary action, big & prominent */}
+      <div className="rounded-3xl border border-line bg-surface2 p-5 space-y-3">
+        <div className="text-lg font-bold text-txt">➕ הוצאה חדשה</div>
+        <div className="grid grid-cols-2 sm:grid-cols-[8rem_1fr_9rem_auto] gap-2.5 items-end">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-txt">סכום ₪</label>
             <input
               type="number"
               inputMode="numeric"
@@ -281,32 +279,33 @@ export default function ExpensesPage() {
               placeholder="₪"
               min={0}
               style={{ direction: 'ltr' }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[52px] text-lg text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">קטגוריה</label>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-txt">קטגוריה</label>
             <CategoryPicker
               value={category}
               onChange={setCategory}
               suggested={suggestedCats}
               variant="field"
               placeholder="בחר קטגוריה…"
+              className="min-h-[52px]"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">תאריך</label>
+          <div className="space-y-1.5 col-span-2 sm:col-span-1">
+            <label className="text-xs text-muted-txt">תאריך</label>
             <input
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
               style={{ direction: 'ltr' }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[52px] text-sm text-txt focus:outline-none focus:border-gold/60"
             />
           </div>
           <button
             onClick={handleAdd}
-            className="col-span-2 sm:col-span-1 bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 text-sm font-semibold transition-colors whitespace-nowrap"
+            className="col-span-2 sm:col-span-1 min-h-[52px] bg-gold text-surface rounded-xl px-6 text-base font-extrabold hover:bg-gold-light active:bg-gold-dark transition-colors whitespace-nowrap"
           >
             הוסף
           </button>
@@ -316,12 +315,12 @@ export default function ExpensesPage() {
           onChange={e => setNote(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
           placeholder="הערה (לא חובה) — איפה / על מה…"
-          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+          className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[48px] text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
         />
       </div>
 
       {/* Month switcher + total + transfer */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 space-y-3">
+      <div className="rounded-2xl border border-line bg-surface2 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
@@ -346,9 +345,9 @@ export default function ExpensesPage() {
             )}
           </div>
           <div className="text-end">
-            <div className="text-[11px] text-muted-txt">סה&quot;כ החודש</div>
-            <div className="text-xl font-black text-expense tabular-nums">{fmt(monthTotal)}</div>
-            <div className="text-[11px] text-muted-txt">{monthEntries.length} רישומים</div>
+            <div className="text-xs text-muted-txt">סה&quot;כ החודש</div>
+            <div className="text-3xl font-extrabold text-expense tabular-nums tracking-tight">{fmt(monthTotal)}</div>
+            <div className="text-xs text-muted-txt">{monthEntries.length} רישומים</div>
           </div>
         </div>
 
@@ -635,15 +634,15 @@ export default function ExpensesPage() {
           {byDay.map(([day, items]) => {
             const dayTotal = items.reduce((s, e) => s + e.amount, 0)
             return (
-              <div key={day} className="rounded-xl border border-line bg-surface2 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 bg-surface3/40 border-b border-line">
-                  <span className="text-xs font-semibold text-txt">{dayLabel(day)}</span>
-                  <span className="text-xs text-muted-txt tabular-nums">{fmt(dayTotal)}</span>
+              <div key={day} className="rounded-2xl border border-line bg-surface2 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-surface3/40 border-b border-line">
+                  <span className="text-sm font-bold text-txt">{dayLabel(day)}</span>
+                  <span className="text-sm text-muted-txt tabular-nums">{fmt(dayTotal)}</span>
                 </div>
                 <div className="divide-y divide-line">
                   {items.map(e => (
-                    <div key={e.id} className="group flex items-center gap-3 px-4 py-2.5">
-                      <span className="text-lg shrink-0">{icon(e.category)}</span>
+                    <div key={e.id} className="group flex items-center gap-2.5 sm:gap-3.5 px-3 sm:px-4 py-3">
+                      <span className="w-11 h-11 shrink-0 grid place-items-center rounded-xl text-xl bg-gold/10 border border-gold/20">{icon(e.category)}</span>
                       <div className="flex-1 min-w-0">
                         <CategoryPicker
                           value={e.category}
@@ -656,10 +655,11 @@ export default function ExpensesPage() {
                             toast.success(teach ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
                           }}
                           variant="plain"
+                          className="!text-base font-semibold min-h-[44px]"
                         />
-                        {e.note && <div className="text-xs text-muted-txt truncate">{e.note}</div>}
+                        {e.note && <div className="text-sm text-muted-txt truncate">{e.note}</div>}
                       </div>
-                      <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                      <span className="text-lg font-bold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
                       <button
                         onClick={() => setEditingId(e.id)}
                         className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-gold active:text-gold sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"

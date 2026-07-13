@@ -183,8 +183,8 @@ export function CategoryPicker({
   }
 
   const triggerLabel = value
-    ? <><span>{icon(value)}</span><span className="truncate">{value}</span></>
-    : <span className="text-muted-txt truncate">{placeholder}</span>
+    ? <><span className="shrink-0">{icon(value)}</span><span className="truncate min-w-0">{value}</span></>
+    : <span className="text-muted-txt truncate min-w-0">{placeholder}</span>
 
   const triggerClass = (() => {
     switch (variant) {
@@ -193,7 +193,7 @@ export function CategoryPicker({
       case 'badge':
         return `inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-txt hover:border-gold/50 transition-colors ${className}`
       case 'plain':
-        return `inline-flex items-center gap-1 bg-transparent text-sm text-txt hover:text-gold transition-colors ${className}`
+        return `inline-flex items-center gap-1 min-w-0 max-w-full bg-transparent text-sm text-txt hover:text-gold transition-colors ${className}`
       case 'chip':
       default:
         return `inline-flex items-center gap-1 rounded border border-line bg-surface2 px-1.5 py-0.5 text-xs text-muted-txt hover:border-gold/50 hover:text-txt transition-colors whitespace-nowrap ${className}`
@@ -277,13 +277,13 @@ export function CategoryPicker({
       >
         {variant === 'field' ? (
           <>
-            <span className="flex-1 truncate text-start flex items-center gap-2">{triggerLabel}</span>
-            <span className="text-muted-txt text-xs">▼</span>
+            <span className="flex-1 min-w-0 truncate text-start flex items-center gap-2">{triggerLabel}</span>
+            <span className="shrink-0 text-muted-txt text-xs">▼</span>
           </>
         ) : (
           <>
             {triggerLabel}
-            <span className="text-muted-txt text-[10px] ms-0.5">▼</span>
+            <span className="shrink-0 text-muted-txt text-[10px] ms-0.5">▼</span>
           </>
         )}
       </button>
