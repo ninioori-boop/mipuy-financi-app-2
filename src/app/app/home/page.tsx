@@ -19,8 +19,9 @@ function monthLabel(ym: string) {
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
 // Client home / landing — the app's front door. One glance answers the only
-// question that matters: "am I OK this month?" A hero status card (money left +
-// pace verdict) sits on top; big tappable cards lead into the tabs. Mobile-first.
+// question that matters: "am I OK this month?" A big, calm status card sits on
+// top; one prominent "רשום הוצאה" action is always in reach; big readable rows
+// lead into the tabs. Mobile-first, tuned for readability + comfort.
 export default function HomePage() {
   const entries     = useExpenseLogStore(s => s.entries)
   const budgets     = useCategoryBudgetStore(s => s.budgets)
@@ -66,10 +67,10 @@ export default function HomePage() {
   }, [entries, budgets, ym])
 
   const tiles = [
-    { href: '/app/expenses',    emoji: '🧾', label: 'תיעוד הוצאות', desc: 'רישום וקטלוג' },
+    { href: '/app/expenses',    emoji: '🧾', label: 'תיעוד הוצאות', desc: 'ראה ורשום את ההוצאות שלך' },
     { href: '/app/monthly/jan', emoji: '📅', label: 'תקציב חודשי', desc: 'תכנון מול ביצוע' },
     { href: '/app/checking',    emoji: '💧', label: 'התנהלות עו"ש', desc: 'כמה להשאיר / לחסוך' },
-    { href: '/app/trends',      emoji: '📊', label: 'מגמות',        desc: 'גרפים לאורך זמן' },
+    { href: '/app/trends',      emoji: '📊', label: 'מגמות',        desc: 'איך אתה מתנהל לאורך זמן' },
     { href: '/app/goals',       emoji: '🎯', label: 'יעדים',         desc: 'חיסכון ומטרות' },
     { href: '/app/meetings',    emoji: '📝', label: 'פגישות',       desc: 'סיכומים ומשימות' },
     ...(hasBusiness ? [{ href: '/app/business', emoji: '🏢', label: 'תקציב עסקי', desc: 'הכנסות והוצאות' }] : []),
@@ -81,97 +82,90 @@ export default function HomePage() {
     s.verdict.tone === 'over' ? 'text-expense' : s.verdict.tone === 'watch' ? 'text-gold' : 'text-income'
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
+    <div className="max-w-xl mx-auto space-y-5">
 
       {/* Greeting */}
-      <div className="flex items-baseline justify-between gap-2">
-        <h1 className="text-lg font-bold text-txt">
-          {firstName ? `שלום, ${firstName} 👋` : 'הכלכלן של הבית 👋'}
+      <div className="flex items-baseline justify-between gap-2 px-1 pt-1">
+        <h1 className="text-2xl font-extrabold text-txt tracking-tight">
+          {firstName ? `שלום ${firstName} 👋` : 'הכלכלן של הבית 👋'}
         </h1>
-        <span className="text-xs text-muted-txt">{monthLabel(ym)}</span>
+        <span className="text-sm text-muted-txt">{monthLabel(ym)}</span>
       </div>
 
-      {/* HERO — "am I OK?" */}
+      {/* STATUS — big & calm: "am I OK this month?" */}
       {s.hasBudget ? (
-        <div className="rounded-2xl border border-gold/30 bg-gradient-to-br from-gold/10 to-transparent p-6 text-center space-y-3">
-          <div className="text-xs text-muted-txt">{overBudget ? 'חרגת מהתקציב החודשי ב־' : 'נשאר לך החודש'}</div>
-          <div className={`text-4xl sm:text-[2.75rem] leading-none font-black tabular-nums ${overBudget ? 'text-expense' : 'text-income'}`}>
+        <div className="rounded-3xl border border-line bg-surface2 p-6 text-center">
+          <div className="text-base font-semibold text-muted-txt">
+            {overBudget ? 'חרגת מהתקציב החודשי ב־' : 'נשאר לך החודש'}
+          </div>
+          <div className={`my-2 text-5xl sm:text-6xl leading-none font-extrabold tracking-tight tabular-nums ${overBudget ? 'text-expense' : 'text-income'}`}>
             {fmt(Math.abs(s.remaining))}
           </div>
-          <div className="text-xs text-muted-txt tabular-nums">
-            הוצאת {fmt(s.total)} מתוך {fmt(s.totalBudget)}
+          <div className="text-sm text-muted-txt tabular-nums">
+            מתוך {fmt(s.totalBudget)} · הוצאת {fmt(s.total)}
           </div>
-
-          {/* Progress */}
-          <div className="h-2 rounded-full bg-surface overflow-hidden">
+          <div className="my-4 h-3.5 rounded-full bg-surface border border-line overflow-hidden">
             <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${Math.min(100, s.spentFrac * 100)}%` }} />
           </div>
-
-          <div className="flex items-center justify-between text-xs">
-            <span className={`font-semibold ${verdictColor}`}>{s.verdict.text}</span>
-            <span className="text-muted-txt">נשארו {s.daysLeft} ימים</span>
-          </div>
+          <div className={`text-base font-bold ${verdictColor}`}>{s.verdict.text}</div>
+          <div className="mt-1 text-sm text-muted-txt">נשארו {s.daysLeft} ימים · {s.count} רישומים החודש</div>
         </div>
       ) : (
-        <div className="rounded-2xl border border-gold/30 bg-gradient-to-br from-gold/10 to-transparent p-6 text-center space-y-3">
-          <div className="text-xs text-muted-txt">הוצאת החודש</div>
-          <div className="text-4xl sm:text-[2.75rem] leading-none font-black tabular-nums text-expense">{fmt(s.total)}</div>
-          <Link
-            href="/app/expenses"
-            className="inline-flex items-center justify-center min-h-[44px] rounded-lg border border-gold/40 bg-gold/10 px-4 py-2 text-xs font-semibold text-gold hover:bg-gold/20 transition-colors"
-          >
-            💡 הגדר תקציב חודשי כדי לראות כמה נשאר לך
-          </Link>
+        <div className="rounded-3xl border border-line bg-surface2 p-6 text-center">
+          <div className="text-base font-semibold text-muted-txt">הוצאת החודש</div>
+          <div className="my-2 text-5xl sm:text-6xl leading-none font-extrabold tracking-tight tabular-nums text-txt">
+            {fmt(s.total)}
+          </div>
+          <div className="text-sm text-muted-txt">{s.count} רישומים</div>
         </div>
+      )}
+
+      {/* BIG primary action — the thing you do most, always in reach */}
+      <Link
+        href="/app/expenses"
+        className="flex items-center justify-center gap-2 w-full min-h-[58px] rounded-2xl bg-gold text-surface text-lg font-extrabold hover:bg-gold-light active:bg-gold-dark transition-colors shadow-lg shadow-gold/20"
+      >
+        ➕ רשום הוצאה
+      </Link>
+
+      {/* Budget nudge when none set yet */}
+      {!s.hasBudget && (
+        <Link
+          href="/app/expenses"
+          className="flex items-center justify-center min-h-[52px] rounded-2xl border border-gold/40 bg-gold/10 px-4 text-center text-sm font-semibold text-gold hover:bg-gold/20 transition-colors"
+        >
+          💡 הגדר תקציב חודשי כדי לראות כמה נשאר לך
+        </Link>
       )}
 
       {/* Proactive coach insights — the app speaks first */}
       <InsightCards />
 
-      {/* Secondary stats + budget alert */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-line bg-surface2 p-4 text-center">
-          <div className="text-2xl font-black text-txt tabular-nums">{s.count}</div>
-          <div className="text-xs text-muted-txt mt-1">רישומים החודש</div>
-        </div>
-        <Link
-          href="/app/expenses"
-          className={[
-            'rounded-xl border p-4 text-center transition-colors flex flex-col justify-center',
-            s.alerts > 0
-              ? 'border-gold/40 bg-gold/10 hover:bg-gold/15'
-              : 'border-line bg-surface2 hover:bg-surface3',
-          ].join(' ')}
-        >
-          <div className={`text-2xl font-black tabular-nums ${s.alerts > 0 ? 'text-gold' : 'text-income'}`}>
-            {s.alerts > 0 ? `⚠️ ${s.alerts}` : '✓'}
-          </div>
-          <div className="text-xs text-muted-txt mt-1">
-            {s.alerts > 0 ? 'קטגוריות קרובות לחריגה' : 'הכל בתוך התקציב'}
-          </div>
-        </Link>
-      </div>
-
       {/* Empty-state nudge — the app never feels dead on day one */}
       {s.count === 0 && (
-        <div className="rounded-xl border border-dashed border-line bg-surface2/50 p-5 text-center">
-          <div className="text-3xl mb-1">💳</div>
-          <p className="text-sm text-txt font-semibold">עוד לא נרשמו הוצאות החודש</p>
-          <p className="text-xs text-muted-txt mt-1">כל תשלום ב-Google Pay ייכנס לכאן אוטומטית — או הוסף הוצאה ידנית בתיעוד ההוצאות.</p>
+        <div className="rounded-2xl border border-dashed border-line bg-surface2/50 p-6 text-center">
+          <div className="text-4xl mb-2">💳</div>
+          <p className="text-base font-semibold text-txt">עוד לא נרשמו הוצאות החודש</p>
+          <p className="mt-1 text-sm text-muted-txt">כל תשלום ב-Google Pay ייכנס לכאן אוטומטית — או הוסף הוצאה ידנית.</p>
         </div>
       )}
 
-      {/* Nav tiles — big, accessible */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Nav — big, readable rows (easy to scan and tap) */}
+      <div className="space-y-3">
         {tiles.map(t => (
           <Link
             key={t.href}
             href={t.href}
-            className="rounded-xl border border-line bg-surface2 p-4 hover:border-gold/50 hover:bg-surface3 transition-colors flex flex-col items-center text-center gap-1 min-h-[116px] justify-center"
+            className="flex items-center gap-4 p-4 min-h-[74px] rounded-2xl border border-line bg-surface2 hover:border-gold/50 hover:bg-surface3 transition-colors"
           >
-            <span className="text-3xl leading-none">{t.emoji}</span>
-            <span className="text-sm font-semibold text-txt mt-1">{t.label}</span>
-            <span className="text-[11px] text-muted-txt">{t.desc}</span>
+            <span className="w-[52px] h-[52px] shrink-0 grid place-items-center rounded-2xl text-2xl bg-gold/10 border border-gold/20">
+              {t.emoji}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-lg font-bold text-txt">{t.label}</span>
+              <span className="block text-sm text-muted-txt truncate">{t.desc}</span>
+            </span>
+            <span dir="ltr" className="text-xl text-muted-txt">‹</span>
           </Link>
         ))}
       </div>
