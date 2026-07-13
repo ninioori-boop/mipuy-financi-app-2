@@ -42,6 +42,10 @@ next-env.d.ts
 
 # firebase admin / client export script
 service-account-key.json
+
+# businessDB benchmark local data (real client-labeled merchants — never commit)
+scripts/businessdb-candidates/.learned-snapshot.json
+scripts/businessdb-candidates/.benchmark-baseline.json
 clients.md
 clients.html
 .export-clients.log

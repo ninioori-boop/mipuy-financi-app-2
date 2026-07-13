@@ -6,6 +6,7 @@ import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
+import { logAiSuggestion } from '@/lib/aiSuggestions'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).
@@ -91,7 +92,12 @@ export async function POST(req: NextRequest) {
     category = categorize(cleanMerchant, learnedDB)
     if (category === 'שונות') {
       const ai = await aiCategorizeOne(cleanMerchant)
-      if (ai) category = ai
+      if (ai) {
+        category = ai
+        // Awaited (not fire-and-forget: Vercel may freeze dangling promises
+        // after the response); logAiSuggestion itself never throws.
+        await logAiSuggestion(db, cleanMerchant, ai)
+      }
     }
   }
 
