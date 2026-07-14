@@ -46,7 +46,10 @@ export async function POST(req: NextRequest) {
   // pull the first money-looking number out of it. (Comma = thousands sep in
   // he-IL; period = decimal.) Plain numbers still pass straight through.
   let amt = parseAmountLoose(amount)
-  let cleanMerchant = merchant.trim()
+  // iOS renders the transaction's Amount/Merchant with invisible bidi control
+  // marks (RLM/LRM etc.) around the ₪ — they break the currency-anchored
+  // regexes below and pollute the merchant name for categorization.
+  let cleanMerchant = stripInvisible(merchant).trim()
 
   // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
   // Merchant/Amount properties from the Apple Pay transaction (the editor
@@ -166,6 +169,12 @@ async function buildNotify(
  * after the number), then a bare first-number as last resort. The remainder of
  * the string, cleaned of separators, becomes the merchant.
  */
+// Strips invisible bidi/zero-width control chars iOS embeds in transaction
+// text (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, BOM).
+function stripInvisible(s: string): string {
+  return s.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+}
+
 /**
  * Parses an amount that may be a plain number OR a currency-formatted string
  * from the iOS Shortcut ("₪32.83", "32.83 ₪", "$1,234.56"). Returns NaN if no
