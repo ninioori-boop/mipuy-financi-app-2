@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
  */
 async function buildNotify(
   db: Firestore, uid: string, category: string, amount: number, merchant: string, ym: string,
-): Promise<{ title: string; body: string; warn: boolean }> {
+): Promise<{ title: string; body: string; text: string; warn: boolean }> {
   const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
   const title = `נרשם: ${merchant} · ${nis(amount)}`
   // Categories that beg for a human to pick the right one → invite a tap.
@@ -160,7 +160,11 @@ async function buildNotify(
       }
     }
   } catch { /* best-effort — the default text is fine */ }
-  return { title, body, warn }
+  // `text` = title + body in ONE field, for the iOS Shortcut: a single
+  // "Get Dictionary Value notify.text" auto-wires into Show Notification with
+  // zero manual variable picking (two identical "ערך המילון" chips proved
+  // impossible to wire correctly by hand). Android keeps using title/body.
+  return { title, body, text: `${title}\n${body}`, warn }
 }
 
 /**
