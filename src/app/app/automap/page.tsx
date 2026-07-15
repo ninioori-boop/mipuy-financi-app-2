@@ -416,6 +416,9 @@ export default function AutoMapPage() {
 
     if (copyMode === 'replace') {
       useMappingStore.setState({
+        creditScore:  Math.round(result.creditScore ?? 0),
+        creditCards:  (result.creditCards ?? []).map(r => ({ id: mkId(), name: r.name, limit: Math.round(r.limit), chargeDay: Math.round(r.chargeDay) || 2 })),
+        bankAccounts: (result.bankAccounts ?? []).map(r => ({ id: mkId(), name: r.name, balance: Math.round(r.balance), overdraftLimit: Math.round(r.overdraftLimit) })),
         income:   result.income.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
         fixed:    result.fixed.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
         sub:      result.sub.map(r => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) })),
@@ -431,6 +434,10 @@ export default function AutoMapPage() {
       // merge mode: existing rows untouched, new rows appended where the
       // normalized name doesn't already exist in the section.
       useMappingStore.setState({
+        // creditScore: keep the advisor's existing value; fill it only if empty.
+        creditScore:  existing.creditScore || Math.round(result.creditScore ?? 0),
+        creditCards:  [...existing.creditCards,  ...newRowsOnly(result.creditCards  ?? [], existing.creditCards).map(r  => ({ id: mkId(), name: r.name, limit: Math.round(r.limit), chargeDay: Math.round(r.chargeDay) || 2 }))],
+        bankAccounts: [...existing.bankAccounts, ...newRowsOnly(result.bankAccounts ?? [], existing.bankAccounts).map(r => ({ id: mkId(), name: r.name, balance: Math.round(r.balance), overdraftLimit: Math.round(r.overdraftLimit) }))],
         income:   [...existing.income,       ...newRowsOnly(result.income,       existing.income).map(r       => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
         fixed:    [...existing.fixed,        ...newRowsOnly(result.fixed,        existing.fixed).map(r        => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
         sub:      [...existing.sub,          ...newRowsOnly(result.sub,          existing.sub).map(r          => ({ id: mkId(), name: r.name, amount: Math.round(r.amount) }))],
@@ -461,6 +468,8 @@ export default function AutoMapPage() {
     const nextFor = <T extends { name: string }>(newRows: T[], existing: { name: string }[]): number =>
       copyMode === 'replace' ? newRows.length : existing.length + newRowsOnly(newRows, existing).length
     return [
+      { key: 'creditCards',  label: '💳 כרטיסי אשראי',    current: len(m.creditCards),  next: nextFor(result.creditCards  ?? [], m.creditCards) },
+      { key: 'bankAccounts', label: '🏛️ עו&quot;ש',        current: len(m.bankAccounts), next: nextFor(result.bankAccounts ?? [], m.bankAccounts) },
       { key: 'income',       label: '💰 הכנסות',         current: len(m.income),       next: nextFor(result.income,       m.income) },
       { key: 'fixed',        label: '📌 הוצאות קבועות',  current: len(m.fixed),        next: nextFor(result.fixed,        m.fixed) },
       { key: 'variable',     label: '🛒 הוצאות משתנות',  current: len(m.variable),     next: nextFor(result.variable,     m.variable) },

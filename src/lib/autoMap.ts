@@ -38,8 +38,15 @@ export interface GenSavingRow extends GenRowMeta {
   name: string; monthlyContribution: number; accumulated: number
   feeBalance: number; feeDeposit: number
 }
+// Point-in-time client facts (mirror mappingStore's CreditCardRow / BankAccountRow),
+// so the lab opens with the same profile snapshot as the manual mapping tab.
+export interface GenCreditCard extends GenRowMeta { name: string; limit: number; chargeDay: number }
+export interface GenBankAccount extends GenRowMeta { name: string; balance: number; overdraftLimit: number }
 
 export interface GeneratedMapping {
+  creditScore:  number
+  creditCards:  GenCreditCard[]
+  bankAccounts: GenBankAccount[]
   income:       GenSimpleRow[]
   fixed:        GenSimpleRow[]
   sub:          GenSimpleRow[]
@@ -68,6 +75,13 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — י
 - **debts (חובות)**: הלוואות עם יתרה והחזר חודשי.
 - **installments (תשלומים)**: רכישות בתשלומים (X מתוך Y).
 - **savings (חיסכון)**: הפקדות לחיסכון/פנסיה/קרנות.
+
+## תמונת מצב הלקוח (נתונים נקודתיים — לא חודשיים)
+אם הנתונים כוללים אותם, חלץ גם:
+- **creditScore (ציון דירוג אשראי)**: מספר בודד (בד"כ 0–1000) מתוך דוח נתוני אשראי. אם אין — 0.
+- **creditCards (כרטיסי אשראי)**: לכל כרטיס — name (שם/סוג), limit (מסגרת האשראי ב‑₪), chargeDay (יום החיוב בחודש 1–28; אם לא ידוע השאר 2).
+- **bankAccounts (חשבונות עו"ש)**: לכל חשבון — name, balance (יתרה נוכחית; שלילי = מינוס/אוברדראפט), overdraftLimit (מסגרת אוברדראפט ב‑₪).
+אלה נתוני מצב רגעיים ולא חלק מהתזרים החודשי. אם אין נתונים — החזר מערך ריק / 0.
 
 השתמש אך ורק בשמות קטגוריות מתוך הרשימה הבאה כשמתאים: ${ALL_CATEGORIES.join(', ')}. אל תמציא קטגוריות.
 
@@ -116,6 +130,9 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — י
 ## פלט
 החזר **JSON תקין בלבד**, ללא טקסט נוסף, במבנה המדויק הזה (מערך ריק אם אין):
 {
+  "creditScore":0,
+  "creditCards":[{"name":"","limit":0,"chargeDay":2,"confidence":"high","source":""}],
+  "bankAccounts":[{"name":"","balance":0,"overdraftLimit":0,"confidence":"high","source":""}],
   "income":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
   "fixed":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
   "sub":[{"name":"","amount":0,"confidence":"high","source":"","category":""}],
@@ -309,6 +326,13 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
   const raw = obj(JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1')))
 
   return {
+    creditScore:  num(raw.creditScore),
+    creditCards:  arr(raw.creditCards).map(obj).map(r => ({
+      name: str(r.name), limit: num(r.limit), chargeDay: num(r.chargeDay) || 2, ...meta(r),
+    })).filter(r => r.name || r.limit),
+    bankAccounts: arr(raw.bankAccounts).map(obj).map(r => ({
+      name: str(r.name), balance: num(r.balance), overdraftLimit: num(r.overdraftLimit), ...meta(r),
+    })).filter(r => r.name || r.balance || r.overdraftLimit),
     income:   simple(arr(raw.income)),
     fixed:    simple(arr(raw.fixed)),
     sub:      simple(arr(raw.sub)),
@@ -335,5 +359,5 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {
-  return { income: [], fixed: [], sub: [], ins: [], variable: [], annual: [], debts: [], installments: [], savings: [], assessment: '' }
+  return { creditScore: 0, creditCards: [], bankAccounts: [], income: [], fixed: [], sub: [], ins: [], variable: [], annual: [], debts: [], installments: [], savings: [], assessment: '' }
 }
