@@ -11,6 +11,7 @@ import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
 import { EnablePushCard } from '@/components/home/EnablePushCard'
+import { BudgetReviewReminder } from '@/components/home/BudgetReviewReminder'
 
 function currentMonth() {
   const d = new Date()
@@ -129,6 +130,9 @@ export default function HomePage() {
 
       {/* Safe-to-spend-today — lab-gated (advisor-only) for now */}
       {isAdvisor && <SafeToSpendToday />}
+
+      {/* End-of-month budget-review reminder — lab-gated (advisor-only) for now */}
+      {isAdvisor && <BudgetReviewReminder />}
 
       {/* BIG primary action — the thing you do most, always in reach */}
       <Link

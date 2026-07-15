@@ -32,6 +32,7 @@ import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
+import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { saveUserData, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
@@ -280,6 +281,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useBusinessStore.subscribe(triggerSave),
       useBusinessAnnualStore.subscribe(triggerSave),
       useSubscriptionPrefsStore.subscribe(triggerSave),
+      useBudgetReminderStore.subscribe(triggerSave),
     ]
 
     return () => {

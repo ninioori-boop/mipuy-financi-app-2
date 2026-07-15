@@ -69,6 +69,13 @@ export default function ExpensesPage() {
   const [note, setNote]         = useState('')
   const [date, setDate]         = useState(today())
   const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Deep-link from the home budget-review reminder: #budget opens the editor.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#budget') {
+      setShowBudgetEditor(true)
+    }
+  }, [])
   const editingEntry = editingId ? entries.find(e => e.id === editingId) ?? null : null
 
   // Recurring-rule add form
