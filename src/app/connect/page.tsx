@@ -15,12 +15,12 @@ import { auth } from '@/lib/firebase'
 const SCHEME = 'mipuytracker://token/'
 
 // One-tap import of the shared iOS Shortcut ("THE HOME ECONOMIST 1"). Authored
-// on Ori's iPhone (2026-07-14) and shared via iCloud (Apple refuses headless
-// signing). Holds ALL the logic: POST {token, merchant} → parse notify →
-// lock-screen notification. The client pastes their token into the shortcut's
-// Text box; their Wallet automation builds "[Amount] [Merchant]" as text and
+// on Ori's iPhone (2026-07-14, v2: single notify.text dictionary get — zero
+// manual variable wiring). Holds ALL the logic: POST {token, merchant} →
+// notify.text → lock-screen notification. The client pastes their token into
+// the Text box; their Wallet automation builds "[Amount] [Merchant]" text and
 // runs this shortcut (the server's extractFromRaw splits amount/merchant).
-const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/1330de3c3651478a8c5dd939f4b1a53c'
+const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/69275622abc0441491f7cb88bca7cc9b'
 
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
