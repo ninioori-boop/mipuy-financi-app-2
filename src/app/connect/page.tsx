@@ -14,11 +14,13 @@ import { auth } from '@/lib/firebase'
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
 
-// One-tap import of the shared iOS Shortcut. Authored once on a real iPhone
-// and shared via iCloud (Apple refuses headless signing, so the /mipuy.shortcut
-// CI-signing path was abandoned). After adding, the client pastes their token
-// into the shortcut's Text box — see the on-page instructions.
-const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/859eb60273434daaa96c1a7fe64cbb2e'
+// One-tap import of the shared iOS Shortcut ("THE HOME ECONOMIST 1"). Authored
+// on Ori's iPhone (2026-07-14) and shared via iCloud (Apple refuses headless
+// signing). Holds ALL the logic: POST {token, merchant} → parse notify →
+// lock-screen notification. The client pastes their token into the shortcut's
+// Text box; their Wallet automation builds "[Amount] [Merchant]" as text and
+// runs this shortcut (the server's extractFromRaw splits amount/merchant).
+const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/1330de3c3651478a8c5dd939f4b1a53c'
 
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
@@ -190,7 +192,7 @@ export default function ConnectPage() {
 
           {isIOS ? (
             <>
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 1 · העתק את הטוקן</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 1 · העתק את הטוקן</p>
               <div
                 dir="ltr"
                 className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
@@ -204,33 +206,45 @@ export default function ConnectPage() {
                 {copied ? '✓ הועתק' : '📋 העתק טוקן'}
               </button>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 2 · הוסף את ה-Shortcut והדבק את הטוקן</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 2 · הוסף את הקיצור והדבק את הטוקן</p>
               <a
                 href={SHORTCUT_ICLOUD_URL}
                 className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors mb-3"
               >
-                📲 הוסף את ה-Shortcut
+                📲 הוסף את הקיצור
               </a>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
                 אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
-                הקש על <span className="text-txt font-semibold">Mipuy</span> →
-                מחק את «הדבק כאן טוקן» מהתיבה הצהובה →
+                לחיצה <span className="text-txt font-semibold">ארוכה</span> על{' '}
+                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+                «עריכה» → מחק את «הדבק כאן טוקן» מתיבת המלל →
                 <span className="text-txt font-semibold"> הדבק את הטוקן</span> שהעתקת בשלב 1 → סיום.
               </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 3 · צור את האוטומציה (חד־פעמי, 2 דקות)</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
-                באפליקציית קיצורי דרך: לשונית <span className="text-txt font-semibold">אוטומציה</span> → ＋ →
-                בחר <span className="text-txt font-semibold">«עסקה»</span> (Transaction) →
-                בחר את הכרטיסים → <span className="text-txt font-semibold">«הפעלה מיידית»</span> →
-                הוסף פעולה <span className="text-txt font-semibold">«הפעל קיצור דרך»</span> →
-                בחר <span className="text-txt font-semibold">Mipuy</span> → סיום.
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 3 · צור את האוטומציה (חד־פעמי, ~2 דקות)</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
+                בקיצורי דרך: לשונית <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> (האמצעית)
+                → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> →
+                «כאשר אני מקיש» → בחר את הכרטיסים שלך →
+                <span className="text-txt font-semibold"> «הפעל מיד»</span> → הבא.
                 <br />
-                מעכשיו כל תשלום Apple Pay נרשם לבד ✨
+                עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» למטה):
+                <br />
+                <span className="text-txt font-semibold">① «מלל»</span> — הקש בתיבה →
+                «בחירת משתנה» → <span className="text-txt font-semibold">«קלט של קיצור»</span> →
+                הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span> →
+                הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
+                בחר <span className="text-txt font-semibold">«בית עסק»</span>.
+                <br />
+                <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
+                הקש על «קיצור דרך» → בחר{' '}
+                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
+                <br />
+                מעכשיו כל תשלום Apple Pay נרשם לבד — עם התראה וסטטוס תקציב ✨
               </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 4 · הוסף את האפליקציה למסך הבית</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed">
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 4 · הוסף את האפליקציה למסך הבית</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
                 בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
                 → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
                 <br />
