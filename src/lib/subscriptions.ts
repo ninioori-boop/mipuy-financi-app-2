@@ -2,6 +2,7 @@ import type { ExpenseEntry } from '@/stores/expenseLogStore'
 
 // A recurring, subscription-like charge inferred from the expense log.
 export interface Subscription {
+  key:           string   // normalized merchant key (stable id for dismiss/restore)
   name:          string   // display merchant name (most common spelling)
   category:      string   // most common category among its charges
   monthlyAmount: number   // representative (median) charge, rounded
@@ -48,8 +49,14 @@ function mode<T>(items: T[]): T {
  * (2) a mostly one-per-month cadence — NOT a supermarket you visit weekly — with
  * (3) a stable amount (most charges cluster around the median). Sorted by
  * monthly cost, biggest first, so the eye lands on the money that matters.
+ *
+ * `dismissedKeys` — merchant keys the client removed from the list (cancelled or
+ * "not a subscription"); those groups are skipped entirely.
  */
-export function detectSubscriptions(entries: ExpenseEntry[]): Subscription[] {
+export function detectSubscriptions(
+  entries: ExpenseEntry[],
+  dismissedKeys?: ReadonlySet<string>,
+): Subscription[] {
   // Group charges by normalized merchant.
   const groups = new Map<string, ExpenseEntry[]>()
   for (const e of entries) {
@@ -57,13 +64,14 @@ export function detectSubscriptions(entries: ExpenseEntry[]): Subscription[] {
     const name = merchantOf(e.note)
     if (name.length < 2) continue          // no usable merchant label
     const key = name.toLowerCase()
+    if (dismissedKeys?.has(key)) continue  // client removed this merchant
     const arr = groups.get(key) ?? []
     arr.push(e)
     groups.set(key, arr)
   }
 
   const subs: Subscription[] = []
-  for (const arr of groups.values()) {
+  for (const [key, arr] of groups.entries()) {
     const months = new Set(arr.map(e => e.date.slice(0, 7)))
     if (months.size < 3) continue          // not enough recurrence to be sure
 
@@ -81,6 +89,7 @@ export function detectSubscriptions(entries: ExpenseEntry[]): Subscription[] {
     const newestFirst = [...arr].sort((a, b) => (a.date < b.date ? 1 : -1))
     const last = newestFirst[0]
     subs.push({
+      key,
       name:          mode(arr.map(e => merchantOf(e.note))),
       category:      mode(arr.map(e => e.category)),
       monthlyAmount: Math.round(mid),

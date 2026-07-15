@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useMemo } from 'react'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { detectSubscriptions, subscriptionsMonthlyTotal } from '@/lib/subscriptions'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -13,8 +14,10 @@ const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
  * history to detect anything (so a new client never sees an empty promise).
  */
 export function SubscriptionsCard() {
-  const entries = useExpenseLogStore(s => s.entries)
-  const subs    = useMemo(() => detectSubscriptions(entries), [entries])
+  const entries   = useExpenseLogStore(s => s.entries)
+  const dismissed = useSubscriptionPrefsStore(s => s.dismissed)
+  const dismissedKeys = useMemo(() => new Set(Object.keys(dismissed)), [dismissed])
+  const subs    = useMemo(() => detectSubscriptions(entries, dismissedKeys), [entries, dismissedKeys])
   if (subs.length === 0) return null
 
   const monthly = subscriptionsMonthlyTotal(subs)
