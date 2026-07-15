@@ -19,6 +19,7 @@ const CLIENT_TABS = [
   { href: '/app/expenses',    emoji: '🧾', label: 'הוצאות' },
   { href: '/app/monthly/jan', emoji: '📅', label: 'חודשי' },
   { href: '/app/checking',    emoji: '💧', label: 'עו"ש' },
+  { href: '/app/subscriptions', emoji: '🔁', label: 'מנויים' },
   { href: '/app/trends',      emoji: '📊', label: 'מגמות' },
   { href: '/app/goals',       emoji: '🎯', label: 'יעדים' },
   { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
@@ -59,6 +60,7 @@ const groups: TabGroup[] = [
     items: [
       { href: '/app/expenses', emoji: '🧾', label: 'תיעוד הוצאות' },
       { href: '/app/checking', emoji: '💧', label: 'התנהלות עו"ש' },
+      { href: '/app/subscriptions', emoji: '🔁', label: 'מנויים קבועים' },
       { href: '/app/goals',    emoji: '🎯', label: 'יעדים' },
       { href: '/app/loans',    emoji: '💰', label: 'הלוואות' },
       { href: '/app/compound', emoji: '📈', label: 'ריבית' },

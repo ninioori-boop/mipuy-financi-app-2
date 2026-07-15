@@ -7,6 +7,7 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useAuthStore } from '@/stores/authStore'
 import { InsightCards } from '@/components/home/InsightCards'
+import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 
 function currentMonth() {
   const d = new Date()
@@ -70,6 +71,7 @@ export default function HomePage() {
     { href: '/app/expenses',    emoji: '🧾', label: 'תיעוד הוצאות', desc: 'ראה ורשום את ההוצאות שלך' },
     { href: '/app/monthly/jan', emoji: '📅', label: 'תקציב חודשי', desc: 'תכנון מול ביצוע' },
     { href: '/app/checking',    emoji: '💧', label: 'התנהלות עו"ש', desc: 'כמה להשאיר / לחסוך' },
+    { href: '/app/subscriptions', emoji: '🔁', label: 'מנויים קבועים', desc: 'חיובים חוזרים שזיהינו' },
     { href: '/app/trends',      emoji: '📊', label: 'מגמות',        desc: 'איך אתה מתנהל לאורך זמן' },
     { href: '/app/goals',       emoji: '🎯', label: 'יעדים',         desc: 'חיסכון ומטרות' },
     { href: '/app/meetings',    emoji: '📝', label: 'פגישות',       desc: 'סיכומים ומשימות' },
@@ -140,6 +142,9 @@ export default function HomePage() {
 
       {/* Proactive coach insights — the app speaks first */}
       <InsightCards />
+
+      {/* Detected recurring subscriptions — shows only once enough history exists */}
+      <SubscriptionsCard />
 
       {/* Empty-state nudge — the app never feels dead on day one */}
       {s.count === 0 && (
