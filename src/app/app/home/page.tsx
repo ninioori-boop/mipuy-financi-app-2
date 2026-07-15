@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { hasLabAccess } from '@/lib/labAccess'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
+import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
 
 function currentMonth() {
   const d = new Date()
@@ -124,6 +125,9 @@ export default function HomePage() {
           <div className="text-sm text-muted-txt">{s.count} רישומים</div>
         </div>
       )}
+
+      {/* Safe-to-spend-today — lab-gated (advisor-only) for now */}
+      {isAdvisor && <SafeToSpendToday />}
 
       {/* BIG primary action — the thing you do most, always in reach */}
       <Link
