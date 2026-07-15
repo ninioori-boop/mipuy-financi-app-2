@@ -10,6 +10,7 @@ import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
 import { EditEntrySheet } from '@/components/expenses/EditEntrySheet'
+import { SmartBudgetSuggest } from '@/components/expenses/SmartBudgetSuggest'
 import { useClientMode } from '@/hooks/useClientMode'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { computeBudgetStatus } from '@/lib/budgetStatus'
@@ -449,6 +450,7 @@ export default function ExpensesPage() {
                 ⚡ אמץ מהתקציב החודשי
               </button>
             </div>
+            <SmartBudgetSuggest />
             <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
               {budgetEditorCats.map(cat => {
                 const spent = spentByCat.get(cat) ?? 0
