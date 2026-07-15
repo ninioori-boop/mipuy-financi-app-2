@@ -24,6 +24,11 @@ interface Props {
   // surface the AI's per-row confidence / source chips. Additive — no effect
   // on existing callers.
   rowExtra?: (row: MappingRow) => ReactNode
+  // Optional override for a row's drill-down transactions. The mapping tab
+  // leaves it undefined and matches by category name (txsForRow); the lab
+  // supplies its own resolver (by the AI row's category) so fixed/sub/ins get
+  // the same "▶ N פריטים" breakdown even though their names are descriptive.
+  resolveTxns?: (row: MappingRow) => Transaction[]
   onAdd: () => void
   onUpdate: (id: string, field: 'name' | 'amount', value: string | number) => void
   onDelete: (id: string) => void
@@ -35,6 +40,7 @@ export function SectionPanel({
   colName, colAmt,
   creditTransactions,
   rowExtra,
+  resolveTxns,
   onAdd, onUpdate, onDelete,
 }: Props) {
   const [openDetail, setOpenDetail] = useState<string | null>(null)
@@ -96,7 +102,7 @@ export function SectionPanel({
 
       <div className="space-y-1">
         {rows.map(row => {
-          const txs = row.fromCredit ? txsForRow(row.name) : []
+          const txs = resolveTxns ? resolveTxns(row) : (row.fromCredit ? txsForRow(row.name) : [])
           const isOpen = openDetail === row.id
 
           return (
@@ -111,7 +117,7 @@ export function SectionPanel({
                 />
                 {rowExtra?.(row)}
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {row.fromCredit && txs.length > 0 && (
+                  {txs.length > 0 && (
                     <button
                       onClick={() => setOpenDetail(isOpen ? null : row.id)}
                       className="text-xs px-1.5 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors whitespace-nowrap"

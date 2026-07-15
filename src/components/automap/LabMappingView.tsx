@@ -161,6 +161,15 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     return r ? <RowMetaChip confidence={r.confidence} source={r.source} /> : null
   }
 
+  // Drill-down transactions for a fixed/sub/ins row — the parsed report lines
+  // whose category matches the AI row's category. Gives every expense section
+  // the same "▶ N פריטים" breakdown the mapping tab shows, so the advisor can
+  // see exactly which charges make up each category.
+  const txnsForCategory = (cat?: string): Transaction[] =>
+    cat ? txns.filter(t => !t.isRefund && t.category === cat) : []
+  const resolveTxnsFor = (key: SimpleKey) => (row: MappingRow): Transaction[] =>
+    txnsForCategory(result[key][idxOf(row.id)]?.category)
+
   const totalAnnualMo = Math.round(result.annual.reduce((s, r) => s + r.annualAmount, 0) / 12)
 
   const creditScore = result.creditScore ?? 0
@@ -224,6 +233,7 @@ export function LabMappingView({ result, txns, onChange }: Props) {
           colName="סוג הוצאה"
           colAmt="סכום חודשי ₪"
           rowExtra={chipFor('fixed')}
+          resolveTxns={resolveTxnsFor('fixed')}
           onAdd={() => addSimple('fixed')}
           onUpdate={(id, field, value) => editSimple('fixed', idxOf(id), field, value)}
           onDelete={id => delRow('fixed', idxOf(id))}
@@ -237,6 +247,7 @@ export function LabMappingView({ result, txns, onChange }: Props) {
           totalLabel="סה&quot;כ מנויים"
           colName="שם המנוי"
           rowExtra={chipFor('sub')}
+          resolveTxns={resolveTxnsFor('sub')}
           onAdd={() => addSimple('sub')}
           onUpdate={(id, field, value) => editSimple('sub', idxOf(id), field, value)}
           onDelete={id => delRow('sub', idxOf(id))}
@@ -249,6 +260,7 @@ export function LabMappingView({ result, txns, onChange }: Props) {
           colName="סוג הביטוח"
           colAmt="פרמיה חודשית ₪"
           rowExtra={chipFor('ins')}
+          resolveTxns={resolveTxnsFor('ins')}
           onAdd={() => addSimple('ins')}
           onUpdate={(id, field, value) => editSimple('ins', idxOf(id), field, value)}
           onDelete={id => delRow('ins', idxOf(id))}
