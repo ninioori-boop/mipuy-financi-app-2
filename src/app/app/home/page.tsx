@@ -10,6 +10,7 @@ import { hasLabAccess } from '@/lib/labAccess'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
+import { EnablePushCard } from '@/components/home/EnablePushCard'
 
 function currentMonth() {
   const d = new Date()
@@ -146,6 +147,9 @@ export default function HomePage() {
           💡 הגדר תקציב חודשי כדי לראות כמה נשאר לך
         </Link>
       )}
+
+      {/* Branded push opt-in — renders only where push can actually work */}
+      <EnablePushCard />
 
       {/* Proactive coach insights — the app speaks first */}
       <InsightCards />

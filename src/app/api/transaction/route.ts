@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
+import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
@@ -115,6 +116,16 @@ export async function POST(req: NextRequest) {
   // NOTE: `category` must stay the FIRST "category" key in the JSON — old APKs
   // extract it by scanning for the first occurrence.
   const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+
+  // Branded Web-Push to the user's installed apps (iOS PWA / browsers) — the
+  // app-name-and-icon notification. Best-effort like notify itself: never
+  // fails the request; inert until the VAPID keys are configured.
+  await sendPushToUser(db, uid, {
+    title: notify.title,
+    body: notify.body,
+    url: '/app/expenses',
+    tag: refStr ?? undefined,
+  })
 
   return NextResponse.json({ ok: true, category, notify })
 }
