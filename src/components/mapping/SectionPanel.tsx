@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMappingStore, type MappingRow } from '@/stores/mappingStore'
 import type { Transaction } from '@/types/transaction'
 import { normalizeForLookup } from '@/lib/categorize'
@@ -19,6 +19,11 @@ interface Props {
   colName?: string
   colAmt?: string
   creditTransactions?: Transaction[]
+  // Optional slot rendered right after a row's name input. The mapping tab
+  // leaves it undefined (nothing renders); the auto-mapping lab uses it to
+  // surface the AI's per-row confidence / source chips. Additive — no effect
+  // on existing callers.
+  rowExtra?: (row: MappingRow) => ReactNode
   onAdd: () => void
   onUpdate: (id: string, field: 'name' | 'amount', value: string | number) => void
   onDelete: (id: string) => void
@@ -29,6 +34,7 @@ export function SectionPanel({
   totalLabel, totalColor = 'text-gold',
   colName, colAmt,
   creditTransactions,
+  rowExtra,
   onAdd, onUpdate, onDelete,
 }: Props) {
   const [openDetail, setOpenDetail] = useState<string | null>(null)
@@ -103,6 +109,7 @@ export function SectionPanel({
                   placeholder={colName ?? 'שם'}
                   className="flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
                 />
+                {rowExtra?.(row)}
                 <div className="flex items-center gap-1.5 shrink-0">
                   {row.fromCredit && txs.length > 0 && (
                     <button
