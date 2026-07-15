@@ -14,43 +14,11 @@ import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
 import { parseGeneratedMapping, validateMapping, type GeneratedMapping } from '@/lib/autoMap'
+import { LabMappingView } from '@/components/automap/LabMappingView'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 const mkId = () => Math.random().toString(36).slice(2)
-
-// Small chip rendered next to each generated row to surface the AI's
-// confidence + source attribution. The chip is the SOURCE text wrapped
-// in a confidence-colored border, with the full label on hover. If the
-// AI didn't return either field for a row, the chip is omitted (older
-// results stay visually unchanged).
-function RowMetaChip({ confidence, source }: { confidence?: 'high' | 'medium' | 'low'; source?: string }) {
-  if (!confidence && !source) return null
-  const palette: Record<string, string> = {
-    high:   'border-income/40 text-income bg-income/10',
-    medium: 'border-gold/40 text-gold bg-gold/10',
-    low:    'border-expense/40 text-expense bg-expense/10',
-  }
-  const label: Record<string, string> = {
-    high:   'אמין',
-    medium: 'בינוני',
-    low:    'נמוך',
-  }
-  const cls     = (confidence && palette[confidence]) ?? 'border-line text-muted-txt bg-surface'
-  const confTxt = confidence ? label[confidence] : ''
-  const tooltip = [
-    confTxt ? `אמינות: ${confTxt}` : '',
-    source ? `מקור: ${source}` : '',
-  ].filter(Boolean).join(' · ')
-  return (
-    <span
-      className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0 max-w-[110px] truncate ${cls}`}
-      title={tooltip}
-    >
-      {source ?? confTxt}
-    </span>
-  )
-}
 
 // Non-Excel documents (PDF / images) sent to Claude as base64 blocks so it reads
 // them directly — no OCR of our own.
@@ -88,26 +56,6 @@ async function imageToJpegBase64(file: File, maxDim = 1500, quality = 0.7): Prom
 async function fileToBase64(file: File): Promise<string> {
   return (await readAsDataURL(file)).split(',')[1] ?? ''
 }
-
-type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins' | 'variable'
-const SIMPLE_SECTIONS: { key: SimpleKey; label: string; icon: string }[] = [
-  { key: 'income',   label: 'הכנסות',         icon: '💰' },
-  { key: 'fixed',    label: 'הוצאות קבועות',  icon: '📌' },
-  { key: 'variable', label: 'הוצאות משתנות',  icon: '🛒' },
-  { key: 'sub',      label: 'מנויים',         icon: '🔄' },
-  { key: 'ins',      label: 'ביטוחים',        icon: '🛡️' },
-]
-
-const DEBT_FIELDS:  [keyof GeneratedMapping['debts'][number], string][] = [
-  ['remainingBalance', 'יתרה'], ['monthlyPayment', 'החזר חודשי'], ['remainingMonths', 'חודשים'],
-  ['interestRate', 'ריבית %'], ['originalBalance', 'קרן מקורית'],
-]
-const INST_FIELDS:  [keyof GeneratedMapping['installments'][number], string][] = [
-  ['totalAmount', 'סכום כולל'], ['monthlyPayment', 'חודשי'], ['paidCount', 'שולמו'], ['totalCount', 'סה"כ'],
-]
-const SAV_FIELDS:   [keyof GeneratedMapping['savings'][number], string][] = [
-  ['monthlyContribution', 'הפקדה חודשית'], ['accumulated', 'נצבר'], ['feeBalance', 'ד.ניהול צבירה %'], ['feeDeposit', 'ד.ניהול הפקדה %'],
-]
 
 const inputCls = 'rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60'
 
@@ -151,22 +99,8 @@ export default function AutoMapPage() {
   // and by how much. The advisor confirms or cancels with full context.
   const [showCopyPreview, setShowCopyPreview] = useState(false)
 
-  // Tracks which variable-category group is currently expanded to show its
-  // underlying credit transactions. Null = all collapsed. One at a time.
-  const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
-
   // Drafts panel collapsed/expanded — kept local, doesn't need persistence.
   const [showDrafts, setShowDrafts] = useState(false)
-
-  // Per-section collapsed state for the result blocks. Mobile screens get
-  // overwhelmed with 9 stacked sections after a full generation; letting
-  // the advisor fold sections away keeps the page navigable.
-  // Default everything open after first render — same as before.
-  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
-    income: true, fixed: true, variable: true, sub: true, ins: true,
-    annual: true, debts: true, installments: true, savings: true,
-  })
-  const toggleSection = (k: string) => setSectionOpen(s => ({ ...s, [k]: !s[k] }))
 
   // Smart-merge vs full-replace toggle inside the preview panel.
   // 'merge' (the default): keep all existing mapping rows, add only result
@@ -371,52 +305,10 @@ export default function AutoMapPage() {
     }
   }
 
-  // ── editing helpers (operate on the stored result) ──
-  function editSimple(key: SimpleKey, idx: number, field: 'name' | 'amount', value: string) {
-    if (!result) return
-    const rows = [...result[key]]
-    rows[idx] = { ...rows[idx], [field]: field === 'amount' ? (parseFloat(value) || 0) : value }
-    updateResult({ [key]: rows })
-  }
-  function editAnnual(idx: number, field: 'name' | 'annualAmount', value: string) {
-    if (!result) return
-    const rows = [...result.annual]
-    rows[idx] = { ...rows[idx], [field]: field === 'annualAmount' ? (parseFloat(value) || 0) : value }
-    updateResult({ annual: rows })
-  }
-  function editComplex<K extends 'debts' | 'installments' | 'savings'>(key: K, idx: number, field: string, value: string) {
-    if (!result) return
-    const rows = [...(result[key] as unknown as Record<string, unknown>[])]
-    rows[idx] = { ...rows[idx], [field]: field === 'name' ? value : (parseFloat(value) || 0) }
-    updateResult({ [key]: rows } as Partial<GeneratedMapping>)
-  }
-  function delRow<K extends keyof GeneratedMapping>(key: K, idx: number) {
-    if (!result || !Array.isArray(result[key])) return
-    const rows = (result[key] as unknown[]).filter((_, i) => i !== idx)
-    updateResult({ [key]: rows } as Partial<GeneratedMapping>)
-  }
-
-  // Manual row insertion — lets the advisor add rows the AI missed without
-  // touching the source data and regenerating. Empty defaults; the user
-  // fills in name and numbers via the existing inline editors.
-  function addSimpleRow(key: SimpleKey) {
-    if (!result) return
-    updateResult({ [key]: [...result[key], { name: '', amount: 0 }] })
-  }
-  function addAnnualRow() {
-    if (!result) return
-    updateResult({ annual: [...result.annual, { name: '', annualAmount: 0 }] })
-  }
-  function addComplexRow(key: 'debts' | 'installments' | 'savings') {
-    if (!result) return
-    const defaults: Record<string, Record<string, unknown>> = {
-      debts:        { name: '', originalBalance: 0, remainingBalance: 0, interestRate: 0, remainingMonths: 0, monthlyPayment: 0 },
-      installments: { name: '', totalAmount: 0, monthlyPayment: 0, paidCount: 0, totalCount: 0 },
-      savings:      { name: '', monthlyContribution: 0, accumulated: 0, feeBalance: 0, feeDeposit: 0 },
-    }
-    const rows = [...(result[key] as unknown as Record<string, unknown>[]), defaults[key]]
-    updateResult({ [key]: rows } as Partial<GeneratedMapping>)
-  }
+  // Row editing / adding / deleting on the AI result lives inside
+  // LabMappingView, which drives the shared mapping-tab panels and writes
+  // back through updateResult. Kept out of this page to keep it focused on
+  // input, generation, drafts, and the copy-to-mapping flow.
 
   // Save the current session (context + months + result) as a named draft.
   // The advisor names the draft via prompt() — quick + good-enough for the
@@ -960,247 +852,12 @@ export default function AutoMapPage() {
             )
           })()}
 
-          {/* Variable section — special grouped render with txns drill-down.
-              The AI returns sub-rows per merchant type ("סופרמרקטים 1800",
-              "פירות וירקות 400") and tags each with its parent ALL_CATEGORIES
-              entry ("מזון לבית"). We bucket the rows by category, show one
-              card per category with all its sub-rows, and let the advisor
-              expand the underlying credit transactions that fed each group
-              — exactly what's needed to walk a client through "where did my
-              money go in food this month". */}
-          {(() => {
-            const variableRows = result.variable.map((r, i) => ({ ...r, _idx: i }))
-            type VarGroup = { category: string; rows: typeof variableRows }
-            const groupsMap = new Map<string, VarGroup>()
-            for (const r of variableRows) {
-              const cat = r.category?.trim() || 'ללא קטגוריה'
-              const g = groupsMap.get(cat) ?? { category: cat, rows: [] }
-              g.rows.push(r)
-              groupsMap.set(cat, g)
-            }
-            const groups = [...groupsMap.values()].sort((a, b) =>
-              b.rows.reduce((s, r) => s + r.amount, 0) - a.rows.reduce((s, r) => s + r.amount, 0))
+          {/* Full mapping-tab view — the AI result rendered through the exact
+              same panels as the manual mapping tab. Edits flow back into the
+              isolated autoMapStore via updateResult; nothing touches the real
+              mapping until "העתק למיפוי". */}
+          <LabMappingView result={result} txns={txns} onChange={updateResult} />
 
-            const isOpen = sectionOpen.variable
-            return (
-              <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-3">
-                <button
-                  onClick={() => toggleSection('variable')}
-                  className="w-full flex items-center justify-between gap-2 text-start"
-                  aria-expanded={isOpen}
-                >
-                  <h3 className="text-sm font-semibold text-txt">🛒 הוצאות משתנות</h3>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-txt tabular-nums">{fmt(result.variable.reduce((s, r) => s + r.amount, 0))}</span>
-                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
-                  </div>
-                </button>
-
-                {isOpen && groups.length === 0 && (
-                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-                )}
-
-                {isOpen && groups.map(g => {
-                  const groupTotal = g.rows.reduce((s, r) => s + r.amount, 0)
-                  const matchingTxns = txns.filter(t => !t.isRefund && t.category === g.category)
-                  const isOpen = openCategoryTxns === g.category
-                  return (
-                    <div key={g.category} className="rounded-lg border border-line/60 bg-surface/40 p-2.5 space-y-2">
-                      {/* Category header */}
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-gold">{g.category}</span>
-                        <span className="text-[10px] text-muted-txt tabular-nums">{g.rows.length} שורות · {fmt(groupTotal)}</span>
-                      </div>
-
-                      {/* Sub-rows */}
-                      {g.rows.map(r => (
-                        <div key={r._idx} className="flex items-center gap-2 group flex-wrap">
-                          <input value={r.name} onChange={e => editSimple('variable', r._idx, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                          <RowMetaChip confidence={r.confidence} source={r.source} />
-                          <input type="number" value={r.amount || ''} onChange={e => editSimple('variable', r._idx, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
-                          <button onClick={() => delRow('variable', r._idx)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
-                        </div>
-                      ))}
-
-                      {/* Expandable underlying transactions from the local Excel parse.
-                          Shown only when there ARE matching txns for this category. */}
-                      {matchingTxns.length > 0 && (
-                        <>
-                          <button
-                            onClick={() => setOpenCategoryTxns(isOpen ? null : g.category)}
-                            className="w-full text-start text-[11px] px-2 py-1 rounded border border-line bg-surface hover:border-gold/40 hover:text-gold transition-colors flex items-center justify-between gap-2"
-                          >
-                            <span>📊 פירוט: {matchingTxns.length} עסקאות מהדוחות</span>
-                            <span>{isOpen ? '▲' : '▶'}</span>
-                          </button>
-                          {isOpen && (
-                            <div className="rounded-lg border border-line overflow-x-auto">
-                              <table className="w-full text-[11px]">
-                                <thead className="bg-surface2 border-b border-line">
-                                  <tr>
-                                    <th className="text-start px-2 py-1 font-medium text-muted-txt">תיאור</th>
-                                    <th className="text-start px-2 py-1 font-medium text-muted-txt whitespace-nowrap">תאריך</th>
-                                    <th className="text-end px-2 py-1 font-medium text-muted-txt">סכום</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-line/50">
-                                  {[...matchingTxns].sort((a, b) => b.amount - a.amount).map((t, i) => (
-                                    <tr key={i} className="hover:bg-surface2/40">
-                                      <td className="px-2 py-1 max-w-[200px] truncate text-txt">{t.desc}</td>
-                                      <td className="px-2 py-1 text-muted-txt whitespace-nowrap">{t.date}</td>
-                                      <td className="px-2 py-1 text-end font-medium text-gold tabular-nums whitespace-nowrap">{fmt(t.amount)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )
-                })}
-
-                {isOpen && (
-                  <button
-                    onClick={() => addSimpleRow('variable')}
-                    className="text-xs text-muted-txt hover:text-gold transition-colors"
-                  >
-                    + הוסף שורה
-                  </button>
-                )}
-              </div>
-            )
-          })()}
-
-          {/* Other simple sections (income / fixed / sub / ins) — flat
-              rendering, since they're typically one row per category and
-              don't benefit from the variable-style grouping. */}
-          {SIMPLE_SECTIONS.filter(s => s.key !== 'variable').map(({ key, label, icon }) => {
-            const isOpen = sectionOpen[key]
-            return (
-              <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-                <button
-                  onClick={() => toggleSection(key)}
-                  className="w-full flex items-center justify-between gap-2 text-start"
-                  aria-expanded={isOpen}
-                >
-                  <h3 className="text-sm font-semibold text-txt">{icon} {label}</h3>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-txt tabular-nums">{fmt(result[key].reduce((s, r) => s + r.amount, 0))}</span>
-                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
-                  </div>
-                </button>
-                {isOpen && result[key].map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 group flex-wrap">
-                    <input value={r.name} onChange={e => editSimple(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                    <RowMetaChip confidence={r.confidence} source={r.source} />
-                    <input type="number" value={r.amount || ''} onChange={e => editSimple(key, i, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
-                    <button onClick={() => delRow(key, i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
-                  </div>
-                ))}
-                {isOpen && result[key].length === 0 && (
-                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-                )}
-                {isOpen && (
-                  <button
-                    onClick={() => addSimpleRow(key)}
-                    className="text-xs text-muted-txt hover:text-gold transition-colors"
-                  >
-                    + הוסף שורה
-                  </button>
-                )}
-              </div>
-            )
-          })}
-
-          {/* Annual — always shown so advisor can add yearly costs manually */}
-          {(() => {
-            const isOpen = sectionOpen.annual
-            return (
-              <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-                <button
-                  onClick={() => toggleSection('annual')}
-                  className="w-full flex items-center justify-between gap-2 text-start"
-                  aria-expanded={isOpen}
-                >
-                  <h3 className="text-sm font-semibold text-txt">📆 שנתיות</h3>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-txt tabular-nums">{fmt(result.annual.reduce((s, r) => s + r.annualAmount, 0))}/שנה</span>
-                    <span className="text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
-                  </div>
-                </button>
-                {isOpen && result.annual.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 group flex-wrap">
-                    <input value={r.name} onChange={e => editAnnual(i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                    <RowMetaChip confidence={r.confidence} source={r.source} />
-                    <input type="number" value={r.annualAmount || ''} onChange={e => editAnnual(i, 'annualAmount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="שנתי" />
-                    <button onClick={() => delRow('annual', i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>
-                  </div>
-                ))}
-                {isOpen && result.annual.length === 0 && (
-                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-                )}
-                {isOpen && (
-                  <button
-                    onClick={addAnnualRow}
-                    className="text-xs text-muted-txt hover:text-gold transition-colors"
-                  >
-                    + הוסף שורה
-                  </button>
-                )}
-              </div>
-            )
-          })()}
-
-          {/* Complex sections — always rendered with add-row buttons */}
-          {([
-            { key: 'debts' as const,        label: '💳 חובות',   fields: DEBT_FIELDS },
-            { key: 'installments' as const, label: '🛍️ תשלומים', fields: INST_FIELDS },
-            { key: 'savings' as const,      label: '🏦 חיסכון',  fields: SAV_FIELDS },
-          ]).map(({ key, label, fields }) => {
-            const isOpen = sectionOpen[key]
-            return (
-              <div key={key} className="rounded-xl border border-line bg-surface2 p-3 sm:p-4 space-y-2">
-                <button
-                  onClick={() => toggleSection(key)}
-                  className="w-full flex items-center justify-between gap-2 text-start"
-                  aria-expanded={isOpen}
-                >
-                  <h3 className="text-sm font-semibold text-txt">{label}</h3>
-                  <span className="text-xs text-muted-txt w-3">{isOpen ? '▲' : '▼'}</span>
-                </button>
-                {isOpen && (result[key] as unknown as Record<string, unknown>[]).map((r, i) => (
-                  <div key={i} className="bg-surface/40 rounded-lg p-2 space-y-1.5 group">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <input value={String(r.name ?? '')} onChange={e => editComplex(key, i, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
-                      <RowMetaChip confidence={r.confidence as 'high' | 'medium' | 'low' | undefined} source={typeof r.source === 'string' ? r.source : undefined} />
-                      <button onClick={() => delRow(key, i)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense text-base rounded">×</button>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                      {fields.map(([f, l]) => (
-                        <div key={String(f)} className="space-y-0.5">
-                          <div className="text-[10px] text-muted-txt px-1">{l}</div>
-                          <input type="number" value={(r[f as string] as number) || ''} onChange={e => editComplex(key, i, f as string, e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-full text-left tabular-nums`} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {isOpen && (result[key] as unknown[]).length === 0 && (
-                  <div className="text-xs text-muted-txt/70 italic py-1">אין שורות — לחץ "+ הוסף שורה" כדי להוסיף ידנית</div>
-                )}
-                {isOpen && (
-                  <button
-                    onClick={() => addComplexRow(key)}
-                    className="text-xs text-muted-txt hover:text-gold transition-colors"
-                  >
-                    + הוסף שורה
-                  </button>
-                )}
-              </div>
-            )
-          })}
         </div>
       )}
 
