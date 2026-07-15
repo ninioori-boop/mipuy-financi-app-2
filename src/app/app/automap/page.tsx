@@ -41,17 +41,35 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 // Downscale + JPEG so large photos fit under the request-size cap.
-async function imageToJpegBase64(file: File, maxDim = 1500, quality = 0.7): Promise<string> {
+//
+// Adaptive: starts at good quality (1600px / 0.72) — better for Claude reading
+// small print in statements — and, if a single image's base64 still exceeds
+// TARGET, progressively lowers quality then dimension until it fits (or hits a
+// floor). Capping each image keeps the whole batch well under the request cap,
+// so image-heavy uploads "just work" without the advisor tuning anything.
+async function imageToJpegBase64(file: File, maxDim = 1600, targetBytes = 900_000): Promise<string> {
   const img = await loadImage(await readAsDataURL(file))
-  const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
-  const w = Math.max(1, Math.round(img.width * scale))
-  const h = Math.max(1, Math.round(img.height * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = w; canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('canvas לא נתמך')
-  ctx.drawImage(img, 0, 0, w, h)
-  return canvas.toDataURL('image/jpeg', quality).split(',')[1] ?? ''
+  const render = (dim: number, quality: number): string => {
+    const scale = Math.min(1, dim / Math.max(img.width, img.height))
+    const w = Math.max(1, Math.round(img.width * scale))
+    const h = Math.max(1, Math.round(img.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w; canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas לא נתמך')
+    ctx.drawImage(img, 0, 0, w, h)
+    return canvas.toDataURL('image/jpeg', quality).split(',')[1] ?? ''
+  }
+  let dim = maxDim
+  let quality = 0.72
+  let out = render(dim, quality)
+  // Up to 6 tries: shed quality first (down to 0.5), then shrink dimensions.
+  for (let attempt = 0; attempt < 6 && out.length > targetBytes; attempt++) {
+    if (quality > 0.5) quality -= 0.1
+    else dim = Math.round(dim * 0.8)
+    out = render(dim, quality)
+  }
+  return out
 }
 async function fileToBase64(file: File): Promise<string> {
   return (await readAsDataURL(file)).split(',')[1] ?? ''
@@ -225,7 +243,7 @@ export default function AutoMapPage() {
   })()
 
   const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
-  const tooBig    = docsBytes > 3_800_000
+  const tooBig    = docsBytes > 4_300_000
 
   // Build the multimodal user content: a text block + one image/document block
   // per attached file, passed straight to Claude.
@@ -634,13 +652,13 @@ export default function AutoMapPage() {
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-txt">נפח מסמכים</span>
               <span className={tooBig ? 'text-expense font-semibold tabular-nums' : 'text-muted-txt tabular-nums'}>
-                {(docsBytes / 1_000_000).toFixed(2)} / 4.0 MB
+                {(docsBytes / 1_000_000).toFixed(2)} / 4.5 MB
               </span>
             </div>
             <div className="h-1.5 rounded-full bg-line overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${tooBig ? 'bg-expense' : 'bg-gold'}`}
-                style={{ width: `${Math.min(100, (docsBytes / 4_000_000) * 100)}%` }}
+                style={{ width: `${Math.min(100, (docsBytes / 4_500_000) * 100)}%` }}
               />
             </div>
             {tooBig && (

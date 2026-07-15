@@ -15,9 +15,12 @@ const WINDOW_MS   = 86_400_000 // 24 hours
 
 // The client's data summary can be large (transaction lines + free text).
 const MAX_MESSAGE_LEN = 40_000
-// Multimodal payload (text + base64 images/PDFs). Kept under the serverless
-// request-body limit; the client also downscales images and caps total size.
-const MAX_CONTENT_LEN = 4_000_000
+// Multimodal payload (text + base64 images/PDFs). Kept just under Vercel's
+// hard ~4.5MB serverless request-body limit (going higher gets the request
+// rejected by the platform before it reaches us); the client also adaptively
+// compresses images and caps the total at 4.3MB, leaving headroom for the
+// JSON envelope + text block.
+const MAX_CONTENT_LEN = 4_400_000
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
