@@ -131,8 +131,8 @@ export default function HomePage() {
       {/* Safe-to-spend-today — lab-gated (advisor-only) for now */}
       {isAdvisor && <SafeToSpendToday />}
 
-      {/* End-of-month budget-review reminder — lab-gated (advisor-only) for now */}
-      {isAdvisor && <BudgetReviewReminder />}
+      {/* End-of-month budget-review reminder — open to everyone */}
+      <BudgetReviewReminder />
 
       {/* BIG primary action — the thing you do most, always in reach */}
       <Link
