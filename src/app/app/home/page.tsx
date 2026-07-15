@@ -6,6 +6,7 @@ import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useAuthStore } from '@/stores/authStore'
+import { hasLabAccess } from '@/lib/labAccess'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 
@@ -30,6 +31,8 @@ export default function HomePage() {
   const user        = useAuthStore(s => s.user)
   const ym          = currentMonth()
   const firstName   = (user?.displayName || '').trim().split(' ')[0]
+  // Subscriptions are lab-gated for now — advisor-only until it's ready for clients.
+  const isAdvisor   = hasLabAccess(user?.email)
 
   const s = useMemo(() => {
     const now = new Date()
@@ -71,7 +74,7 @@ export default function HomePage() {
     { href: '/app/expenses',    emoji: '🧾', label: 'תיעוד הוצאות', desc: 'ראה ורשום את ההוצאות שלך' },
     { href: '/app/monthly/jan', emoji: '📅', label: 'תקציב חודשי', desc: 'תכנון מול ביצוע' },
     { href: '/app/checking',    emoji: '💧', label: 'התנהלות עו"ש', desc: 'כמה להשאיר / לחסוך' },
-    { href: '/app/subscriptions', emoji: '🔁', label: 'מנויים קבועים', desc: 'חיובים חוזרים שזיהינו' },
+    ...(isAdvisor ? [{ href: '/app/subscriptions', emoji: '🔁', label: 'מנויים קבועים', desc: 'חיובים חוזרים שזיהינו' }] : []),
     { href: '/app/trends',      emoji: '📊', label: 'מגמות',        desc: 'איך אתה מתנהל לאורך זמן' },
     { href: '/app/goals',       emoji: '🎯', label: 'יעדים',         desc: 'חיסכון ומטרות' },
     { href: '/app/meetings',    emoji: '📝', label: 'פגישות',       desc: 'סיכומים ומשימות' },
@@ -143,8 +146,8 @@ export default function HomePage() {
       {/* Proactive coach insights — the app speaks first */}
       <InsightCards />
 
-      {/* Detected recurring subscriptions — shows only once enough history exists */}
-      <SubscriptionsCard />
+      {/* Detected recurring subscriptions — lab-gated (advisor-only) for now */}
+      {isAdvisor && <SubscriptionsCard />}
 
       {/* Empty-state nudge — the app never feels dead on day one */}
       {s.count === 0 && (

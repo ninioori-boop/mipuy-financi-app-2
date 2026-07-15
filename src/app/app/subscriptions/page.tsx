@@ -1,8 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/authStore'
+import { hasLabAccess } from '@/lib/labAccess'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useSubscriptionPrefsStore, type DismissReason } from '@/stores/subscriptionPrefsStore'
 import { detectSubscriptions, subscriptionsMonthlyTotal } from '@/lib/subscriptions'
@@ -22,6 +25,15 @@ function dateLabel(iso: string) {
 // log. The big total (monthly + yearly) is the eye-opener; each row can be
 // removed ("cancelled" / "not a subscription"), reversibly. Pure/local, no server.
 export default function SubscriptionsPage() {
+  const router    = useRouter()
+  const user      = useAuthStore(s => s.user)
+  const isAdvisor = hasLabAccess(user?.email)
+
+  // Lab-gated for now — advisor-only, even via a direct URL. Send clients home.
+  useEffect(() => {
+    if (user && !hasLabAccess(user.email)) router.replace('/app/home')
+  }, [user, router])
+
   const entries   = useExpenseLogStore(s => s.entries)
   const dismissed = useSubscriptionPrefsStore(s => s.dismissed)
   const dismiss   = useSubscriptionPrefsStore(s => s.dismiss)
@@ -47,6 +59,9 @@ export default function SubscriptionsPage() {
       action: { label: 'ביטול', onClick: () => restore(key) },
     })
   }
+
+  // Non-advisors are redirected by the effect above; render nothing meanwhile.
+  if (!isAdvisor) return null
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
