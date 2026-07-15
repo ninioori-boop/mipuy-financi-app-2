@@ -5,9 +5,11 @@ import { SectionPanel } from '@/components/mapping/SectionPanel'
 import { DebtPanel } from '@/components/mapping/DebtPanel'
 import { InstallmentPanel } from '@/components/mapping/InstallmentPanel'
 import { SavingPanel } from '@/components/mapping/SavingPanel'
+import { CreditCardsPanel } from '@/components/mapping/CreditCardsPanel'
+import { BankAccountsPanel } from '@/components/mapping/BankAccountsPanel'
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
 import type {
-  MappingRow, AnnualRow, DebtRow, InstallmentRow, SavingRow,
+  MappingRow, AnnualRow, DebtRow, InstallmentRow, SavingRow, CreditCardRow, BankAccountRow,
 } from '@/stores/mappingStore'
 import type { GeneratedMapping } from '@/lib/autoMap'
 import type { Transaction } from '@/types/transaction'
@@ -116,6 +118,25 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     patch(key, [...(result[key] as unknown as Record<string, unknown>[]), defaults[key]] as unknown as GeneratedMapping[typeof key])
   }
 
+  // Profile snapshot editors (credit cards / bank accounts). `?? []` guards
+  // drafts saved before these fields existed.
+  function editCard(idx: number, field: string, value: string | number) {
+    const rows = [...(result.creditCards ?? [])]
+    rows[idx] = { ...rows[idx], [field]: field === 'name' ? String(value) : asNum(value) }
+    patch('creditCards', rows)
+  }
+  function editAccount(idx: number, field: string, value: string | number) {
+    const rows = [...(result.bankAccounts ?? [])]
+    rows[idx] = { ...rows[idx], [field]: field === 'name' ? String(value) : asNum(value) }
+    patch('bankAccounts', rows)
+  }
+  function addCard() {
+    patch('creditCards', [...(result.creditCards ?? []), { name: '', limit: 0, chargeDay: 2 }])
+  }
+  function addAccount() {
+    patch('bankAccounts', [...(result.bankAccounts ?? []), { name: '', balance: 0, overdraftLimit: 0 }])
+  }
+
   // ── adapters: GeneratedMapping rows → id-bearing panel rows ──
   const simpleRows = (key: SimpleKey): MappingRow[] =>
     result[key].map((r, i) => ({ id: `${key}-${i}`, name: r.name, amount: r.amount }))
@@ -129,6 +150,10 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     result.savings.map((r, i) => ({ id: `savings-${i}`, name: r.name, monthlyContribution: r.monthlyContribution, accumulated: r.accumulated, feeBalance: r.feeBalance, feeDeposit: r.feeDeposit }))
   const variableRows: MappingRow[] =
     result.variable.map((r, i) => ({ id: `variable-${i}`, name: r.name, amount: r.amount }))
+  const creditCardRows: CreditCardRow[] =
+    (result.creditCards ?? []).map((r, i) => ({ id: `creditCards-${i}`, name: r.name, limit: r.limit, chargeDay: r.chargeDay || 2 }))
+  const bankAccountRows: BankAccountRow[] =
+    (result.bankAccounts ?? []).map((r, i) => ({ id: `bankAccounts-${i}`, name: r.name, balance: r.balance, overdraftLimit: r.overdraftLimit }))
 
   // Confidence/source chip for a simple-section row, looked up by id.
   const chipFor = (key: SimpleKey) => (row: MappingRow) => {
@@ -138,8 +163,44 @@ export function LabMappingView({ result, txns, onChange }: Props) {
 
   const totalAnnualMo = Math.round(result.annual.reduce((s, r) => s + r.annualAmount, 0) / 12)
 
+  const creditScore = result.creditScore ?? 0
+
   return (
     <div className="space-y-6">
+
+      {/* Profile snapshot — credit score + credit cards + checking account,
+          identical to the top of the manual mapping tab (point-in-time facts). */}
+      <div className="rounded-xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-txt">📊 ציון דירוג אשראי</div>
+          <div className="text-xs text-muted-txt mt-0.5">הציון העדכני של הלקוח (לפי דוח נתוני אשראי)</div>
+        </div>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={creditScore || ''}
+          min={0}
+          onChange={e => onChange({ creditScore: Math.max(0, parseFloat(e.target.value) || 0) })}
+          placeholder="—"
+          style={{ direction: 'ltr' }}
+          className="w-28 rounded-lg border border-line bg-surface px-3 py-2 text-lg font-bold text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
+        />
+      </div>
+
+      <CreditCardsPanel
+        cards={creditCardRows}
+        onAdd={addCard}
+        onUpdate={(id, field, value) => editCard(idxOf(id), field, value)}
+        onDelete={id => delRow('creditCards', idxOf(id))}
+      />
+
+      <BankAccountsPanel
+        accounts={bankAccountRows}
+        onAdd={addAccount}
+        onUpdate={(id, field, value) => editAccount(idxOf(id), field, value)}
+        onDelete={id => delRow('bankAccounts', idxOf(id))}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}
