@@ -81,6 +81,35 @@ export async function POST(req: NextRequest) {
   // and easy to re-categorize (the app surfaces it in the one-tap review strip).
   const isTransfer = typeof source === 'string' && /ביט|פייבוקס|paybox|\bbit\b/i.test(source)
 
+  // Duplicate-fire guard: iOS Wallet automations can fire several times for
+  // ONE physical payment (transaction updates / re-triggers — seen in the
+  // field: one ₪14 tap → a burst of identical POSTs). Same merchant+amount
+  // arriving again within the window = the same payment; skip the inbox write
+  // and the push, but answer normally so the shortcut doesn't error.
+  const DEDUP_WINDOW_MS = 180_000
+  const inboxRef = db.collection('transactionInbox').doc(uid)
+  const roundedAmt = Math.round(amt * 100) / 100
+  // Manual entries (explicit category from the app) are deliberate — a human
+  // adding the same amount twice on purpose must not be swallowed.
+  if (typeof catOverride !== 'string') try {
+    const parent = await inboxRef.get()
+    const last = parent.exists
+      ? (parent.data()?.last as { m?: string; a?: number; at?: number; cat?: string } | undefined)
+      : undefined
+    if (
+      last &&
+      last.m === cleanMerchant &&
+      last.a === roundedAmt &&
+      typeof last.at === 'number' &&
+      Date.now() - last.at < DEDUP_WINDOW_MS
+    ) {
+      console.log(`[transaction] DUPLICATE_SKIPPED uid=${uid}`)
+      const category = typeof last.cat === 'string' ? last.cat : 'שונות'
+      const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+      return NextResponse.json({ ok: true, duplicate: true, category, notify })
+    }
+  } catch { /* guard is best-effort — never blocks a capture */ }
+
   let category: string
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
     category = catOverride
@@ -97,16 +126,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await db
-    .collection('transactionInbox').doc(uid)
-    .collection('items').add({
-      merchant:  cleanMerchant,
-      amount:    Math.round(amt * 100) / 100,
-      date:      dateStr,
-      category,
-      ref:       refStr,
-      createdAt: FieldValue.serverTimestamp(),
-    })
+  await inboxRef.collection('items').add({
+    merchant:  cleanMerchant,
+    amount:    roundedAmt,
+    date:      dateStr,
+    category,
+    ref:       refStr,
+    createdAt: FieldValue.serverTimestamp(),
+  })
+  // Fingerprint for the duplicate-fire guard above (best-effort).
+  await inboxRef
+    .set({ last: { m: cleanMerchant, a: roundedAmt, at: Date.now(), cat: category } }, { merge: true })
+    .catch(() => { /* guard metadata only */ })
 
   // uid + bucket only — no merchant/amount detail logged.
   console.log(`[transaction] uid=${uid} cat=${category}`)
@@ -124,7 +155,8 @@ export async function POST(req: NextRequest) {
     title: notify.title,
     body: notify.body,
     url: '/app/expenses',
-    tag: refStr ?? undefined,
+    // Identical captures replace each other on screen instead of stacking.
+    tag: refStr ?? `${cleanMerchant}|${roundedAmt}|${dateStr}`,
   })
 
   return NextResponse.json({ ok: true, category, notify })
