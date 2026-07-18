@@ -223,6 +223,70 @@ export function analyzeMediumTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalA
   return { id: g.id, name: g.name, facts, opinion, choicePrompt: null, notes }
 }
 
+// ── LONG TERM (7 years and up) ───────────────────────────────────────────────
+//
+// Time works for you: let compounding accumulate through a broad, passive,
+// globally-diversified investment held for years. Same two per-goal inputs as
+// the medium term (risk level + investor type), but here risk level means
+// VOLATILITY TOLERANCE — how you'd react to a big drop — because over long
+// horizons the probability of loss collapses (historically ~0% over 20y, and no
+// continuous 15y stretch has lost). The real long-term risk is behavioural: not
+// staying the course. Currency matters less (it evens out over years). Pension
+// products (pension fund, השתלמות) should sit in an equity track first.
+// US citizens: US-domiciled ETFs via a US broker (PFIC) — no Israeli funds.
+
+export const LONG_TERM_PRINCIPLES =
+  'טווח ארוך (7 שנים ומעלה) הוא המקום שבו הזמן עובד לטובתך: נותנים לריבית דריבית לצבור הון לאורך שנים, בהשקעה מפוזרת ופאסיבית שמכסה את כל השוק העולמי. ככל שמשקיעים יותר זמן, הסבירות להפסיד קורסת: על פני שנה בערך 25%, על פני 5 שנים בערך 10%, ועל פני 20 שנה קרוב ל‑0%. היסטורית, לא היה מקרה שמישהו שהשקיע במדדים רחבים ברצף של 15 שנה הפסיד. מטבע הוא פחות שיקול כאן, כי הוא מתאזן לאורך שנים. הסיכון האמיתי בטווח ארוך הוא לא השוק, אלא לא להתמיד ולמכור בפאניקה בזמן ירידה.'
+
+export const LONG_DISCLAIMER =
+  'זה לא ייעוץ השקעות ולא המלצה, זה כיוון חשיבה. השקעה לטווח ארוך דורשת הבנה בסיסית של השוק, יכולת התמדה, וסיבולת לתנודתיות. חשוב מאוד ללמוד את התחום ולהתייעץ עם איש מקצוע לפני הביצוע.'
+
+// The pension layer — shown for every long-term goal, before the free-money
+// direction. The base, per the advisor.
+const LONG_PENSION_NOTE =
+  'קודם כל, ודא שהמוצרים הפנסיוניים שלך (קרן פנסיה, קרן השתלמות) נמצאים במסלול מנייתי שמתאים לטווח ארוך. זה הבסיס, עוד לפני הכסף הפנוי.'
+
+// Risk level in the long term = volatility tolerance (how you react to a drop).
+const LONG_RISK_OPINION: Record<RiskLevel, string> = {
+  solid:
+    'רמת הסיכון כאן היא סיבולת תנודתיות, כלומר איך תגיב לירידה חדה. סיבולת נמוכה: אם ירידה של עשרות אחוזים תגרום לך למכור בפאניקה, עדיף מסלול שתוכל להחזיק בו. אבל שים לב, בטווח ארוך ישיבה בסולידי מוותרת על חלק גדול מהצמיחה, והיסטורית הזמן תיקן את הירידות.',
+  balanced:
+    'רמת הסיכון כאן היא סיבולת תנודתיות, כלומר איך תגיב לירידה חדה. סיבולת בינונית: אתה סופג ירידות אבל מעדיף לא את המקסימום. מסלול מנייתי עם ריכוך מסוים יכול להתאים.',
+  growth:
+    'רמת הסיכון כאן היא סיבולת תנודתיות, כלומר איך תגיב לירידה חדה. סיבולת גבוהה: אתה מבין שירידות הן חלק מהדרך ומסוגל להחזיק דרכן. בטווח ארוך זו בדרך כלל הגישה שממקסמת את פוטנציאל הצמיחה, בתנאי שתתמיד.',
+}
+
+function longVehicles(investorType: InvestorType, isUSCitizen: boolean): string {
+  if (isUSCitizen) {
+    return 'בגלל האזרחות האמריקאית, מוצרים ארוזים וקרנות ישראליות לא מתאימות לך (PFIC). הכיוון: קרנות סל אמריקאיות שעוקבות אחרי מדדים רחבים, דרך ברוקר אמריקאי (למשל אינטראקטיב ברוקרס).'
+  }
+  if (investorType === 'managed') {
+    return 'אם אתה מעדיף שלא לנהל בעצמך: קופת גמל להשקעה או פוליסת חיסכון במסלול מנייתי. שים לב לדמי הניהול, בטווח ארוך יש להם משמעות ענקית על הסכום הסופי.'
+  }
+  return 'אם אתה מנהל בעצמך: קרנות סל שעוקבות אחרי מדדים רחבים (כל השוק העולמי), דרך ברוקר ישראלי ולא דרך הבנק (עמלות גבוהות).'
+}
+
+export function analyzeLongTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAnalysis {
+  const facts = factsHeader('טווח ארוך', g)
+  const done  = g.required > 0 && g.current >= g.required
+
+  if (!g.riskLevel || !g.investorType) {
+    return {
+      id: g.id, name: g.name, facts, opinion: null,
+      choicePrompt: 'בחר על המטרה רמת סיכון (סיבולת תנודתיות: סולידי / מאוזן / צמיחה) וסוג משקיע (מוצר מנוהל / משקיע לבד), ואז הרץ שוב.',
+      notes: [],
+    }
+  }
+
+  const opinion = LONG_PENSION_NOTE + '\n\n' + LONG_RISK_OPINION[g.riskLevel] + '\n\n' + longVehicles(g.investorType, ctx.isUSCitizen)
+  const notes = timingNotes(g, ctx)
+  if (done) {
+    notes.unshift('כבר הגעת ליעד. ככל שאתה מתקרב לשימוש בכסף, שווה לשקול להתחיל למתן את הסיכון בהדרגה.')
+  }
+
+  return { id: g.id, name: g.name, facts, opinion, choicePrompt: null, notes }
+}
+
 // ── batch entry points ───────────────────────────────────────────────────────
 
 const hasContent = (g: GoalFacts) => g.name.trim() !== '' || g.required > 0
@@ -233,4 +297,8 @@ export function analyzeShortTerm(goals: GoalFacts[], ctx: AnalysisContext): Goal
 
 export function analyzeMediumTerm(goals: GoalFacts[], ctx: AnalysisContext): GoalAnalysis[] {
   return goals.filter(hasContent).map(g => analyzeMediumTermGoal(g, ctx))
+}
+
+export function analyzeLongTerm(goals: GoalFacts[], ctx: AnalysisContext): GoalAnalysis[] {
+  return goals.filter(hasContent).map(g => analyzeLongTermGoal(g, ctx))
 }

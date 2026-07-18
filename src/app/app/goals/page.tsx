@@ -104,6 +104,10 @@ export default function GoalsPage() {
     id: r.id, name: r.name, required: r.required, current: r.current,
     months: monthsUntil(r.targetDate), riskLevel: r.riskLevel, investorType: r.investorType,
   }))
+  const longFacts: GoalFacts[] = long.map(r => ({
+    id: r.id, name: r.name, required: r.required, current: r.current,
+    months: monthsUntil(r.targetDate), riskLevel: r.riskLevel, investorType: r.investorType,
+  }))
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
@@ -285,9 +289,9 @@ export default function GoalsPage() {
                       </div>
                     )}
 
-                    {/* Risk + investor toggles — lab-only, medium-term goals.
+                    {/* Risk + investor toggles — lab-only, medium & long goals.
                         Feed the analysis (equity/solid tilt + vehicles). */}
-                    {isLab && id === 'medium' && (
+                    {isLab && (id === 'medium' || id === 'long') && (
                       <div className="space-y-1.5 pt-0.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-muted-txt">רמת סיכון:</span>
@@ -341,6 +345,9 @@ export default function GoalsPage() {
             )}
             {isLab && id === 'medium' && (
               <GoalsAnalysis horizon="medium" facts={mediumFacts} monthlyBudget={savingsBudget.budget} />
+            )}
+            {isLab && id === 'long' && (
+              <GoalsAnalysis horizon="long" facts={longFacts} monthlyBudget={savingsBudget.budget} />
             )}
           </div>
         )

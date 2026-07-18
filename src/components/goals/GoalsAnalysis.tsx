@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import { useGoalsStore } from '@/stores/goalsStore'
 import {
-  analyzeShortTerm, analyzeMediumTerm,
-  SHORT_TERM_PRINCIPLES, MEDIUM_TERM_PRINCIPLES,
-  SHORT_DISCLAIMER, MEDIUM_DISCLAIMER,
+  analyzeShortTerm, analyzeMediumTerm, analyzeLongTerm,
+  SHORT_TERM_PRINCIPLES, MEDIUM_TERM_PRINCIPLES, LONG_TERM_PRINCIPLES,
+  SHORT_DISCLAIMER, MEDIUM_DISCLAIMER, LONG_DISCLAIMER,
   type GoalFacts,
 } from '@/lib/goalsAnalysis'
 
@@ -19,7 +19,7 @@ import {
 // themselves; when one is missing the engine returns a choicePrompt instead of a
 // direction.
 
-type Horizon = 'short' | 'medium'
+type Horizon = 'short' | 'medium' | 'long'
 
 const COPY: Record<Horizon, { title: string; sub: string; principles: string; disclaimer: string }> = {
   short: {
@@ -33,6 +33,12 @@ const COPY: Record<Horizon, { title: string; sub: string; principles: string; di
     sub:        'קריאה של המטרות שלך לטווח בינוני, וכיוון חשיבה לכל אחת. לא המלצה.',
     principles: MEDIUM_TERM_PRINCIPLES,
     disclaimer: MEDIUM_DISCLAIMER,
+  },
+  long: {
+    title:      '🧭 ניתוח יעדים · טווח ארוך',
+    sub:        'קריאה של המטרות שלך לטווח ארוך, וכיוון חשיבה לכל אחת. לא המלצה.',
+    principles: LONG_TERM_PRINCIPLES,
+    disclaimer: LONG_DISCLAIMER,
   },
 }
 
@@ -69,7 +75,10 @@ export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
     setShowResults(true)
   }
 
-  const analyze = horizon === 'short' ? analyzeShortTerm : analyzeMediumTerm
+  const analyze =
+    horizon === 'short'  ? analyzeShortTerm
+    : horizon === 'medium' ? analyzeMediumTerm
+    : analyzeLongTerm
   const results = showResults
     ? analyze(facts, { isUSCitizen: isUSCitizen === true, monthlyBudget })
     : []
