@@ -3,36 +3,62 @@
 import { useState } from 'react'
 import { useGoalsStore } from '@/stores/goalsStore'
 import {
-  analyzeShortTerm, ANALYSIS_DISCLAIMER, SHORT_TERM_PRINCIPLES, type GoalFacts,
+  analyzeShortTerm, analyzeMediumTerm,
+  SHORT_TERM_PRINCIPLES, MEDIUM_TERM_PRINCIPLES,
+  SHORT_DISCLAIMER, MEDIUM_DISCLAIMER,
+  type GoalFacts,
 } from '@/lib/goalsAnalysis'
 
-// Short-term goal analysis card. Lab-gated by the caller (goals page), so
+// Goal analysis card, one per horizon. Lab-gated by the caller (goals page), so
 // regular clients never see it.
 //
 // The analysis itself is deterministic (see lib/goalsAnalysis.ts) — this
-// component only asks the one question the rules need (US citizenship, which
-// gates the PFIC branch) and renders what the engine returns.
+// component only asks the one shared question the rules need (US citizenship,
+// which gates the PFIC branch) and renders what the engine returns. The per-goal
+// inputs (short: liquidity; medium: risk + investor type) are marked on the goals
+// themselves; when one is missing the engine returns a choicePrompt instead of a
+// direction.
+
+type Horizon = 'short' | 'medium'
+
+const COPY: Record<Horizon, { title: string; sub: string; principles: string; disclaimer: string }> = {
+  short: {
+    title:      '🧭 ניתוח יעדים · טווח קצר',
+    sub:        'קריאה של המטרות שלך לטווח קצר, וכיוון חשיבה לכל אחת. לא המלצה.',
+    principles: SHORT_TERM_PRINCIPLES,
+    disclaimer: SHORT_DISCLAIMER,
+  },
+  medium: {
+    title:      '🧭 ניתוח יעדים · טווח בינוני',
+    sub:        'קריאה של המטרות שלך לטווח בינוני, וכיוון חשיבה לכל אחת. לא המלצה.',
+    principles: MEDIUM_TERM_PRINCIPLES,
+    disclaimer: MEDIUM_DISCLAIMER,
+  },
+}
 
 interface Props {
-  /** Short-term goals with months already computed by the caller. */
+  horizon:       Horizon
+  /** Goals for this horizon, with months already computed by the caller. */
   facts:         GoalFacts[]
   /** Monthly savings budget from the checking tab; 0 = unknown. */
   monthlyBudget: number
 }
 
-export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
+export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
   const isUSCitizen    = useGoalsStore(s => s.isUSCitizen)
   const setIsUSCitizen = useGoalsStore(s => s.setIsUSCitizen)
 
   const [showResults, setShowResults] = useState(false)
   const [asking, setAsking]           = useState(false)
 
+  const copy     = COPY[horizon]
   const hasGoals = facts.some(g => g.name.trim() || g.required > 0)
 
   function start() {
     if (!hasGoals) return
     // The citizenship answer gates the whole product family (PFIC), so we ask
-    // it once before the first analysis and remember it after that.
+    // it once before the first analysis and remember it after that. It's stored
+    // globally, so a horizon that runs later reuses the earlier answer.
     if (isUSCitizen === null) { setAsking(true); return }
     setShowResults(true)
   }
@@ -43,8 +69,9 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
     setShowResults(true)
   }
 
+  const analyze = horizon === 'short' ? analyzeShortTerm : analyzeMediumTerm
   const results = showResults
-    ? analyzeShortTerm(facts, { isUSCitizen: isUSCitizen === true, monthlyBudget })
+    ? analyze(facts, { isUSCitizen: isUSCitizen === true, monthlyBudget })
     : []
 
   return (
@@ -53,10 +80,8 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <h2 className="font-bold text-gold">🧭 ניתוח יעדים · טווח קצר</h2>
-          <p className="text-xs text-muted-txt mt-0.5">
-            קריאה של המטרות שלך לטווח קצר, וכיוון חשיבה לכל אחת. לא המלצה.
-          </p>
+          <h2 className="font-bold text-gold">{copy.title}</h2>
+          <p className="text-xs text-muted-txt mt-0.5">{copy.sub}</p>
         </div>
         {!asking && (
           <button
@@ -70,7 +95,7 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
       </div>
 
       {!hasGoals && (
-        <p className="text-xs text-muted-txt">הוסף מטרה לטווח קצר כדי להריץ ניתוח.</p>
+        <p className="text-xs text-muted-txt">הוסף מטרה כדי להריץ ניתוח.</p>
       )}
 
       {/* The one question the rules need before they can run */}
@@ -108,9 +133,9 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
       {showResults && (
         <div className="space-y-3">
           <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt leading-relaxed">
-            {SHORT_TERM_PRINCIPLES}
+            {copy.principles}
             <div className="mt-1.5">
-              סטטוס: {isUSCitizen ? 'אזרח אמריקאי (פיקדונות בלבד)' : 'לא אזרח אמריקאי'}
+              סטטוס: {isUSCitizen ? 'אזרח אמריקאי (פיקדונות / ברוקר אמריקאי, ללא קרנות ישראליות)' : 'לא אזרח אמריקאי'}
               <button
                 onClick={() => { setShowResults(false); setAsking(true) }}
                 className="text-gold hover:underline ms-2"
@@ -128,13 +153,11 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
               </div>
 
               {r.opinion && (
-                <p className="text-sm text-txt leading-relaxed">{r.opinion}</p>
+                <p className="text-sm text-txt leading-relaxed whitespace-pre-line">{r.opinion}</p>
               )}
 
-              {r.needsLiquidityChoice && (
-                <p className="text-sm text-gold leading-relaxed">
-                  סמן על המטרה אם אתה צריך את הכסף נזיל או שאפשר לנעול אותו, ואז הרץ שוב.
-                </p>
+              {r.choicePrompt && (
+                <p className="text-sm text-gold leading-relaxed">{r.choicePrompt}</p>
               )}
 
               {r.notes.map((n, i) => (
@@ -144,7 +167,7 @@ export function ShortTermAnalysis({ facts, monthlyBudget }: Props) {
           ))}
 
           <p className="text-[11px] text-muted-txt leading-relaxed border-t border-line pt-3">
-            ⚠️ {ANALYSIS_DISCLAIMER}
+            ⚠️ {copy.disclaimer}
           </p>
         </div>
       )}

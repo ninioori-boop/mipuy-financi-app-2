@@ -1,30 +1,17 @@
-// Short-term (up to 3 years) goal analysis — "כיוון חשיבה", NOT investment advice.
+// Goal analysis — "כיוון חשיבה", NOT investment advice.
 //
 // DETERMINISTIC BY DESIGN. Every sentence below is authored and approved by the
 // advisor; nothing is generated at runtime by a language model. That is the whole
 // point: the rules here encode hard constraints that must NEVER be violated —
 // most critically the PFIC rule (a US citizen must never be pointed at an Israeli
-// fund, which would expose them to punitive US taxation). A model that "usually"
-// remembers is not good enough for a rule whose violation causes real tax damage
-// to a client, so the product set is a closed union and the copy is fixed.
-//
-// The agreed rules (short term, up to 3 years):
-//   Principles: solid, preserves value against inflation, no volatility, ILS only.
-//   Product set is CLOSED — these four and nothing else:
-//
-//                    | needs liquidity            | can lock
-//     non-US citizen | money market fund          | bank deposit (1y+)
-//     US citizen     | liquid deposit             | locked deposit / with terms
-//     (US citizens: deposits only — never funds, per PFIC.)
-//
-// Allowed commentary: timing that doesn't add up, and a goal that is unrealistic
-// given the return. Never a recommendation, never a product outside the set.
+// fund / provident fund / savings policy, which would expose them to punitive US
+// taxation). A model that "usually" remembers is not good enough for a rule whose
+// violation causes real tax damage to a client, so the product paths are a closed
+// set and the copy is fixed.
 
-/** The only products this analysis may ever point at. */
-export type ShortTermProduct = 'money-market' | 'bank-deposit' | 'liquid-deposit' | 'locked-deposit'
-
-/** Whether the money must stay reachable, or can be locked until the target date. */
-export type Liquidity = 'liquid' | 'lockable'
+export type Liquidity    = 'liquid' | 'lockable'
+export type RiskLevel    = 'solid' | 'balanced' | 'growth'
+export type InvestorType = 'managed' | 'diy'
 
 /** Precomputed facts for one goal — keeps this module pure and testable. */
 export interface GoalFacts {
@@ -34,7 +21,9 @@ export interface GoalFacts {
   current:    number
   /** Months until the target date; null when no target date is set. */
   months:     number | null
-  liquidity?: Liquidity
+  liquidity?:    Liquidity     // short-term input
+  riskLevel?:    RiskLevel     // medium-term input
+  investorType?: InvestorType  // medium-term input
 }
 
 export interface AnalysisContext {
@@ -46,49 +35,19 @@ export interface AnalysisContext {
 export interface GoalAnalysis {
   id:    string
   name:  string
-  /** One-line facts header: horizon, time left, progress. */
   facts: string
-  /** The direction paragraph. Null when we can't pick a branch yet. */
+  /** The direction paragraph(s). Null when a per-goal choice is still missing. */
   opinion: string | null
-  /** True when the advisor still has to say liquid vs lockable. */
-  needsLiquidityChoice: boolean
+  /** When set, the per-goal inputs the advisor still has to mark before the
+   *  analysis can pick a branch (short: liquidity; medium: risk + investor). */
+  choicePrompt: string | null
   /** Direct, factual commentary: timing, realism, overdue, reached. */
   notes: string[]
-  /** Which product the direction points at, or null. Useful for tests/telemetry. */
-  product: ShortTermProduct | null
 }
-
-export const ANALYSIS_DISCLAIMER =
-  'זה לא ייעוץ השקעות ולא המלצה. זה כיוון חשיבה שנועד לעזור לך לשאול את השאלות הנכונות. לפני כל החלטה התייעץ עם בעל רישיון.'
-
-/** Shown once above the results — the principles that govern every short-term goal. */
-export const SHORT_TERM_PRINCIPLES =
-  'בטווח קצר המטרה היא לשמור על ערך הכסף מול האינפלציה בלי תנודתיות, ובשקלים בלבד, כדי להימנע גם מתנודות מטבע.'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
-// The PFIC heads-up. Prepended to the direction for US citizens so they
-// understand WHY funds are off the table for them.
-const PFIC_NOTE =
-  'חשוב שתדע: בגלל האזרחות האמריקאית, קרן כספית וקרנות ישראליות אחרות לא מתאימות לך. חוק PFIC בארה"ב עלול ליצור עליהן חבות מס כבדה.'
-
-// The four approved directions. Nothing outside this map can ever be emitted.
-const DIRECTIONS: Record<ShortTermProduct, string> = {
-  'money-market':
-    'הדעה שלי: המטרה הזו צריכה להישאר נזילה, כי אתה עלול להזדקק לכסף בכל רגע או שהתזמון לא ברור. במצב כזה המטרה היא לא להרוויח, אלא לשמור על ערך הכסף מול האינפלציה בלי לקחת סיכון. כיוון לחשוב עליו: קרן כספית שקלית. היא שואפת לתשואה בהתאם לריבית בנק ישראל, ומאפשרת למשוך את הכסף מתי שצריך.',
-  'bank-deposit':
-    'הדעה שלי: אם אתה באמת יכול לנעול את הכסף עד התאריך, יש לך אפשרות לקבל קצת יותר. כיוון לחשוב עליו: פיקדון בנקאי שקלי. בנעילה לשנה ומעלה לפעמים אפשר לקבל ריבית גבוהה יותר מקרן כספית. המחיר: הכסף נעול, ואם תצטרך אותו באמצע זה עלול לעלות לך. אם אתה לא בטוח שתוכל לנעול, קרן כספית תשאיר אותך גמיש.',
-  'liquid-deposit':
-    'הדעה שלי: המטרה הזו צריכה להישאר נזילה, ולכן צריך פתרון שמשאיר את הכסף זמין. כיוון לחשוב עליו: פיקדון נזיל שקלי, שמאפשר למשוך את הכסף מתי שצריך.',
-  'locked-deposit':
-    'הדעה שלי: אם אתה יכול לנעול את הכסף עד התאריך, אפשר לשפר את התנאים. כיוון לחשוב עליו: פיקדון נעול שקלי, או פיקדון עם תנאים ותחנות יציאה שמתאימים למטרה.',
-}
-
-/** The 2x2: citizenship gates the family, liquidity picks within it. */
-function pickProduct(isUSCitizen: boolean, liquidity: Liquidity): ShortTermProduct {
-  if (isUSCitizen) return liquidity === 'liquid' ? 'liquid-deposit' : 'locked-deposit'
-  return liquidity === 'liquid' ? 'money-market' : 'bank-deposit'
-}
+// ── shared helpers ──────────────────────────────────────────────────────────
 
 /** Monthly contribution needed to close the gap by the target date. */
 export function requiredMonthly(g: GoalFacts): number {
@@ -99,14 +58,8 @@ export function requiredMonthly(g: GoalFacts): number {
   return Math.ceil(remaining / g.months)
 }
 
-export function analyzeShortTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAnalysis {
-  const pct       = g.required > 0 ? Math.round((g.current / g.required) * 100) : 0
-  const done      = g.required > 0 && g.current >= g.required
-  const overdue   = !done && g.months !== null && g.months <= 0 && g.required > 0
-  const perMonth  = requiredMonthly(g)
-  const notes: string[] = []
-
-  // ── facts header ──
+function factsHeader(label: string, g: GoalFacts): string {
+  const pct = g.required > 0 ? Math.round((g.current / g.required) * 100) : 0
   const timePart =
     g.months === null ? 'בלי תאריך יעד'
     : g.months <= 0   ? 'התאריך עבר'
@@ -114,36 +67,16 @@ export function analyzeShortTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAn
   const progressPart = g.required > 0
     ? `${fmt(g.current)} מתוך ${fmt(g.required)} (${pct}%)`
     : 'לא הוגדר סכום'
-  const facts = `טווח קצר · ${timePart} · ${progressPart}`
+  return `${label} · ${timePart} · ${progressPart}`
+}
 
-  // ── the goal is already funded ──
-  if (done) {
-    notes.push('הכסף כבר שם. מכאן העניין הוא לא לאבד אותו עד שתשתמש בו.')
-    // Still worth pointing at where funded short-term money should sit.
-    if (g.liquidity) {
-      const product = pickProduct(ctx.isUSCitizen, g.liquidity)
-      return {
-        id: g.id, name: g.name, facts, product,
-        opinion: (ctx.isUSCitizen ? PFIC_NOTE + ' ' : '') + DIRECTIONS[product],
-        needsLiquidityChoice: false, notes,
-      }
-    }
-    return { id: g.id, name: g.name, facts, product: null, opinion: null, needsLiquidityChoice: true, notes }
-  }
+/** Timing / realism commentary shared by every horizon. */
+function timingNotes(g: GoalFacts, ctx: AnalysisContext): string[] {
+  const notes: string[] = []
+  const done    = g.required > 0 && g.current >= g.required
+  const overdue = !done && g.months !== null && g.months <= 0 && g.required > 0
+  const perMonth = requiredMonthly(g)
 
-  // ── we can't pick a branch without knowing the liquidity need ──
-  if (!g.liquidity) {
-    return {
-      id: g.id, name: g.name, facts, product: null, opinion: null,
-      needsLiquidityChoice: true,
-      notes: ['כדי לתת כיוון מדויק צריך לדעת אם הכסף חייב להישאר נזיל או שאפשר לנעול אותו עד התאריך.'],
-    }
-  }
-
-  const product = pickProduct(ctx.isUSCitizen, g.liquidity)
-  const opinion = (ctx.isUSCitizen ? PFIC_NOTE + ' ' : '') + DIRECTIONS[product]
-
-  // ── commentary: timing and realism (the only two the advisor allows) ──
   if (overdue) {
     notes.push('התאריך עבר והמטרה לא הושגה. צריך לעדכן את התאריך או את הסכום.')
   } else if (g.months === null) {
@@ -158,16 +91,146 @@ export function analyzeShortTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAn
       notes.push(`כדי להגיע ליעד בזמן צריך ${fmt(perMonth)} בחודש.`)
     }
   }
-
-  // The core short-term principle: the product preserves, it doesn't grow.
-  notes.push('חשוב להבין: בטווח קצר המוצר לא מביא אותך ליעד, ההפקדה החודשית כן. התשואה כאן נועדה לשמור על ערך הכסף, לא להצמיח אותו.')
-
-  return { id: g.id, name: g.name, facts, product, opinion, needsLiquidityChoice: false, notes }
+  return notes
 }
 
-/** Analyze every short-term goal that has something in it. */
+// ── SHORT TERM (up to 3 years) ───────────────────────────────────────────────
+//
+//                    | needs liquidity            | can lock
+//     non-US citizen | money market fund          | bank deposit (1y+)
+//     US citizen     | liquid deposit             | locked deposit / with terms
+//     (US citizens: deposits only — never funds, per PFIC.)
+//   Principles: solid, preserves value against inflation, no volatility, ILS only.
+
+export type ShortTermProduct = 'money-market' | 'bank-deposit' | 'liquid-deposit' | 'locked-deposit'
+
+export const SHORT_TERM_PRINCIPLES =
+  'בטווח קצר המטרה היא לשמור על ערך הכסף מול האינפלציה בלי תנודתיות, ובשקלים בלבד, כדי להימנע גם מתנודות מטבע.'
+
+export const SHORT_DISCLAIMER =
+  'זה לא ייעוץ השקעות ולא המלצה. זה כיוון חשיבה שנועד לעזור לך לשאול את השאלות הנכונות. לפני כל החלטה התייעץ עם בעל רישיון.'
+
+const SHORT_PFIC_NOTE =
+  'חשוב שתדע: בגלל האזרחות האמריקאית, קרן כספית וקרנות ישראליות אחרות לא מתאימות לך. חוק PFIC בארה"ב עלול ליצור עליהן חבות מס כבדה.'
+
+const SHORT_DIRECTIONS: Record<ShortTermProduct, string> = {
+  'money-market':
+    'הדעה שלי: המטרה הזו צריכה להישאר נזילה, כי אתה עלול להזדקק לכסף בכל רגע או שהתזמון לא ברור. במצב כזה המטרה היא לא להרוויח, אלא לשמור על ערך הכסף מול האינפלציה בלי לקחת סיכון. כיוון לחשוב עליו: קרן כספית שקלית. היא שואפת לתשואה בהתאם לריבית בנק ישראל, ומאפשרת למשוך את הכסף מתי שצריך.',
+  'bank-deposit':
+    'הדעה שלי: אם אתה באמת יכול לנעול את הכסף עד התאריך, יש לך אפשרות לקבל קצת יותר. כיוון לחשוב עליו: פיקדון בנקאי שקלי. בנעילה לשנה ומעלה לפעמים אפשר לקבל ריבית גבוהה יותר מקרן כספית. המחיר: הכסף נעול, ואם תצטרך אותו באמצע זה עלול לעלות לך. אם אתה לא בטוח שתוכל לנעול, קרן כספית תשאיר אותך גמיש.',
+  'liquid-deposit':
+    'הדעה שלי: המטרה הזו צריכה להישאר נזילה, ולכן צריך פתרון שמשאיר את הכסף זמין. כיוון לחשוב עליו: פיקדון נזיל שקלי, שמאפשר למשוך את הכסף מתי שצריך.',
+  'locked-deposit':
+    'הדעה שלי: אם אתה יכול לנעול את הכסף עד התאריך, אפשר לשפר את התנאים. כיוון לחשוב עליו: פיקדון נעול שקלי, או פיקדון עם תנאים ותחנות יציאה שמתאימים למטרה.',
+}
+
+function pickShortProduct(isUSCitizen: boolean, liquidity: Liquidity): ShortTermProduct {
+  if (isUSCitizen) return liquidity === 'liquid' ? 'liquid-deposit' : 'locked-deposit'
+  return liquidity === 'liquid' ? 'money-market' : 'bank-deposit'
+}
+
+export function analyzeShortTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAnalysis {
+  const facts = factsHeader('טווח קצר', g)
+  const done  = g.required > 0 && g.current >= g.required
+
+  if (done) {
+    const notes = ['הכסף כבר שם. מכאן העניין הוא לא לאבד אותו עד שתשתמש בו.']
+    if (g.liquidity) {
+      const product = pickShortProduct(ctx.isUSCitizen, g.liquidity)
+      return { id: g.id, name: g.name, facts, choicePrompt: null, notes,
+        opinion: (ctx.isUSCitizen ? SHORT_PFIC_NOTE + ' ' : '') + SHORT_DIRECTIONS[product] }
+    }
+    return { id: g.id, name: g.name, facts, opinion: null, notes,
+      choicePrompt: 'סמן על המטרה אם אתה צריך את הכסף נזיל או שאפשר לנעול אותו, ואז הרץ שוב.' }
+  }
+
+  if (!g.liquidity) {
+    return {
+      id: g.id, name: g.name, facts, opinion: null,
+      choicePrompt: 'סמן על המטרה אם אתה צריך את הכסף נזיל בכל רגע או שאפשר לנעול אותו עד התאריך, ואז הרץ שוב.',
+      notes: [],
+    }
+  }
+
+  const product = pickShortProduct(ctx.isUSCitizen, g.liquidity)
+  const opinion = (ctx.isUSCitizen ? SHORT_PFIC_NOTE + ' ' : '') + SHORT_DIRECTIONS[product]
+  const notes = timingNotes(g, ctx)
+  notes.push('חשוב להבין: בטווח קצר המוצר לא מביא אותך ליעד, ההפקדה החודשית כן. התשואה כאן נועדה לשמור על ערך הכסף, לא להצמיח אותו.')
+
+  return { id: g.id, name: g.name, facts, opinion, choicePrompt: null, notes }
+}
+
+// ── MEDIUM TERM (3–7 years) ──────────────────────────────────────────────────
+//
+// The trickiest horizon: not long enough for full risk, not short enough to
+// accept a low return — so it's all about balance. Two per-goal inputs: risk
+// level (solid/balanced/growth) sets the equity vs solid tilt; investor type
+// (managed vs DIY) sets the vehicles. Solid part stays ILS; the equity part may
+// carry currency exposure (that's part of it). US citizens: no Israeli packaged
+// products or funds (PFIC) — equities via a US broker, solid via deposits / short
+// government bonds.
+
+export const MEDIUM_TERM_PRINCIPLES =
+  'טווח בינוני (3־7 שנים) הוא הטווח הכי טריקי: לא ארוך מספיק לסיכון מלא, ולא קצר מספיק להסתפק בתשואה נמוכה, אז הכל כאן איזון. סטטיסטית, הסיכוי להפסיד בשוק ההון על פני כ־5 שנים הוא בערך 10%, אבל במשבר גדול מדדים רחבים יכולים לרדת בעשרות אחוזים. השאלה המרכזית: כמה מהכסף הזה אתה מוכן להפסיד זמנית, או לדחות את המטרה בגללו, אם יבוא משבר.'
+
+export const MEDIUM_DISCLAIMER =
+  'דווקא בגלל שהטווח טריקי: זה לא ייעוץ השקעות ולא המלצה, זה כיוון חשיבה בלבד. חשוב מאוד להתייעץ עם איש מקצוע לפני כל החלטה, ולחקור את הנושא לעומק.'
+
+const RISK_OPINION: Record<RiskLevel, string> = {
+  solid:
+    'רמת סיכון סולידית: רוב הכסף בסולידי ששומר על הערך, וחשיפה קטנה בלבד למניות. מתאים אם קשה לך להרשות הפסד זמני על הכסף הזה.',
+  balanced:
+    'רמת סיכון מאוזנת: איזון בין השניים, בערך חצי סולידי וחצי מניות. פשרה בין שמירה על הכסף לבין פוטנציאל צמיחה.',
+  growth:
+    'רמת סיכון צמיחה: דגש על מניות עם כרית סולידית. מתאים רק אם אתה יכול לספוג ירידה זמנית או לדחות את המטרה במקרה של משבר.',
+}
+
+/** Vehicles by investor type + citizenship. US citizens never get Israeli
+ *  packaged products or funds (PFIC). */
+function mediumVehicles(investorType: InvestorType, isUSCitizen: boolean): string {
+  if (isUSCitizen) {
+    let s = 'בגלל האזרחות האמריקאית, קופת גמל להשקעה, פוליסת חיסכון וקרנות ישראליות לא מתאימות לך (PFIC). ' +
+      'כיוון מעשי: את החלק המנייתי דרך תיק מסחר בברוקר אמריקאי (למשל אינטראקטיב ברוקרס), ואת החלק הסולידי בשקלים — למי שמבין, חשבון מסחר ישראלי עם אג"ח ממשלתי קצר מועד, או בפשטות פיקדון שקלי.'
+    if (investorType === 'managed') {
+      s += ' שים לב: מסלול של מוצר מנוהל ישראלי לא פתוח בפניך בגלל PFIC, אז כאן נדרשת גישה עצמאית יותר.'
+    }
+    return s
+  }
+  if (investorType === 'managed') {
+    return 'אם אתה מעדיף שלא לנהל בעצמך: קופת גמל להשקעה, במסלול שמתאים לרמת הסיכון שבחרת. חלופה נוספת היא פוליסת חיסכון, אבל יש בה חסרונות (דמי ניהול, נזילות), אז כדאי לבדוק אותה לעומק.'
+  }
+  return 'אם אתה מנהל בעצמך: תיק מאוזן דרך חשבון מסחר. את החלק הסולידי החזק בשקלים (אג"ח ממשלתי קצר, מק"מ, קרן כספית או פיקדון), ואת החלק המנייתי במדדים רחבים. בחלק המנייתי חשיפה מטבעית היא חלק מהעניין, לא צריך לפחד ממנה.'
+}
+
+export function analyzeMediumTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAnalysis {
+  const facts = factsHeader('טווח בינוני', g)
+  const done  = g.required > 0 && g.current >= g.required
+
+  if (!g.riskLevel || !g.investorType) {
+    return {
+      id: g.id, name: g.name, facts, opinion: null,
+      choicePrompt: 'בחר על המטרה רמת סיכון (סולידי / מאוזן / צמיחה) וסוג משקיע (מוצר מנוהל / משקיע לבד), ואז הרץ שוב.',
+      notes: [],
+    }
+  }
+
+  const opinion = RISK_OPINION[g.riskLevel] + '\n\n' + mediumVehicles(g.investorType, ctx.isUSCitizen)
+  const notes = timingNotes(g, ctx)
+  if (done) {
+    notes.unshift('כבר הגעת ליעד. ככל שאתה מתקרב לשימוש בכסף, שווה לשקול להקטין את הסיכון ולעבור לכיוון סולידי יותר.')
+  }
+
+  return { id: g.id, name: g.name, facts, opinion, choicePrompt: null, notes }
+}
+
+// ── batch entry points ───────────────────────────────────────────────────────
+
+const hasContent = (g: GoalFacts) => g.name.trim() !== '' || g.required > 0
+
 export function analyzeShortTerm(goals: GoalFacts[], ctx: AnalysisContext): GoalAnalysis[] {
-  return goals
-    .filter(g => g.name.trim() || g.required > 0)
-    .map(g => analyzeShortTermGoal(g, ctx))
+  return goals.filter(hasContent).map(g => analyzeShortTermGoal(g, ctx))
+}
+
+export function analyzeMediumTerm(goals: GoalFacts[], ctx: AnalysisContext): GoalAnalysis[] {
+  return goals.filter(hasContent).map(g => analyzeMediumTermGoal(g, ctx))
 }
