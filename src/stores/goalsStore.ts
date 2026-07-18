@@ -16,6 +16,12 @@ export interface GoalRow {
    *  date? Drives the short-term analysis (see lib/goalsAnalysis.ts). Undefined
    *  on goals created before the field existed — the analysis then asks for it. */
   liquidity?: 'liquid' | 'lockable'
+  /** Medium-term risk appetite: how much of this money the client can stomach
+   *  losing temporarily in a crisis. Drives the equity/solid tilt. */
+  riskLevel?: 'solid' | 'balanced' | 'growth'
+  /** Medium-term: managed product vs self-directed portfolio. Drives the
+   *  concrete vehicles (provident fund vs DIY / US broker). */
+  investorType?: 'managed' | 'diy'
 }
 
 export type GoalHorizon = 'short' | 'medium' | 'long'

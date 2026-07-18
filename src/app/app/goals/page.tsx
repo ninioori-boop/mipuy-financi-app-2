@@ -6,7 +6,7 @@ import { useGoalsStore } from '@/stores/goalsStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAuthStore } from '@/stores/authStore'
 import { hasLabAccess } from '@/lib/labAccess'
-import { ShortTermAnalysis } from '@/components/goals/ShortTermAnalysis'
+import { GoalsAnalysis } from '@/components/goals/GoalsAnalysis'
 import type { GoalFacts } from '@/lib/goalsAnalysis'
 import type { GoalHorizon, GoalRow } from '@/stores/goalsStore'
 
@@ -94,11 +94,15 @@ export default function GoalsPage() {
   const allocPct  = savingsBudget.budget > 0 ? Math.min(100, (allocated / savingsBudget.budget) * 100) : 0
   const isOver    = allocated > savingsBudget.budget && savingsBudget.budget > 0
 
-  // Facts for the (lab-only) short-term analysis — months derived from each
-  // goal's target date; the analysis engine is pure and lives in lib/.
+  // Facts for the (lab-only) goal analysis — months derived from each goal's
+  // target date; the analysis engine is pure and lives in lib/.
   const shortFacts: GoalFacts[] = short.map(r => ({
     id: r.id, name: r.name, required: r.required, current: r.current,
     months: monthsUntil(r.targetDate), liquidity: r.liquidity,
+  }))
+  const mediumFacts: GoalFacts[] = medium.map(r => ({
+    id: r.id, name: r.name, required: r.required, current: r.current,
+    months: monthsUntil(r.targetDate), riskLevel: r.riskLevel, investorType: r.investorType,
   }))
 
   return (
@@ -281,6 +285,31 @@ export default function GoalsPage() {
                       </div>
                     )}
 
+                    {/* Risk + investor toggles — lab-only, medium-term goals.
+                        Feed the analysis (equity/solid tilt + vehicles). */}
+                    {isLab && id === 'medium' && (
+                      <div className="space-y-1.5 pt-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-muted-txt">רמת סיכון:</span>
+                          {([['solid', 'סולידי'], ['balanced', 'מאוזן'], ['growth', 'צמיחה']] as const).map(([val, label]) => (
+                            <button key={val}
+                              onClick={() => updateGoal(id, row.id, 'riskLevel', val)}
+                              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.riskLevel === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-muted-txt">סוג משקיע:</span>
+                          {([['managed', 'מוצר מנוהל'], ['diy', 'משקיע לבד']] as const).map(([val, label]) => (
+                            <button key={val}
+                              onClick={() => updateGoal(id, row.id, 'investorType', val)}
+                              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.investorType === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Progress */}
                     {row.required > 0 && (
                       <div className="space-y-1">
@@ -306,9 +335,12 @@ export default function GoalsPage() {
               + הוסף יעד
             </button>
 
-            {/* Short-term analysis — lab-only, rendered inside the short section. */}
+            {/* Goal analysis — lab-only, rendered inside its horizon section. */}
             {isLab && id === 'short' && (
-              <ShortTermAnalysis facts={shortFacts} monthlyBudget={savingsBudget.budget} />
+              <GoalsAnalysis horizon="short" facts={shortFacts} monthlyBudget={savingsBudget.budget} />
+            )}
+            {isLab && id === 'medium' && (
+              <GoalsAnalysis horizon="medium" facts={mediumFacts} monthlyBudget={savingsBudget.budget} />
             )}
           </div>
         )
