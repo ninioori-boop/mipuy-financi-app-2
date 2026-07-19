@@ -96,7 +96,7 @@ export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
           <button
             onClick={() => (showResults ? setShowResults(false) : start())}
             disabled={!hasGoals}
-            className="shrink-0 rounded-lg bg-gold text-surface px-4 py-2 text-sm font-bold hover:bg-gold-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="shrink-0 rounded-lg bg-gold text-surface px-4 py-2 min-h-[44px] inline-flex items-center justify-center text-sm font-bold hover:bg-gold-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {showResults ? 'סגור' : '🧭 הרץ ניתוח'}
           </button>
@@ -118,19 +118,19 @@ export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => answer(true)}
-              className="rounded-lg border border-gold/40 bg-gold/10 text-gold px-4 py-2 text-sm font-semibold hover:bg-gold/20 transition-colors"
+              className="rounded-lg border border-gold/40 bg-gold/10 text-gold px-4 py-2 min-h-[44px] inline-flex items-center justify-center text-sm font-semibold hover:bg-gold/20 transition-colors"
             >
               כן, אזרח אמריקאי
             </button>
             <button
               onClick={() => answer(false)}
-              className="rounded-lg border border-line bg-surface text-txt px-4 py-2 text-sm font-semibold hover:border-gold/40 transition-colors"
+              className="rounded-lg border border-line bg-surface text-txt px-4 py-2 min-h-[44px] inline-flex items-center justify-center text-sm font-semibold hover:border-gold/40 transition-colors"
             >
               לא
             </button>
             <button
               onClick={() => setAsking(false)}
-              className="text-xs text-muted-txt hover:text-txt transition-colors ms-1"
+              className="text-xs text-muted-txt hover:text-txt transition-colors ms-1 min-h-[44px] px-3 inline-flex items-center"
             >
               ביטול
             </button>
@@ -147,7 +147,7 @@ export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
               סטטוס: {isUSCitizen ? 'אזרח אמריקאי (פיקדונות / ברוקר אמריקאי, ללא קרנות ישראליות)' : 'לא אזרח אמריקאי'}
               <button
                 onClick={() => { setShowResults(false); setAsking(true) }}
-                className="text-gold hover:underline ms-2"
+                className="text-gold hover:underline ms-2 inline-block px-1 py-2 -my-2"
               >
                 שנה
               </button>
@@ -157,7 +157,7 @@ export function GoalsAnalysis({ horizon, facts, monthlyBudget }: Props) {
           {results.map(r => (
             <div key={r.id} className="rounded-lg border border-line bg-surface2 p-3 sm:p-4 space-y-2">
               <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                <h3 className="font-bold text-txt">🎯 {r.name || 'מטרה ללא שם'}</h3>
+                <h3 className="font-bold text-txt min-w-0 break-words">🎯 {r.name || 'מטרה ללא שם'}</h3>
                 <span className="text-[11px] text-muted-txt">{r.facts}</span>
               </div>
 

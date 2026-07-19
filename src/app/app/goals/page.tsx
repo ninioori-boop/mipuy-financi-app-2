@@ -4,8 +4,6 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useMappingStore } from '@/stores/mappingStore'
-import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
 import { GoalsAnalysis } from '@/components/goals/GoalsAnalysis'
 import type { GoalFacts } from '@/lib/goalsAnalysis'
 import type { GoalHorizon, GoalRow } from '@/stores/goalsStore'
@@ -58,11 +56,7 @@ function numInput(
 export default function GoalsPage() {
   const { short, medium, long, addGoal, updateGoal, deleteGoal } = useGoalsStore()
   const mapping = useMappingStore()
-  const { user } = useAuthStore()
   const sections = { short, medium, long }
-
-  // The goal analysis is an experimental lab feature — advisor-only for now.
-  const isLab = hasLabAccess(user?.email)
 
   const allGoals    = [...short, ...medium, ...long]
   const totalReq    = allGoals.reduce((s, r) => s + r.required, 0)
@@ -94,7 +88,7 @@ export default function GoalsPage() {
   const allocPct  = savingsBudget.budget > 0 ? Math.min(100, (allocated / savingsBudget.budget) * 100) : 0
   const isOver    = allocated > savingsBudget.budget && savingsBudget.budget > 0
 
-  // Facts for the (lab-only) goal analysis — months derived from each goal's
+  // Facts for the goal analysis — months derived from each goal's
   // target date; the analysis engine is pure and lives in lib/.
   const shortFacts: GoalFacts[] = short.map(r => ({
     id: r.id, name: r.name, required: r.required, current: r.current,
@@ -273,32 +267,32 @@ export default function GoalsPage() {
                       </div>
                     </div>
 
-                    {/* Liquidity toggle — lab-only, short-term goals. Feeds the
+                    {/* Liquidity toggle — short-term goals. Feeds the
                         analysis (money-market vs deposit). */}
-                    {isLab && id === 'short' && (
+                    {id === 'short' && (
                       <div className="flex items-center gap-2 flex-wrap pt-0.5">
                         <span className="text-xs text-muted-txt">נזילות:</span>
                         <button
                           onClick={() => updateGoal(id, row.id, 'liquidity', 'liquid')}
-                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.liquidity === 'liquid' ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                          className={`text-xs px-3 py-2 min-h-[44px] inline-flex items-center justify-center rounded-lg border transition-colors ${row.liquidity === 'liquid' ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
                         >צריך נזיל</button>
                         <button
                           onClick={() => updateGoal(id, row.id, 'liquidity', 'lockable')}
-                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.liquidity === 'lockable' ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                          className={`text-xs px-3 py-2 min-h-[44px] inline-flex items-center justify-center rounded-lg border transition-colors ${row.liquidity === 'lockable' ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
                         >אפשר לנעול</button>
                       </div>
                     )}
 
-                    {/* Risk + investor toggles — lab-only, medium & long goals.
+                    {/* Risk + investor toggles — medium & long goals.
                         Feed the analysis (equity/solid tilt + vehicles). */}
-                    {isLab && (id === 'medium' || id === 'long') && (
+                    {(id === 'medium' || id === 'long') && (
                       <div className="space-y-1.5 pt-0.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-muted-txt">רמת סיכון:</span>
                           {([['solid', 'סולידי'], ['balanced', 'מאוזן'], ['growth', 'צמיחה']] as const).map(([val, label]) => (
                             <button key={val}
                               onClick={() => updateGoal(id, row.id, 'riskLevel', val)}
-                              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.riskLevel === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                              className={`text-xs px-3 py-2 min-h-[44px] inline-flex items-center justify-center rounded-lg border transition-colors ${row.riskLevel === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
                             >{label}</button>
                           ))}
                         </div>
@@ -307,7 +301,7 @@ export default function GoalsPage() {
                           {([['managed', 'מוצר מנוהל'], ['diy', 'משקיע לבד']] as const).map(([val, label]) => (
                             <button key={val}
                               onClick={() => updateGoal(id, row.id, 'investorType', val)}
-                              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${row.investorType === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
+                              className={`text-xs px-3 py-2 min-h-[44px] inline-flex items-center justify-center rounded-lg border transition-colors ${row.investorType === val ? 'border-gold bg-gold/15 text-gold font-semibold' : 'border-line bg-surface text-muted-txt hover:border-gold/40'}`}
                             >{label}</button>
                           ))}
                         </div>
@@ -339,14 +333,14 @@ export default function GoalsPage() {
               + הוסף יעד
             </button>
 
-            {/* Goal analysis — lab-only, rendered inside its horizon section. */}
-            {isLab && id === 'short' && (
+            {/* Goal analysis — rendered inside its horizon section. */}
+            {id === 'short' && (
               <GoalsAnalysis horizon="short" facts={shortFacts} monthlyBudget={savingsBudget.budget} />
             )}
-            {isLab && id === 'medium' && (
+            {id === 'medium' && (
               <GoalsAnalysis horizon="medium" facts={mediumFacts} monthlyBudget={savingsBudget.budget} />
             )}
-            {isLab && id === 'long' && (
+            {id === 'long' && (
               <GoalsAnalysis horizon="long" facts={longFacts} monthlyBudget={savingsBudget.budget} />
             )}
           </div>
