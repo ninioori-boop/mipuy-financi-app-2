@@ -279,7 +279,11 @@ export function analyzeLongTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAna
   }
 
   const opinion = LONG_PENSION_NOTE + '\n\n' + LONG_RISK_OPINION[g.riskLevel] + '\n\n' + longVehicles(g.investorType, ctx.isUSCitizen)
-  const notes = timingNotes(g, ctx)
+  // No pace/realism notes in the long term: requiredMonthly() assumes the whole
+  // gap is filled by contributions alone, ignoring market return + compounding —
+  // which do most of the work over 7+ years, so "you need X/month, unrealistic"
+  // would be misleading here.
+  const notes: string[] = []
   if (done) {
     notes.unshift('כבר הגעת ליעד. ככל שאתה מתקרב לשימוש בכסף, שווה לשקול להתחיל למתן את הסיכון בהדרגה.')
   }
