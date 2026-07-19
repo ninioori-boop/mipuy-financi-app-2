@@ -7,6 +7,7 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   getIdToken,
+  sendPasswordResetEmail,
   type User,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
@@ -40,6 +41,7 @@ export default function ConnectPage() {
   const [busy, setBusy] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [resetMsg, setResetMsg] = useState('')
 
   const fetchToken = useCallback(async (user: User) => {
     setPhase('fetching')
@@ -103,6 +105,28 @@ export default function ConnectPage() {
     }
   }
 
+  // Sets/resets a password by email. Crucial on iPhone: Google sign-in is
+  // unreliable in iOS Safari (bounces back to the home screen), so iPhone
+  // clients need the email+password path — including clients who signed up
+  // with Google and never had a password (the reset link SETS one on the same
+  // account).
+  async function resetPassword() {
+    setError('')
+    setResetMsg('')
+    const addr = email.trim()
+    if (!addr) {
+      setError('כתוב את המייל שלך למעלה ואז הקש שוב על "שכחתי סיסמה"')
+      return
+    }
+    try {
+      await sendPasswordResetEmail(auth, addr)
+      setResetMsg('שלחנו לך למייל קישור לקביעת סיסמה. אחרי שתקבע — חזור לכאן והתחבר איתה.')
+    } catch {
+      // Don't reveal whether the address exists — same message either way.
+      setResetMsg('אם המייל רשום במערכת — נשלח אליו קישור לקביעת סיסמה.')
+    }
+  }
+
   function retry() {
     const u = auth.currentUser
     if (u) fetchToken(u)
@@ -162,6 +186,14 @@ export default function ConnectPage() {
           </form>
 
           {error && <p className="text-expense text-sm mt-4">{error}</p>}
+          {resetMsg && <p className="text-income text-sm mt-4">{resetMsg}</p>}
+
+          <button
+            onClick={resetPassword}
+            className="mt-3 text-xs text-muted-txt underline hover:text-gold transition-colors"
+          >
+            שכחתי סיסמה / אין לי סיסמה
+          </button>
 
           <div className="flex items-center gap-3 my-5">
             <div className="h-px bg-line flex-1" />
@@ -175,6 +207,12 @@ export default function ConnectPage() {
           >
             התחבר עם Google
           </button>
+          {isIOS && (
+            <p className="mt-2 text-xs text-muted-txt leading-relaxed">
+              באייפון הכניסה עם Google לא תמיד עובדת. אם היא נתקעת — התחבר עם
+              מייל וסיסמה (אין סיסמה? הקש על «שכחתי סיסמה» וקבע אחת).
+            </p>
+          )}
         </div>
       )}
 
