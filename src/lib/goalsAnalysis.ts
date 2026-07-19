@@ -70,8 +70,15 @@ function factsHeader(label: string, g: GoalFacts): string {
   return `${label} · ${timePart} · ${progressPart}`
 }
 
-/** Timing / realism commentary shared by every horizon. */
-function timingNotes(g: GoalFacts, ctx: AnalysisContext): string[] {
+/** Timing / realism commentary.
+ *
+ * `growthAware` softens the pace note for horizons with market exposure: the
+ * required-monthly figure ignores return + compounding, so on the short term
+ * (no growth, capital-preservation — the contribution really is what gets you
+ * there) we state it as a hard verdict, while on the medium term we present it
+ * as a "before returns" reality check without the absolute "unrealistic" call.
+ * The long term drops the pace note entirely (see analyzeLongTermGoal). */
+function timingNotes(g: GoalFacts, ctx: AnalysisContext, growthAware = false): string[] {
   const notes: string[] = []
   const done    = g.required > 0 && g.current >= g.required
   const overdue = !done && g.months !== null && g.months <= 0 && g.required > 0
@@ -82,7 +89,15 @@ function timingNotes(g: GoalFacts, ctx: AnalysisContext): string[] {
   } else if (g.months === null) {
     notes.push('אין תאריך יעד, אז אי אפשר לחשב קצב. קבע תאריך כדי לדעת כמה צריך להפריש בחודש.')
   } else if (perMonth > 0) {
-    if (ctx.monthlyBudget > 0 && perMonth > ctx.monthlyBudget) {
+    const overBudget = ctx.monthlyBudget > 0 && perMonth > ctx.monthlyBudget
+    if (growthAware) {
+      notes.push(
+        `בקצב הזה, מהפקדות בלבד ולפני תשואה, צריך בערך ${fmt(perMonth)} בחודש. ` +
+        (overBudget
+          ? `זה מעל תקציב החיסכון שלך (${fmt(ctx.monthlyBudget)}). התשואה תעזור, אבל אם הפער גדול, שווה לבדוק שוב את התאריך או הסכום.`
+          : 'התשואה לאורך הדרך תעזור להגיע לשם.'),
+      )
+    } else if (overBudget) {
       notes.push(
         `כדי להגיע ליעד בזמן צריך ${fmt(perMonth)} בחודש, ותקציב החיסכון שלך הוא ${fmt(ctx.monthlyBudget)}. ` +
         'המטרה לא ריאלית בקצב הזה. צריך לדחות את התאריך או להקטין את הסכום.',
@@ -215,7 +230,7 @@ export function analyzeMediumTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalA
   }
 
   const opinion = RISK_OPINION[g.riskLevel] + '\n\n' + mediumVehicles(g.investorType, ctx.isUSCitizen)
-  const notes = timingNotes(g, ctx)
+  const notes = timingNotes(g, ctx, /* growthAware */ true)
   if (done) {
     notes.unshift('כבר הגעת ליעד. ככל שאתה מתקרב לשימוש בכסף, שווה לשקול להקטין את הסיכון ולעבור לכיוון סולידי יותר.')
   }
@@ -282,8 +297,8 @@ export function analyzeLongTermGoal(g: GoalFacts, ctx: AnalysisContext): GoalAna
   // No pace/realism notes in the long term: requiredMonthly() assumes the whole
   // gap is filled by contributions alone, ignoring market return + compounding —
   // which do most of the work over 7+ years, so "you need X/month, unrealistic"
-  // would be misleading here.
-  const notes: string[] = []
+  // would be misleading here. Instead, a positive note explaining why.
+  const notes: string[] = ['בטווח ארוך חלק גדול מהיעד נוצר מהתשואה והריבית דריבית, לא רק מההפקדה החודשית.']
   if (done) {
     notes.unshift('כבר הגעת ליעד. ככל שאתה מתקרב לשימוש בכסף, שווה לשקול להתחיל למתן את הסיכון בהדרגה.')
   }
