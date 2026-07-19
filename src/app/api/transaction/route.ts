@@ -52,6 +52,18 @@ export async function POST(req: NextRequest) {
   // regexes below and pollute the merchant name for categorization.
   let cleanMerchant = stripInvisible(merchant).trim()
 
+  // Echo/loop guard: a miswired iOS Shortcut can call ITSELF and feed our own
+  // notification text back as the "merchant" ("נרשם: נרשם: … קוטלג ל…"),
+  // creating an infinite capture loop that only died on MAX_MERCHANT (seen in
+  // the field: one ₪44 tap → a recursive notification flood + junk expense
+  // rows). A merchant that carries our notify signature is never a real
+  // business — reject it, which also kills the loop on its first round trip
+  // (no notify in the response → the shortcut's dictionary step stops the run).
+  if (/^נרשם:|קוטלג ל/.test(cleanMerchant)) {
+    console.log('[transaction] ECHO_REJECTED')
+    return NextResponse.json({ error: 'echo' }, { status: 400 })
+  }
+
   // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
   // Merchant/Amount properties from the Apple Pay transaction (the editor
   // offers no "transaction" type), so it sends the WHOLE transaction as text
