@@ -28,7 +28,7 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
     try {
       await onAdd(value)
       setEmail('')
-      toast.success('ההזמנה נשלחה — הלקוח יופיע כ״ממתין״')
+      toast.success('הלקוח נוסף כ״ממתין״. שים לב: לא נשלח מייל — שלח לו בעצמך קישור להרשמה.')
     } catch (err) {
       toast.error((err as { message?: string })?.message || 'שליחת ההזמנה נכשלה, נסה/י שוב.')
     } finally {
@@ -55,7 +55,7 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
           disabled={busy}
           className="min-h-[44px] rounded-full bg-gold text-surface px-5 text-sm font-bold hover:bg-gold-light transition-colors disabled:opacity-50"
         >
-          {busy ? 'שולח…' : 'שלח הזמנה'}
+          {busy ? 'מוסיף…' : 'הוסף לקוח'}
         </button>
         <button
           type="button"
@@ -66,7 +66,7 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
           ביטול
         </button>
       </div>
-      <p className="text-xs text-muted-txt">המייל של הלקוח יתווסף לרשימת המורשים. שלח/י לו קישור להרשמה, והוא יירשם עם אותו מייל בדיוק.</p>
+      <p className="text-xs text-muted-txt">⚠️ לא נשלח מייל אוטומטי. המייל יתווסף לרשימת המורשים, ועליך לשלוח ללקוח בעצמך קישור להרשמה (app.orimipuy.com). חשוב: הוא חייב להירשם עם אותו מייל בדיוק.</p>
     </form>
   )
 }
