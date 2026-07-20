@@ -58,9 +58,10 @@ export default function AdvisorPage() {
   const openClient = openClientId ? clients.find(c => c.id === openClientId) ?? null : null
   const advisorName = user?.displayName || (user?.email ? nameFromEmail(user.email) : 'יועץ')
 
-  async function addClient(email: string) {
-    await callable<{ email: string }, { ok: boolean }>('inviteClient')({ email })
+  async function addClient(email: string): Promise<{ emailSent: boolean }> {
+    const res = await callable<{ email: string }, { ok: boolean; emailSent?: boolean }>('inviteClient')({ email })
     await refetch()
+    return { emailSent: !!res.data.emailSent }
   }
 
   if (!user || isAdvisor === null) return <Loading />
