@@ -3,10 +3,28 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // Advisor identification for cross-user reads (mirrors src/lib/labAccess.ts
-    // LAB_EMAILS — rules can't import app code, keep the two in sync).
+    // LAB_EMAILS — rules can't import app code, keep the two in sync). Used ONLY
+    // for the intake cross-read below. The advisor↔client management system
+    // (clientLinks) does NOT use this — it keys off invitedByUid on the link.
     function isAdvisor() {
       return request.auth != null
         && request.auth.token.email in ['ninioori@gmail.com', 'eden00076@gmail.com'];
+    }
+
+    // Platform owner (super-admin) — reads the oversight ledger across all
+    // practices. Membership doc is admin-managed (platformOwners/{uid}); it is
+    // never exposed to clients (falls under the catch-all deny, read here with
+    // rule privileges via exists()).
+    function isOwner() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/platformOwners/$(request.auth.uid));
+    }
+
+    // The signed-in caller's own lowercased email, or '' when absent (guards the
+    // clientLinks self-read below against a null token email).
+    function callerEmail() {
+      return request.auth != null && request.auth.token.email != null
+        ? request.auth.token.email.lower() : '';
     }
 
     // ── User data — owner-only AND invite-only ────────────────────────
@@ -17,9 +35,20 @@ service cloud.firestore {
     // so the app is unusable for them until the advisor adds their email.
     // (exists() runs with rule privileges, so `allowlist` stays private below.)
     match /users/{userId} {
+      // UNCHANGED — owner-only + allowlist, read AND write:
       allow read, write: if request.auth != null
         && request.auth.uid == userId
         && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+
+      // NEW (additive, READ-ONLY): a consented advisor whose ACTIVE link names
+      // them may read this client's financial doc. OR-combined, so the owner
+      // clause above is never weakened. Advisor write stays blocked; revoking
+      // the link (status != 'active') cuts advisor access instantly. The
+      // `versions` subcollection below is deliberately NOT extended to advisors.
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid;
     }
 
     // ── Version history — per-user snapshot subcollection ─────────────
@@ -76,6 +105,37 @@ service cloud.firestore {
       }
     }
 
+    // ── Advisor↔client management (additive; old live app never touches these) ──
+    // Links written ONLY by callables (inviteClient / setClientSharing) via the
+    // admin SDK, so every client write is blocked here. Reads:
+    //  • the advisor who sent it (invitedByUid) — sees every status for their roster
+    //  • the linked client (clientUid) — their own active/declined/revoked link
+    //  • the invited client pre-registration (invitedEmail == own email) — to drive consent
+    //  • the platform owner — the oversight ledger across all practices
+    match /clientLinks/{linkId} {
+      allow read: if request.auth != null && (
+           resource.data.invitedByUid == request.auth.uid
+        || resource.data.clientUid   == request.auth.uid
+        || resource.data.invitedEmail == callerEmail()
+        || isOwner()
+      );
+      allow write: if false;
+    }
+
+    // Advisor↔practice binding. An advisor reads only their own role doc (the
+    // dashboard gate + practiceId); the owner reads all (oversight). Admin-write only.
+    match /advisors/{advisorUid} {
+      allow read: if request.auth != null && (request.auth.uid == advisorUid || isOwner());
+      allow write: if false;
+    }
+
+    // A practice is readable by its member advisors and the owner. Admin-write only.
+    match /practices/{practiceId} {
+      allow read: if request.auth != null
+        && (request.auth.uid in resource.data.advisorUids || isOwner());
+      allow write: if false;
+    }
+
     // ── Server-only collections (admin SDK; clients fully blocked) ────
     // `rateLimits`   — per-uid + global AI rate-limit counters (src/lib/rateLimit.ts).
     // `deviceTokens` — per-user device-token minVersion for revocation
@@ -85,8 +145,10 @@ service cloud.firestore {
     // access. Documented here only — additive, the old live app never references them.
 
     // ── Everything else: blocked ──────────────────────────────────────
-    // Includes `allowlist` (advisor-managed via console/admin only), the new
-    // server-only `rateLimits`/`deviceTokens`, and the unused advisor/invites/maps.
+    // Includes `allowlist` and `platformOwners` (admin-managed, read only via
+    // exists() with rule privileges above), the server-only `rateLimits`/
+    // `deviceTokens`, and the still-unused invites/maps. The advisor system's
+    // clientLinks/advisors/practices are matched explicitly above.
     match /{document=**} {
       allow read, write: if false;
     }

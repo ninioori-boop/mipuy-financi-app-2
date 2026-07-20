@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# playwright MCP — page snapshots record form field values (incl. passwords) verbatim
+.playwright-mcp/
+advisor-*.png
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
