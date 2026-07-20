@@ -5,11 +5,12 @@ import { toast } from 'sonner'
 
 // Inline add-client form (not a modal — matches the app's inline-create habit).
 // onAdd invites the client for real (inviteClient callable) and may reject
-// (already-registered, invited elsewhere, not an advisor). No email is sent —
-// the advisor shares the signup link with the client manually.
+// (already-registered, invited elsewhere, not an advisor). The backend tries to
+// send an invitation email (Resend); onAdd reports whether it actually went out
+// so the toast tells the truth either way.
 
 interface Props {
-  onAdd:    (email: string) => void | Promise<void>
+  onAdd:    (email: string) => Promise<{ emailSent: boolean }>
   onCancel: () => void
 }
 
@@ -26,9 +27,13 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
     }
     setBusy(true)
     try {
-      await onAdd(value)
+      const { emailSent } = await onAdd(value)
       setEmail('')
-      toast.success('הלקוח נוסף כ״ממתין״. שים לב: לא נשלח מייל — שלח לו בעצמך קישור להרשמה.')
+      if (emailSent) {
+        toast.success('הלקוח נוסף כ״ממתין״ ונשלח לו מייל הזמנה ✉️')
+      } else {
+        toast.success('הלקוח נוסף כ״ממתין״. שליחת המייל לא הצליחה, שלח לו בעצמך קישור להרשמה.')
+      }
     } catch (err) {
       toast.error((err as { message?: string })?.message || 'שליחת ההזמנה נכשלה, נסה/י שוב.')
     } finally {
@@ -66,7 +71,7 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
           ביטול
         </button>
       </div>
-      <p className="text-xs text-muted-txt">⚠️ לא נשלח מייל אוטומטי. המייל יתווסף לרשימת המורשים, ועליך לשלוח ללקוח בעצמך קישור להרשמה (app.orimipuy.com). חשוב: הוא חייב להירשם עם אותו מייל בדיוק.</p>
+      <p className="text-xs text-muted-txt">המערכת תנסה לשלוח ללקוח מייל הזמנה. חשוב: הלקוח חייב להירשם עם אותו מייל בדיוק (app.orimipuy.com).</p>
     </form>
   )
 }

@@ -1,5 +1,6 @@
 const { beforeUserCreated, HttpsError } = require("firebase-functions/v2/identity");
 const { onCall } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
@@ -9,6 +10,74 @@ const db = getFirestore();
 
 const CONSENT_VERSION = "v1";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Resend API key — stored as a Firebase secret (firebase functions:secrets:set
+// RESEND_API_KEY). Never in code or env files.
+const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
+
+const APP_URL = "https://app.orimipuy.com";
+// Until the orimipuy.com domain is verified in Resend, only Resend's onboarding
+// sender works (and only to the Resend account owner's inbox). After DNS
+// verification, switch to the branded sender below.
+const MAIL_FROM = "הכלכלן של הבית <onboarding@resend.dev>";
+
+/** Simple RTL Hebrew invitation email. Inline styles only (email-client safe). */
+function inviteEmailHtml(email) {
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
+    <div style="background:#ffffff;border:1px solid #e5e0d8;border-radius:12px;padding:28px;">
+      <div style="font-size:13px;color:#a8894c;letter-spacing:2px;margin-bottom:6px;">THE HOME ECONOMIST</div>
+      <h1 style="font-size:22px;color:#1a1a1a;margin:0 0 14px;">הוזמנת למערכת ליווי פיננסי</h1>
+      <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 12px;">
+        היועץ הפיננסי שלך הזמין אותך למערכת "הכלכלן של הבית": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
+      </p>
+      <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
+        ההרשמה פשוטה: נכנסים לקישור, נרשמים עם כתובת המייל הזאת בדיוק
+        (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
+      </p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${APP_URL}" style="background:#C9A86C;color:#1a1a1a;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
+          להרשמה למערכת
+        </a>
+      </div>
+      <p style="font-size:12px;color:#8a8178;line-height:1.6;margin:0;">
+        חשוב: יש להירשם עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
+      </p>
+    </div>
+    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת הכלכלן של הבית · ${APP_URL.replace("https://", "")}</p>
+  </div>
+</body></html>`;
+}
+
+/**
+ * Best-effort invitation email via Resend. Never throws — an email failure must
+ * not break the invite itself (the client is already allowlisted + linked).
+ * Returns true when Resend accepted the send.
+ */
+async function sendInviteEmail(toEmail) {
+  const key = RESEND_API_KEY.value();
+  if (!key) return false;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: MAIL_FROM,
+        to: [toEmail],
+        subject: "הוזמנת למערכת הליווי הפיננסי של הכלכלן של הבית",
+        html: inviteEmailHtml(toEmail),
+      }),
+    });
+    if (!res.ok) {
+      console.warn("inviteEmail: resend rejected", res.status, await res.text().catch(() => ""));
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("inviteEmail: send failed", e?.message || e);
+    return false;
+  }
+}
 
 /**
  * Invite-only signup gate.
@@ -59,7 +128,7 @@ const pendingId = (email) => `pending_${email}`;
  * existing gateSignup, and (b) records a pending advisor↔client link. New
  * clients only — an email that already has an account is rejected.
  */
-exports.inviteClient = onCall(async (request) => {
+exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => {
   const callerUid = request.auth?.uid;
   if (!callerUid) {
     throw new HttpsError("unauthenticated", "נדרשת התחברות.");
@@ -116,7 +185,10 @@ exports.inviteClient = onCall(async (request) => {
   }, { merge: true });
   await batch.commit();
 
-  return { ok: true, status: "pending", email };
+  // Best-effort invitation email — the invite is already recorded either way.
+  const emailSent = await sendInviteEmail(email);
+
+  return { ok: true, status: "pending", email, emailSent };
 });
 
 /**

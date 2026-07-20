@@ -9,7 +9,7 @@ interface Props {
   clients:      MockClient[]
   advisorName?: string
   onOpenClient: (id: string) => void
-  onAddClient:  (email: string) => void | Promise<void>
+  onAddClient:  (email: string) => Promise<{ emailSent: boolean }>
   onOpenEmail:  () => void
 }
 
@@ -81,7 +81,10 @@ export function AdvisorDashboard({ clients, advisorName, onOpenClient, onAddClie
       </header>
 
       {addOpen && (
-        <AddClientForm onAdd={async email => { await onAddClient(email); setAddOpen(false) }} onCancel={() => setAddOpen(false)} />
+        <AddClientForm
+          onAdd={async email => { const r = await onAddClient(email); setAddOpen(false); return r }}
+          onCancel={() => setAddOpen(false)}
+        />
       )}
 
       {/* KPI strip — the 30-second overview */}
