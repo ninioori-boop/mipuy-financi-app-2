@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Rubik } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/components/layout/AuthProvider'
+import { ConsentGate } from '@/components/layout/ConsentGate'
 import { DataSync } from '@/components/layout/DataSync'
 import { CookieBanner } from '@/components/layout/CookieBanner'
 import { Toaster } from '@/components/ui/sonner'
@@ -30,9 +31,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="he" dir="rtl" className={`${rubik.variable} dark`}>
       <body className="min-h-screen bg-surface text-txt antialiased font-sans">
         <AuthProvider>
-          <DataSync>
-            {children}
-          </DataSync>
+          <ConsentGate>
+            <DataSync>
+              {children}
+            </DataSync>
+          </ConsentGate>
         </AuthProvider>
         <CookieBanner />
         <Toaster position="bottom-center" />

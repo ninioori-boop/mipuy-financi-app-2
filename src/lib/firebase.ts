@@ -2,6 +2,7 @@ import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { initializeAppCheck, ReCaptchaV3Provider, getToken, type AppCheck } from "firebase/app-check";
 
 const firebaseConfig = {
@@ -51,3 +52,13 @@ export async function getAppCheckToken(): Promise<string | null> {
 export const auth    = getAuth(app);
 export const db      = getFirestore(app);
 export const storage = getStorage(app);
+export const functions = getFunctions(app);
+
+/**
+ * Typed handle to a callable Cloud Function (default region us-central1, matching
+ * the deployed functions). Used by the advisor-management flow: `inviteClient`
+ * and `setClientSharing`.
+ */
+export function callable<Req = unknown, Res = unknown>(name: string) {
+  return httpsCallable<Req, Res>(functions, name);
+}

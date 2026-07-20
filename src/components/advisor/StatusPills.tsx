@@ -1,31 +1,55 @@
 'use client'
 
-import type { Lifecycle, ClientFlag } from '@/lib/advisorMock'
-import { FLAG_LABELS, STAGE_LABELS } from '@/lib/advisorMock'
+import type { Lifecycle, ClientFlag, NeglectFlag } from '@/lib/advisorMock'
+import { FLAG_LABELS, NEGLECT_LABELS, STAGE_LABELS } from '@/lib/advisorMock'
 
-// Small presentational pills for the advisor dashboard. Same chip shape as the
-// lab's RowMetaChip, mapped to the brand good/warning/critical palette.
+// Small presentational pills for the advisor dashboard. Refined "magic-portfolio"
+// treatment: soft rounded-full chips with a leading status dot, mapped to the
+// brand good / warning / critical palette.
 
-const CHIP = 'inline-flex items-center text-[11px] px-2 py-0.5 rounded border whitespace-nowrap'
+const CHIP = 'inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border whitespace-nowrap font-medium'
+const DOT  = 'h-1.5 w-1.5 rounded-full'
 
-const LIFECYCLE: Record<Lifecycle, { cls: string; label: string }> = {
-  active:      { cls: 'border-income/40 text-income bg-income/10',  label: 'פעיל' },
-  pending:     { cls: 'border-gold/40 text-gold bg-gold/10',         label: 'ממתין' },
-  graduated:   { cls: 'border-line text-muted-txt bg-surface',       label: 'בוגר · שנה חינם' },
-  'read-only': { cls: 'border-expense/40 text-expense bg-expense/10', label: 'לקריאה בלבד' },
+const LIFECYCLE: Record<Lifecycle, { cls: string; dot: string; label: string }> = {
+  active:      { cls: 'border-income/30 text-income bg-income/10',   dot: 'bg-income',    label: 'פעיל' },
+  pending:     { cls: 'border-gold/30 text-gold bg-gold/10',          dot: 'bg-gold',      label: 'ממתין' },
+  graduated:   { cls: 'border-line text-muted-txt bg-surface',        dot: 'bg-muted-txt', label: 'בוגר · שנה חינם' },
+  'read-only': { cls: 'border-expense/30 text-expense bg-expense/10', dot: 'bg-expense',   label: 'לקריאה בלבד' },
+  declined:    { cls: 'border-line text-muted-txt bg-surface',        dot: 'bg-muted-txt', label: 'סירב לשתף' },
+  revoked:     { cls: 'border-line text-muted-txt bg-surface',        dot: 'bg-muted-txt', label: 'ביטל שיתוף' },
 }
 
 export function LifecycleBadge({ lifecycle }: { lifecycle: Lifecycle }) {
-  const { cls, label } = LIFECYCLE[lifecycle]
-  return <span className={`${CHIP} ${cls}`}>{label}</span>
+  const { cls, dot, label } = LIFECYCLE[lifecycle]
+  return (
+    <span className={`${CHIP} ${cls}`}>
+      <span className={`${DOT} ${dot}`} aria-hidden />
+      {label}
+    </span>
+  )
 }
 
 export function FlagPill({ flag }: { flag: ClientFlag }) {
-  return <span className={`${CHIP} border-expense/40 text-expense bg-expense/10`}>{FLAG_LABELS[flag]}</span>
+  return (
+    <span className={`${CHIP} border-expense/30 text-expense bg-expense/10`}>
+      <span className={`${DOT} bg-expense`} aria-hidden />
+      {FLAG_LABELS[flag]}
+    </span>
+  )
+}
+
+export function NeglectPill({ flag }: { flag: NeglectFlag }) {
+  // NEGLECT_LABELS already carry an emoji marker, so no leading dot here.
+  return <span className={`${CHIP} border-gold/30 text-gold bg-gold/10`}>{NEGLECT_LABELS[flag]}</span>
 }
 
 export function OkPill() {
-  return <span className={`${CHIP} border-income/40 text-income bg-income/10`}>הכל תקין</span>
+  return (
+    <span className={`${CHIP} border-income/30 text-income bg-income/10`}>
+      <span className={`${DOT} bg-income`} aria-hidden />
+      הכל תקין
+    </span>
+  )
 }
 
 export function FlagList({ flags }: { flags: ClientFlag[] }) {
@@ -41,9 +65,12 @@ export function FlagList({ flags }: { flags: ClientFlag[] }) {
 export function StageIndicator({ stage }: { stage: number }) {
   return (
     <span className="inline-flex items-center gap-2" title={STAGE_LABELS[stage] ?? ''}>
-      <span className="inline-flex gap-0.5" aria-hidden>
+      <span className="inline-flex gap-1" aria-hidden>
         {Array.from({ length: 5 }, (_, i) => (
-          <span key={i} className={`h-3 w-1.5 rounded-full ${i < stage ? 'bg-gold' : 'bg-surface3'}`} />
+          <span
+            key={i}
+            className={`h-1.5 w-4 rounded-full transition-colors ${i < stage ? 'bg-gold' : 'bg-surface3'}`}
+          />
         ))}
       </span>
       <span className="text-xs text-muted-txt tabular-nums whitespace-nowrap">

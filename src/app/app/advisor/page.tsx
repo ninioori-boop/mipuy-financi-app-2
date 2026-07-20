@@ -1,60 +1,71 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { doc, getDoc } from 'firebase/firestore'
+import { db, callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
 import { AdvisorDashboard } from '@/components/advisor/AdvisorDashboard'
 import { ClientDetailView } from '@/components/advisor/ClientDetailView'
 import { WeeklyEmailPreview } from '@/components/advisor/WeeklyEmailPreview'
-import { MOCK_CLIENTS, nameFromEmail, type MockClient } from '@/lib/advisorMock'
+import { listAdvisorClients } from '@/lib/advisorClients'
+import { nameFromEmail, type MockClient } from '@/lib/advisorMock'
 
-// ADVISOR MANAGEMENT — Stage 1 design prototype.
+// ADVISOR MANAGEMENT — Stage 2 (add-client slice, read-only).
 //
-// Pure side page: reachable only by URL (/app/advisor), gated to advisors, fed
-// entirely by MOCK data. No Firebase, no persistence, no writes — added clients
-// live in React state and vanish on reload. Nothing in the running app imports
-// this, so it cannot affect anything live. The real backend arrives in Stage 2.
+// Real data now: the page is gated by the advisors/{uid} ROLE (not the lab email
+// list), and the roster is loaded from clientLinks + each active client's real
+// snapshot. Inviting a client calls the inviteClient callable. No writes to any
+// client's data — advisor access here is read-only.
 
-const emptyFin = (): MockClient['fin'] => ({
-  income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
-  debts: [], installments: [], savings: [], creditCards: [], bankAccounts: [],
-  varMonths: 1, goals: [],
-})
+function Loading() {
+  return <div className="max-w-6xl mx-auto p-8 text-center text-muted-txt">טוען…</div>
+}
 
 export default function AdvisorPage() {
   const router = useRouter()
   const { user } = useAuthStore()
-  const isAdvisor = hasLabAccess(user?.email)
 
-  // Full page guard — advisors only, even via direct URL.
+  const [isAdvisor, setIsAdvisor] = useState<boolean | null>(null)
+  const [clients, setClients]     = useState<MockClient[]>([])
+  const [booted, setBooted]       = useState(false)
+  const [view, setView]           = useState<'dashboard' | 'email'>('dashboard')
+  const [openClientId, setOpenClientId] = useState<string | null>(null)
+
+  // Role gate — advisors only, via the real advisors/{uid} record.
   useEffect(() => {
-    if (user && !hasLabAccess(user.email)) router.replace('/app/home')
+    if (!user) return
+    let alive = true
+    getDoc(doc(db, 'advisors', user.uid))
+      .then(snap => {
+        if (!alive) return
+        const ok = snap.exists()
+        setIsAdvisor(ok)
+        if (!ok) router.replace('/app/home')
+      })
+      .catch(() => { if (alive) { setIsAdvisor(false); router.replace('/app/home') } })
+    return () => { alive = false }
   }, [user, router])
 
-  const [view, setView]                 = useState<'dashboard' | 'email'>('dashboard')
-  const [openClientId, setOpenClientId] = useState<string | null>(null)
-  const [addedClients, setAddedClients] = useState<MockClient[]>([])
+  const refetch = useCallback(async () => {
+    if (!user) return
+    try { setClients(await listAdvisorClients(user.uid)) }
+    finally { setBooted(true) }
+  }, [user])
 
-  const clients = useMemo(() => [...MOCK_CLIENTS, ...addedClients], [addedClients])
+  useEffect(() => { if (isAdvisor) refetch() }, [isAdvisor, refetch])
+
   const openClient = openClientId ? clients.find(c => c.id === openClientId) ?? null : null
   const advisorName = user?.displayName || (user?.email ? nameFromEmail(user.email) : 'יועץ')
 
-  function addClient(email: string) {
-    const c: MockClient = {
-      id: 'new-' + Math.random().toString(36).slice(2, 8),
-      name: nameFromEmail(email),
-      email,
-      lifecycle: 'pending',
-      stage: 0,
-      lastActivity: new Date().toISOString().slice(0, 10),
-      flags: [],
-      fin: emptyFin(),
-    }
-    setAddedClients(prev => [...prev, c])
+  async function addClient(email: string) {
+    await callable<{ email: string }, { ok: boolean }>('inviteClient')({ email })
+    await refetch()
   }
 
+  if (!user || isAdvisor === null) return <Loading />
   if (!isAdvisor) return null
+  if (!booted) return <Loading />
 
   if (openClient) {
     return <ClientDetailView client={openClient} onExit={() => setOpenClientId(null)} />
@@ -65,6 +76,7 @@ export default function AdvisorPage() {
   return (
     <AdvisorDashboard
       clients={clients}
+      advisorName={advisorName}
       onOpenClient={setOpenClientId}
       onAddClient={addClient}
       onOpenEmail={() => setView('email')}

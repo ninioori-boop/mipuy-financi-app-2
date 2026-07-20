@@ -1,8 +1,9 @@
 'use client'
 
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
-import { fmt, isSnapshotable, type MockClient } from '@/lib/advisorMock'
-import { LifecycleBadge } from './StatusPills'
+import { fmt, isSnapshotable, neglectFlags, type MockClient } from '@/lib/advisorMock'
+import { LifecycleBadge, NeglectPill, FlagPill } from './StatusPills'
+import { Avatar } from './Avatar'
 
 // Screen 3 — the advisor "enters" a client's account. Prototype: read-only,
 // fed by mock data, reusing the real CashflowSummary. The impersonation banner
@@ -23,31 +24,35 @@ export function ClientDetailView({ client, onExit }: Props) {
   const f = client.fin
   const snap = isSnapshotable(client)
   const goals = f.goals.filter(g => g.name || g.required > 0)
+  const neg = neglectFlags(client)
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6 pb-16">
 
       {/* Impersonation banner */}
-      <div className="sticky top-0 z-20 rounded-xl border border-gold/40 bg-gold/10 backdrop-blur p-4 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg">👁️</span>
+      <div className="sticky top-0 z-20 rounded-2xl border border-gold/40 bg-gold/10 backdrop-blur p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar name={client.name} size="lg" />
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-gold truncate">אתה עורך את החשבון של {client.name}</div>
+            <div className="text-[11px] uppercase tracking-wider text-gold/80">אתה עורך את החשבון של</div>
+            <div className="text-base font-bold text-txt truncate">{client.name}</div>
             <div className="text-xs text-muted-txt truncate" dir="ltr">{client.email}</div>
           </div>
         </div>
         <button
           onClick={onExit}
-          className="min-h-[44px] rounded-lg bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors whitespace-nowrap"
+          className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors whitespace-nowrap"
         >
           ⟵ חזרה לרשימת הלקוחות
         </button>
       </div>
 
       {/* Client meta strip */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="rounded-2xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <LifecycleBadge lifecycle={client.lifecycle} />
+          {client.flags.map(fl => <FlagPill key={fl} flag={fl} />)}
+          {neg.map(n => <NeglectPill key={n} flag={n} />)}
           {client.phone && <span className="text-xs text-muted-txt" dir="ltr">{client.phone}</span>}
         </div>
         <div className="text-xs text-muted-txt">פעילות אחרונה: {new Date(client.lastActivity).toLocaleDateString('he-IL')}</div>
@@ -55,7 +60,7 @@ export function ClientDetailView({ client, onExit }: Props) {
 
       {/* Concurrency warning — static demo */}
       {client.beingEdited && (
-        <div className="rounded-xl border border-line bg-surface2 border-s-4 border-s-gold px-4 py-3 text-sm text-txt">
+        <div className="rounded-2xl border border-line bg-surface2 border-s-[3px] border-s-gold px-4 py-3 text-sm text-txt">
           ⚠️ יועץ אחר (מנהל המשרד) צופה כעת בחשבון זה. שינויים אחרונים מנצחים.
         </div>
       )}
@@ -70,18 +75,18 @@ export function ClientDetailView({ client, onExit }: Props) {
           />
 
           {/* Goals block (read-only) */}
-          <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
-            <h2 className="font-semibold text-txt">🎯 יעדים</h2>
+          <div className="rounded-2xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
+            <h2 className="text-xs uppercase tracking-wider text-gold flex items-center gap-2">🎯 יעדים</h2>
             {goals.length === 0 && <p className="text-xs text-muted-txt">אין יעדים מוגדרים.</p>}
             <div className="space-y-3">
               {goals.map(g => {
                 const pct = g.required > 0 ? Math.min(100, Math.round((g.current / g.required) * 100)) : 0
                 return (
-                  <div key={g.id} className="rounded-lg bg-surface/40 p-3 space-y-2">
+                  <div key={g.id} className="rounded-xl bg-surface/40 border border-line/60 p-3 space-y-2">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
                       <span className="font-medium text-txt">{g.name || 'מטרה'}</span>
-                      <span className="text-xs text-muted-txt tabular-nums">
-                        {fmt(g.current)} מתוך {fmt(g.required)} · {fmt(g.monthly)}/חודש · יעד {dateFmt(g.targetDate)}
+                      <span className="text-xs text-muted-txt tabular-nums" dir="ltr">
+                        {fmt(g.current)} / {fmt(g.required)} · {fmt(g.monthly)}/חודש · יעד {dateFmt(g.targetDate)}
                         {g.product ? ` · ${g.product}` : ''}
                       </span>
                     </div>
@@ -100,7 +105,7 @@ export function ClientDetailView({ client, onExit }: Props) {
           <p className="text-[11px] text-muted-txt text-center">תצוגה מוקטנת לצורך הדגמת העיצוב. בגרסה המלאה כאן ייערכו המיפוי, התקציב והיעדים ישירות.</p>
         </>
       ) : (
-        <div className="rounded-xl border border-line bg-surface2 p-8 text-center space-y-2">
+        <div className="rounded-2xl border border-line bg-surface2 p-8 text-center space-y-2">
           <div className="text-3xl">📭</div>
           <div className="font-semibold text-txt">הלקוח עדיין לא נרשם</div>
           <p className="text-sm text-muted-txt">ברגע שהלקוח ישלים הרשמה עם המייל שהוזמן, החשבון שלו יופיע כאן.</p>
