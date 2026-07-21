@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
+import { toast } from 'sonner'
 import { db, callable } from '@/lib/firebase'
+import { applySnapshot } from '@/lib/dataSync'
 import { useAuthStore } from '@/stores/authStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { AdvisorDashboard } from '@/components/advisor/AdvisorDashboard'
 import { ClientDetailView } from '@/components/advisor/ClientDetailView'
 import { WeeklyEmailPreview } from '@/components/advisor/WeeklyEmailPreview'
@@ -58,6 +61,24 @@ export default function AdvisorPage() {
   const openClient = openClientId ? clients.find(c => c.id === openClientId) ?? null : null
   const advisorName = user?.displayName || (user?.email ? nameFromEmail(user.email) : 'יועץ')
 
+  /** Enter read-only "view as client" mode: hydrate the stores with the
+   *  client's snapshot and jump into the regular tabs. DataSync's guards make
+   *  sure NOTHING gets saved while this mode is on. Exit = full reload. */
+  async function viewFullAccount(c: MockClient) {
+    try {
+      const snap = await getDoc(doc(db, 'users', c.id))
+      const data = snap.exists() ? snap.data().data : null
+      if (!data) { toast.error('אין נתונים לצפייה עבור הלקוח הזה.'); return }
+      // Order matters: raise the guard BEFORE touching the stores, so the
+      // store-change subscriptions can never schedule a save of client data.
+      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email })
+      applySnapshot(data)
+      router.push('/app/home')
+    } catch {
+      toast.error('טעינת חשבון הלקוח נכשלה.')
+    }
+  }
+
   async function addClient(email: string): Promise<{ emailSent: boolean }> {
     const res = await callable<{ email: string }, { ok: boolean; emailSent?: boolean }>('inviteClient')({ email })
     await refetch()
@@ -69,7 +90,13 @@ export default function AdvisorPage() {
   if (!booted) return <Loading />
 
   if (openClient) {
-    return <ClientDetailView client={openClient} onExit={() => setOpenClientId(null)} />
+    return (
+      <ClientDetailView
+        client={openClient}
+        onExit={() => setOpenClientId(null)}
+        onViewFull={() => viewFullAccount(openClient)}
+      />
+    )
   }
   if (view === 'email') {
     return <WeeklyEmailPreview clients={clients} advisorName={advisorName} onClose={() => setView('dashboard')} />

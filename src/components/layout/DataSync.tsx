@@ -31,6 +31,9 @@ import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 import { useRecurringStore } from '@/stores/recurringStore'
+import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
+import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
@@ -193,6 +196,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (!user || !hydrated) return
 
     const triggerSave = () => {
+      // ADVISOR VIEW-AS-CLIENT GUARD: while impersonating, the stores hold the
+      // CLIENT's data — persisting anything would corrupt the advisor's own
+      // account. Block every save/backup from even being scheduled.
+      if (useImpersonationStore.getState().client) return
+
       // Flip isDirty (only if not already dirty — avoids re-renders on every keystroke).
       if (!useSyncStore.getState().isDirty) useSyncStore.getState().setDirty(true)
 
@@ -201,6 +209,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       // crashes, or the beacon is blocked, next login can restore from here.
       if (backupTimer.current) clearTimeout(backupTimer.current)
       backupTimer.current = setTimeout(() => {
+        // Guard at FIRE time too — a timer armed just before impersonation
+        // started must not mirror the client's data into the advisor's backup.
+        if (useImpersonationStore.getState().client) return
         const snap = collectSnapshot()
         const json = JSON.stringify(snap)
         if (json === lastBackupJson.current) return
@@ -217,6 +228,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // during the debounce window, abort — never write to a stale UID.
         const currentUid = useAuthStore.getState().user?.uid
         if (currentUid !== user.uid) return
+
+        // Guard at FIRE time too (see backup timer above) — never write the
+        // impersonated client's data anywhere.
+        if (useImpersonationStore.getState().client) return
 
         const snap = collectSnapshot()
         const json = JSON.stringify(snap)
@@ -278,6 +293,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useRecurringStore.subscribe(triggerSave),
       useBusinessStore.subscribe(triggerSave),
       useBusinessAnnualStore.subscribe(triggerSave),
+      useSubscriptionPrefsStore.subscribe(triggerSave),
+      useBudgetReminderStore.subscribe(triggerSave),
     ]
 
     return () => {
@@ -359,6 +376,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const uid = user.uid
 
     function flushIfDirty() {
+      // ADVISOR VIEW-AS-CLIENT GUARD: never beacon/mirror the client's data.
+      if (useImpersonationStore.getState().client) return
       const snap = collectSnapshot()
       const json = JSON.stringify(snap)
       if (json === lastSavedJson.current) return   // nothing to save

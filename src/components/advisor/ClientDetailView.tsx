@@ -10,8 +10,10 @@ import { Avatar } from './Avatar'
 // and the "someone else editing" warning are visual only (no real access).
 
 interface Props {
-  client: MockClient
-  onExit: () => void
+  client:      MockClient
+  onExit:      () => void
+  /** Enter read-only view-as-client mode (all tabs show this client's data). */
+  onViewFull?: () => void
 }
 
 const dateFmt = (iso: string) => {
@@ -20,7 +22,7 @@ const dateFmt = (iso: string) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' })
 }
 
-export function ClientDetailView({ client, onExit }: Props) {
+export function ClientDetailView({ client, onExit, onViewFull }: Props) {
   const f = client.fin
   const snap = isSnapshotable(client)
   const goals = f.goals.filter(g => g.name || g.required > 0)
@@ -39,12 +41,22 @@ export function ClientDetailView({ client, onExit }: Props) {
             <div className="text-xs text-muted-txt truncate" dir="ltr">{client.email}</div>
           </div>
         </div>
-        <button
-          onClick={onExit}
-          className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors whitespace-nowrap"
-        >
-          ⟵ חזרה לרשימת הלקוחות
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {snap && onViewFull && (
+            <button
+              onClick={onViewFull}
+              className="min-h-[44px] rounded-full bg-gold text-surface px-4 text-sm font-bold hover:bg-gold-light transition-colors whitespace-nowrap"
+            >
+              🖥️ צפה בכל הטאבים
+            </button>
+          )}
+          <button
+            onClick={onExit}
+            className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors whitespace-nowrap"
+          >
+            ⟵ חזרה לרשימת הלקוחות
+          </button>
+        </div>
       </div>
 
       {/* Client meta strip */}
