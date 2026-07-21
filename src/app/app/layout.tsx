@@ -32,6 +32,7 @@ const groups: TabGroup[] = [
   {
     title: '',
     items: [
+      { href: '/app/home',         emoji: '🏠', label: 'בית' },
       { href: '/app/guide',        emoji: '📖', label: 'מדריך' },
       { href: '/app/upload-guide', emoji: '📋', label: 'משימות למיפוי' },
       { href: '/app/intake',       emoji: '📤', label: 'העלאת מסמכים' },
