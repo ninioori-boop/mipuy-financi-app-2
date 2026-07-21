@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
-import { auth } from '@/lib/firebase'
+import { doc, getDoc } from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
@@ -109,6 +110,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [])
 
+  // Advisor-linked clients get a "פרטיות ושיתוף" menu entry (revoke/grant
+  // sharing). One cheap own-doc read; everyone else sees nothing new.
+  const [hasAdvisorLink, setHasAdvisorLink] = useState(false)
+  useEffect(() => {
+    if (!user) { setHasAdvisorLink(false); return }
+    let alive = true
+    getDoc(doc(db, 'clientLinks', user.uid))
+      .then(snap => { if (alive) setHasAdvisorLink(snap.exists()) })
+      .catch(() => { if (alive) setHasAdvisorLink(false) })
+    return () => { alive = false }
+  }, [user])
+
   // Client-mode profile (gates the business tabs) + hydration flag, so we only
   // ask the "has business?" question once the real saved value has loaded.
   const hasBusiness = useClientProfileStore(s => s.hasBusiness)
@@ -137,6 +150,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const visibleGroups = groups
     .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
     .filter(g => g.items.length > 0)
+  if (hasAdvisorLink) {
+    visibleGroups.push({
+      title: 'פרטיות',
+      items: [{ href: '/app/sharing', emoji: '🔒', label: 'שיתוף עם היועץ' }],
+    })
+  }
 
   const navList = (
     <nav className="flex flex-col gap-0.5 p-3">
