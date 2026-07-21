@@ -16,10 +16,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 
 const APP_URL = "https://app.orimipuy.com";
-// Until the orimipuy.com domain is verified in Resend, only Resend's onboarding
-// sender works (and only to the Resend account owner's inbox). After DNS
-// verification, switch to the branded sender below.
-const MAIL_FROM = "הכלכלן של הבית <onboarding@resend.dev>";
+// orimipuy.com is verified in Resend (DKIM/SPF/MX in Route 53, 2026-07-21), so
+// invitations go out from the branded sender to any recipient.
+const MAIL_FROM = "הכלכלן של הבית <invite@orimipuy.com>";
 
 /** Simple RTL Hebrew invitation email. Inline styles only (email-client safe). */
 function inviteEmailHtml(email) {
