@@ -81,8 +81,9 @@ const groups: TabGroup[] = [
   {
     title: 'מעבדה',
     items: [
-      { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',   advisorOnly: true },
-      { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה', advisorOnly: true },
+      { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',      advisorOnly: true },
+      { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה',    advisorOnly: true },
+      { href: '/app/subscriptions',    emoji: '🔁', label: 'מנויים קבועים', advisorOnly: true },
     ],
   },
 ]
@@ -280,13 +281,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="border-b border-line bg-surface2 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sticky top-0 z-30">
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
-            aria-label="פתח תפריט"
-          >
-            ☰
-          </button>
+          {/* The advisor dashboard is its own world — the personal-tabs menu is
+              noise there (Ori's request), so the hamburger hides on that page. */}
+          {pathname !== '/app/advisor' && (
+            <button
+              onClick={() => setDrawerOpen(true)}
+              className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
+              aria-label="פתח תפריט"
+            >
+              ☰
+            </button>
+          )}
           <span className="font-bold text-gold tracking-wide truncate text-base sm:text-xl">
             <span className="hidden sm:inline">The Home Economist</span>
             <span className="sm:hidden">THE</span>
