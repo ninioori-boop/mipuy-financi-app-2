@@ -23,10 +23,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthReady(true)
 
       if (!user && !pathname.startsWith('/auth') && !pathname.startsWith('/privacy') && !pathname.startsWith('/connect') && !pathname.startsWith('/delete-account')) {
+        // Deep-link preservation: remember where the visitor was headed, so
+        // after signing in they land there instead of /welcome. Session-scoped
+        // and best-effort (private mode may block storage — fail silently).
+        try { sessionStorage.setItem('postLoginPath', pathname) } catch {}
         router.replace('/auth')
       }
       if (user && pathname.startsWith('/auth')) {
-        router.replace('/welcome')
+        let dest = '/welcome'
+        try {
+          const saved = sessionStorage.getItem('postLoginPath')
+          // Only honor safe, in-app absolute paths (never external URLs).
+          if (saved && saved.startsWith('/') && !saved.startsWith('//')) dest = saved
+          sessionStorage.removeItem('postLoginPath')
+        } catch {}
+        router.replace(dest)
       }
     })
   }, [setUser, setLoading, router, pathname])
