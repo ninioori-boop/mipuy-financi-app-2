@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
@@ -26,9 +27,12 @@ export function useRecurringExpenses() {
   const user     = useAuthStore(s => s.user)
   const hydrated = useSyncStore(s => s.hydrated)
   const rules    = useRecurringStore(s => s.rules)
+  // Paused while the advisor is viewing a client's account — viewing must not
+  // materialize anything (nothing is being saved anyway; keep the view pristine).
+  const viewingAsClient = useImpersonationStore(s => !!s.client)
 
   useEffect(() => {
-    if (!user || !hydrated) return
+    if (!user || !hydrated || viewingAsClient) return
 
     const now = new Date()
     const ym  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -72,5 +76,5 @@ export function useRecurringExpenses() {
     } else {
       toast.success(label)
     }
-  }, [user, hydrated, rules])
+  }, [user, hydrated, viewingAsClient, rules])
 }

@@ -7,6 +7,7 @@ import { collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { saveUserData } from '@/lib/firestoreService'
@@ -72,15 +73,22 @@ export function useTransactionInbox() {
   const router   = useRouter()
   const user     = useAuthStore(s => s.user)
   const hydrated = useSyncStore(s => s.hydrated)
+  // Paused while the advisor is viewing a client's account: draining would
+  // merge the ADVISOR's own pushed charges into the client's (unsaved) view
+  // and delete the inbox docs — real data loss. Resubscribes on exit.
+  const viewingAsClient = useImpersonationStore(s => !!s.client)
 
   useEffect(() => {
-    if (!user || !hydrated) return
+    if (!user || !hydrated || viewingAsClient) return
 
     const itemsRef = collection(db, 'transactionInbox', user.uid, 'items')
 
     const unsub = onSnapshot(
       itemsRef,
       async snap => {
+        // Re-check at drain time — a snapshot event may already be in flight
+        // when impersonation starts.
+        if (useImpersonationStore.getState().client) return
         const added = snap.docChanges().filter(c => c.type === 'added')
         if (added.length === 0) return
 
@@ -143,5 +151,5 @@ export function useTransactionInbox() {
     )
 
     return () => unsub()
-  }, [user, hydrated, router])
+  }, [user, hydrated, viewingAsClient, router])
 }
