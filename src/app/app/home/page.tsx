@@ -12,6 +12,7 @@ import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
 import { EnablePushCard } from '@/components/home/EnablePushCard'
 import { BudgetReviewReminder } from '@/components/home/BudgetReviewReminder'
+import { SharingControl } from '@/components/client/SharingControl'
 
 function currentMonth() {
   const d = new Date()
@@ -189,6 +190,10 @@ export default function HomePage() {
           </Link>
         ))}
       </div>
+
+      {/* Advisor-sharing control — renders ONLY for clients linked to an
+          advisor (one null read otherwise). Grant/revoke sharing anytime. */}
+      <SharingControl />
     </div>
   )
 }
