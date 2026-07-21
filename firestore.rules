@@ -136,6 +136,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // The platform owner may read their OWN owner-record — the client-side gate
+    // for the /app/admin oversight screen. No one else can read it (isOwner()
+    // above still reads it with rule privileges for cross-collection checks).
+    // Admin-write only.
+    match /platformOwners/{ownerUid} {
+      allow read: if request.auth != null && request.auth.uid == ownerUid;
+      allow write: if false;
+    }
+
     // ── Server-only collections (admin SDK; clients fully blocked) ────
     // `rateLimits`   — per-uid + global AI rate-limit counters (src/lib/rateLimit.ts).
     // `deviceTokens` — per-user device-token minVersion for revocation
@@ -145,10 +154,10 @@ service cloud.firestore {
     // access. Documented here only — additive, the old live app never references them.
 
     // ── Everything else: blocked ──────────────────────────────────────
-    // Includes `allowlist` and `platformOwners` (admin-managed, read only via
-    // exists() with rule privileges above), the server-only `rateLimits`/
-    // `deviceTokens`, and the still-unused invites/maps. The advisor system's
-    // clientLinks/advisors/practices are matched explicitly above.
+    // Includes `allowlist` (admin-managed, read only via exists() with rule
+    // privileges above), the server-only `rateLimits`/`deviceTokens`, and the
+    // still-unused invites/maps. The advisor system's clientLinks/advisors/
+    // practices/platformOwners are matched explicitly above.
     match /{document=**} {
       allow read, write: if false;
     }
