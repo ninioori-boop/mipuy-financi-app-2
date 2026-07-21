@@ -146,14 +146,22 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
   }
 
-  // 3) Existing accounts MAY be invited (they'll get the one-time consent
-  //    prompt on next sign-in; declining changes nothing for them). Resolve
-  //    the uid if one exists so exclusivity can be checked on the real link.
+  // 3) Existing accounts may be invited ONLY if Ori explicitly listed them
+  //    below (family/testing). Any other email that already has an account is
+  //    rejected — the system stays "new clients only" for everyone else.
+  //    An allowed existing user sees the one-time consent prompt on next
+  //    sign-in; declining changes nothing for them.
+  const EXISTING_INVITE_ALLOWED = [
+    // lowercased emails Ori approves for linking an EXISTING account:
+  ];
   let existingUid = null;
   try {
     existingUid = (await getAuth().getUserByEmail(email)).uid;
   } catch (e) {
     if (e.code !== "auth/user-not-found") throw e; // real error — surface it
+  }
+  if (existingUid && !EXISTING_INVITE_ALLOWED.includes(email)) {
+    throw new HttpsError("already-exists", "למשתמש הזה כבר קיים חשבון במערכת.");
   }
 
   // 4) Exclusivity — one practice at a time.
