@@ -10,9 +10,11 @@ export function ImpersonationBanner() {
   if (!client) return null
 
   function exit() {
-    useImpersonationStore.getState().stop()
-    // Full reload on purpose: drops the client's data from every store and lets
-    // DataSync load the advisor's own account fresh.
+    // CRITICAL: do NOT call stop() here. The guard must stay up through the
+    // unload — dropping it first lets the pagehide/visibility flush "rescue"
+    // the client's data straight into the advisor's own account (real bug,
+    // caught in production verification 2026-07-21). The full page load wipes
+    // the in-memory store anyway, so navigating is all an exit needs.
     window.location.assign('/app/advisor')
   }
 

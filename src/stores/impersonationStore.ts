@@ -16,11 +16,14 @@ export interface ImpersonatedClient {
 interface ImpersonationState {
   client: ImpersonatedClient | null
   start: (client: ImpersonatedClient) => void
-  stop:  () => void
+  // There is deliberately NO stop(): the only safe exit from view-as-client is
+  // a full page navigation (window.location.assign), which wipes this
+  // in-memory store while the DataSync guards stay up through the unload.
+  // Clearing the flag in-place would let the pagehide flush persist the
+  // client's data into the advisor's account (real bug caught 2026-07-21).
 }
 
 export const useImpersonationStore = create<ImpersonationState>(set => ({
   client: null,
   start: client => set({ client }),
-  stop:  () => set({ client: null }),
 }))
