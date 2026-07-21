@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
@@ -29,6 +30,22 @@ const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 // top; one prominent "רשום הוצאה" action is always in reach; big readable rows
 // lead into the tabs. Mobile-first, tuned for readability + comfort.
 export default function HomePage() {
+  const router = useRouter()
+  // The home screen is the APP experience (push card etc.) and is not exposed
+  // to desktop-browser users — a plain browser visit bounces to the classic
+  // landing tab. Installed PWA / in-app WebView keep it (Ori's rule: app
+  // surfaces stay app-only).
+  const [surface, setSurface] = useState<'checking' | 'app' | 'browser'>('checking')
+  useEffect(() => {
+    let isApp = false
+    try {
+      isApp = sessionStorage.getItem('embedMode') === '1'
+        || window.matchMedia('(display-mode: standalone)').matches
+        || (navigator as { standalone?: boolean }).standalone === true
+    } catch {}
+    if (isApp) { setSurface('app') } else { setSurface('browser'); router.replace('/app/credit') }
+  }, [router])
+
   const entries     = useExpenseLogStore(s => s.entries)
   const budgets     = useCategoryBudgetStore(s => s.budgets)
   const hasBusiness = useClientProfileStore(s => s.hasBusiness)
@@ -89,6 +106,9 @@ export default function HomePage() {
   const overBudget = s.remaining < 0
   const verdictColor =
     s.verdict.tone === 'over' ? 'text-expense' : s.verdict.tone === 'watch' ? 'text-gold' : 'text-income'
+
+  // After all hooks: browser visits render nothing while redirecting away.
+  if (surface !== 'app') return null
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
