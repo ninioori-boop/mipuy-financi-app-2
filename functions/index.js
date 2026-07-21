@@ -153,6 +153,9 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
   //    sign-in; declining changes nothing for them.
   const EXISTING_INVITE_ALLOWED = [
     // lowercased emails Ori approves for linking an EXISTING account:
+    "rotemgovrin@gmail.com",
+    "rotemgovrin1@gmail.com",
+    "ninioori@gmail.com",
   ];
   let existingUid = null;
   try {
