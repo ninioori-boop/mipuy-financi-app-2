@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import {
   listVersions, getVersion, createVersion,
   type VersionSummary,
@@ -60,6 +61,15 @@ export default function VersionsPage() {
 
   async function handleRestore(v: VersionSummary) {
     if (!user) return
+    // Impersonation guard: "restore" is the one MANUAL save path outside the
+    // DataSync auto-save guards. While an advisor is viewing a client, the
+    // stores hold the client's data — restoring would write it into the
+    // advisor's OWN version history. Block it. (Same class as the auto-save
+    // guards in DataSync.tsx.)
+    if (useImpersonationStore.getState().client) {
+      toast.warning('👁️ אתה במצב צפייה בלבד — שחזור גרסה מושבת כאן.')
+      return
+    }
     const confirmed = window.confirm(
       `לשחזר את כל הנתונים לגרסה מ-${fmtDate(v.savedAt)}?\n\nהמצב הנוכחי יישמר כגרסה חדשה (אפשר לחזור אליה) לפני השחזור.`
     )
