@@ -82,6 +82,30 @@ async function main() {
   await db.collection("users").doc(clientUid).set(
     { data: snapshot, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
+  // The ADVISOR gets distinctive data of their OWN (income 99999 + a budget
+  // month) so the bleed-through check is possible: while viewing the client,
+  // no tab may show 99999 / the advisor's month.
+  const advisorSnapshot = {
+    version: 1,
+    mapping: {
+      income:   [{ id: "adv-i1", name: "הכנסה של היועץ עצמו", amount: 99999 }],
+      fixed: [], sub: [], ins: [], variable: [], annual: [], debts: [],
+      installments: [], savings: [], creditCards: [], bankAccounts: [],
+      varMonths: 1, creditImported: false, bufferPct: 10,
+      incomeOverride: null, expensesOverride: null, creditScore: 0,
+    },
+    monthly: {
+      months: {
+        jan: {
+          income: [{ id: "adv-m1", name: "תקציב היועץ עצמו", planned: 99999, actual: 0, fromMapping: false }],
+          fixed: [], variable: [], sub: [], ins: [], installments: [], debts: [], savings: [], deletedRows: [],
+        },
+      },
+    },
+  };
+  await db.collection("users").doc(advisorUid).set(
+    { data: advisorSnapshot, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
   console.log("✅ fixture ready");
   console.log("advisorUid=" + advisorUid);
   console.log("clientUid=" + clientUid);

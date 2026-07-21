@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
 import { toast } from 'sonner'
 import { db, callable } from '@/lib/firebase'
-import { applySnapshot } from '@/lib/dataSync'
+import { applySnapshot, resetAllStores } from '@/lib/dataSync'
 import { useAuthStore } from '@/stores/authStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { AdvisorDashboard } from '@/components/advisor/AdvisorDashboard'
@@ -72,6 +72,10 @@ export default function AdvisorPage() {
       // Order matters: raise the guard BEFORE touching the stores, so the
       // store-change subscriptions can never schedule a save of client data.
       useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email })
+      // Wipe the advisor's own data first — applySnapshot skips sections the
+      // client never filled, and without the reset those tabs would keep
+      // showing the ADVISOR's numbers instead of the client's empty state.
+      resetAllStores()
       applySnapshot(data)
       router.push('/app/home')
     } catch {

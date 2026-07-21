@@ -15,6 +15,10 @@ export interface ImpersonatedClient {
 
 interface ImpersonationState {
   client: ImpersonatedClient | null
+  /** Entry timestamp — lets DataSync ignore the programmatic store changes of
+   *  the entry itself (reset + applySnapshot) when deciding to show the
+   *  "edits are not saved" warning. */
+  startedAt: number
   start: (client: ImpersonatedClient) => void
   // There is deliberately NO stop(): the only safe exit from view-as-client is
   // a full page navigation (window.location.assign), which wipes this
@@ -25,5 +29,6 @@ interface ImpersonationState {
 
 export const useImpersonationStore = create<ImpersonationState>(set => ({
   client: null,
-  start: client => set({ client }),
+  startedAt: 0,
+  start: client => set({ client, startedAt: Date.now() }),
 }))
