@@ -31,7 +31,7 @@ function inviteEmailHtml(email) {
         היועץ הפיננסי שלך הזמין אותך למערכת "הכלכלן של הבית": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
       </p>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
-        ההרשמה פשוטה: נכנסים לקישור, נרשמים עם כתובת המייל הזאת בדיוק
+        פשוט נכנסים לקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
         (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
@@ -40,7 +40,7 @@ function inviteEmailHtml(email) {
         </a>
       </div>
       <p style="font-size:12px;color:#8a8178;line-height:1.6;margin:0;">
-        חשוב: יש להירשם עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
+        חשוב: יש להתחבר עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
       </p>
     </div>
     <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת הכלכלן של הבית · ${APP_URL.replace("https://", "")}</p>
@@ -146,23 +146,33 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
   }
 
-  // 3) New clients only — reject an email that already has an account.
+  // 3) Existing accounts MAY be invited (they'll get the one-time consent
+  //    prompt on next sign-in; declining changes nothing for them). Resolve
+  //    the uid if one exists so exclusivity can be checked on the real link.
+  let existingUid = null;
   try {
-    await getAuth().getUserByEmail(email);
-    throw new HttpsError("already-exists", "למשתמש הזה כבר קיים חשבון במערכת.");
+    existingUid = (await getAuth().getUserByEmail(email)).uid;
   } catch (e) {
-    if (e instanceof HttpsError) throw e;
     if (e.code !== "auth/user-not-found") throw e; // real error — surface it
-    // not-found = good, continue.
   }
 
-  // 4) Exclusivity — one practice at a time. If a pending invite from a
-  //    DIFFERENT practice exists, block; same practice is idempotent.
+  // 4) Exclusivity — one practice at a time.
+  //    (a) A pending invite from a DIFFERENT practice blocks; same practice is
+  //        idempotent. (b) For an existing account: an ACTIVE link with a
+  //        different practice blocks (declined/revoked don't — the client can
+  //        reconsider a new invite).
   const pendingRef = db.collection("clientLinks").doc(pendingId(email));
   const pendingSnap = await pendingRef.get();
   if (pendingSnap.exists && pendingSnap.data().practiceId !== practiceId
       && pendingSnap.data().status === "pending") {
     throw new HttpsError("already-exists", "הלקוח כבר הוזמן על ידי יועץ אחר.");
+  }
+  if (existingUid) {
+    const linkSnap = await db.collection("clientLinks").doc(existingUid).get();
+    if (linkSnap.exists && linkSnap.data().status === "active"
+        && linkSnap.data().practiceId !== practiceId) {
+      throw new HttpsError("already-exists", "הלקוח כבר משתף יועץ אחר.");
+    }
   }
 
   // 5) Atomic: allowlist the email + write the pending link.
