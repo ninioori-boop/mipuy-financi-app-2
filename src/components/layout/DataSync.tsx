@@ -97,6 +97,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   // Cached Firebase ID token — needed by the beacon-save handler at tab close
   // (sendBeacon runs synchronously; we can't await getIdToken() there).
   const cachedIdToken   = useRef<string>('')
+  // One-time "edits in view mode are not saved" warning per session.
+  const viewEditWarned  = useRef<boolean>(false)
   const [retryCount, setRetryCount] = useState(0)
 
   // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
@@ -198,8 +200,18 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const triggerSave = () => {
       // ADVISOR VIEW-AS-CLIENT GUARD: while impersonating, the stores hold the
       // CLIENT's data — persisting anything would corrupt the advisor's own
-      // account. Block every save/backup from even being scheduled.
-      if (useImpersonationStore.getState().client) return
+      // account. Block every save/backup from even being scheduled. The first
+      // blocked change also warns the advisor that edits in view mode vanish.
+      const imp = useImpersonationStore.getState()
+      if (imp.client) {
+        // Warn once per session — but only for changes made AFTER entry
+        // settled (the entry's own reset+applySnapshot fire this too).
+        if (!viewEditWarned.current && Date.now() - imp.startedAt > 2000) {
+          viewEditWarned.current = true
+          toast.warning('👁️ אתה במצב צפייה בלבד — שינויים שתעשה כאן לא נשמרים.', { duration: 6000 })
+        }
+        return
+      }
 
       // Flip isDirty (only if not already dirty — avoids re-renders on every keystroke).
       if (!useSyncStore.getState().isDirty) useSyncStore.getState().setDirty(true)
