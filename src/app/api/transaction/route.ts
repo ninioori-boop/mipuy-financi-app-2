@@ -87,10 +87,12 @@ export async function POST(req: NextRequest) {
   // Explicit category (manual entry from the app) wins. Otherwise: learned
   // corrections (shared — same DB the credit/import/expenses tabs teach) →
   // BUSINESS_DB → AI fallback.
-  // Bit/Paybox person-to-person transfers have no real business name, so the
-  // AI just mis-guesses (e.g. a person's name → "ביטוח לאומי"). Detect them from
-  // the capture source and default UNKNOWN ones to "ביט ללא מעקב" — identifiable,
-  // and easy to re-categorize (the app surfaces it in the one-tap review strip).
+  // Bit/Paybox person-to-person transfers carry the RECIPIENT'S NAME, not a
+  // business — substring lookups and the AI both mis-guess on person names
+  // (e.g. "אורן" → a restaurant / a barber). So a transfer ALWAYS lands in
+  // "ביט ללא מעקב" (bypassing learned/DB/AI entirely); only an explicit
+  // category from the app's manual entry overrides. Re-categorizing a specific
+  // transfer is done per-entry in the expenses tab.
   const isTransfer = typeof source === 'string' && /ביט|פייבוקס|paybox|\bbit\b/i.test(source)
 
   // Duplicate-fire guard: iOS Wallet automations can fire several times for
@@ -125,16 +127,14 @@ export async function POST(req: NextRequest) {
   let category: string
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
     category = catOverride
+  } else if (isTransfer) {
+    category = 'ביט ללא מעקב'
   } else {
     const learnedDB = await loadSharedLearned(db)
-    category = categorize(cleanMerchant, learnedDB)   // learned corrections still win
+    category = categorize(cleanMerchant, learnedDB)
     if (category === 'שונות') {
-      if (isTransfer) {
-        category = 'ביט ללא מעקב'   // don't let the AI guess a person's name
-      } else {
-        const ai = await aiCategorizeOne(cleanMerchant)
-        if (ai) category = ai
-      }
+      const ai = await aiCategorizeOne(cleanMerchant)
+      if (ai) category = ai
     }
   }
 
