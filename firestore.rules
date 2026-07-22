@@ -42,13 +42,24 @@ service cloud.firestore {
 
       // NEW (additive, READ-ONLY): a consented advisor whose ACTIVE link names
       // them may read this client's financial doc. OR-combined, so the owner
-      // clause above is never weakened. Advisor write stays blocked; revoking
-      // the link (status != 'active') cuts advisor access instantly. The
-      // `versions` subcollection below is deliberately NOT extended to advisors.
+      // clause above is never weakened. Read is granted at BOTH access tiers
+      // (a write-consented advisor must still be able to read).
       allow read: if request.auth != null
         && exists(/databases/$(database)/documents/clientLinks/$(userId))
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid;
+
+      // NEW (additive, WRITE): a WRITE-tier consented advisor may edit this
+      // client's financial doc. Gated on the client's explicit edit consent
+      // (access=='write', set only by the client via setClientSharing). The
+      // owner write clause above is untouched; dropping the link (status!='active')
+      // or the tier (access!='write' — incl. auto-expiry at 'סוף תהליך') cuts
+      // write instantly at the rule level.
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.access == 'write';
     }
 
     // ── Version history — per-user snapshot subcollection ─────────────
@@ -57,9 +68,19 @@ service cloud.firestore {
     // doc: owner-only + invite-only allowlist. Additive collection — the old
     // live app never touches it, so zero-risk to it.
     match /users/{userId}/versions/{versionId} {
+      // UNCHANGED — owner-only + allowlist:
       allow read, write: if request.auth != null
         && request.auth.uid == userId
         && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+
+      // NEW (additive): a WRITE-tier consented advisor may read + write version
+      // snapshots in the CLIENT's history — full transparency, the client can
+      // rewind advisor edits. `write` covers create/delete (trimVersions caps at 20).
+      allow read, write: if request.auth != null
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.access == 'write';
     }
 
     // ── Shared category-learning DB ───────────────────────────────────

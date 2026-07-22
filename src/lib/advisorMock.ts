@@ -49,11 +49,20 @@ export interface MockClient {
   flags:          ClientFlag[]
   beingEdited?:   boolean        // powers the static "someone else editing" demo
   fin:            MockClientFinancials
+  // Edit-access seam (Stage 3). Only set for real links; mock clients omit them.
+  //  access          — the granted tier: 'read' (view only) or 'write' (advisor may edit)
+  //  requestedAccess — 'write' while the advisor's edit request awaits client consent
+  access?:          'read' | 'write'
+  requestedAccess?: 'write'
 }
 
 export const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
-export const STAGE_LABELS = ['טרם התחיל', 'מיפוי', 'תקציב', 'יעדים', 'מעקב', 'עצמאות'] as const
+// Engagement stages the advisor sets after each meeting (Stage 3). Index order
+// MUST match ENGAGEMENT_STAGES in functions/index.js — advisorClients maps the
+// stored stage STRING to this array's index (MockClient.stage: 0..5). The last
+// stage ('סוף תהליך') auto-expires the advisor's edit access server-side.
+export const STAGE_LABELS = ['היכרות', 'מיפוי', 'תקציב', 'בקרה', 'תוכנית כלכלית', 'סוף תהליך'] as const
 
 export const FLAG_LABELS: Record<ClientFlag, string> = {
   'over-budget':      'חריגה מהתקציב',

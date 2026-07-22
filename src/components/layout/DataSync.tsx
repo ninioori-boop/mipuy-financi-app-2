@@ -34,7 +34,9 @@ import { useRecurringStore } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
-import { saveUserData, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
@@ -99,7 +101,19 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const cachedIdToken   = useRef<string>('')
   // One-time "edits in view mode are not saved" warning per session.
   const viewEditWarned  = useRef<boolean>(false)
+  // Concurrent-edit detection baseline: the client doc's updatedAt (epoch ms)
+  // as of the last time WE loaded/wrote it, during advisor edit mode.
+  const clientDocBaseline = useRef<number>(0)
   const [retryCount, setRetryCount] = useState(0)
+
+  // Advisor edit-mode helper: are we saving to a CLIENT's uid, and which uid.
+  // In edit mode saves target the client; otherwise the signed-in (advisor) uid.
+  function saveTarget() {
+    const imp = useImpersonationStore.getState()
+    const editMode = !!imp.client && imp.mode === 'edit'
+    const uid = editMode ? imp.client!.uid : useAuthStore.getState().user?.uid ?? ''
+    return { editMode, uid, imp }
+  }
 
   // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
   // log. No-op until the transactionInbox rule + backend are enabled.
@@ -198,12 +212,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (!user || !hydrated) return
 
     const triggerSave = () => {
-      // ADVISOR VIEW-AS-CLIENT GUARD: while impersonating, the stores hold the
-      // CLIENT's data — persisting anything would corrupt the advisor's own
-      // account. Block every save/backup from even being scheduled. The first
-      // blocked change also warns the advisor that edits in view mode vanish.
+      // ADVISOR IMPERSONATION BRANCHING:
+      //  • VIEW mode → HARD-BLOCK. The stores hold the CLIENT's data; persisting
+      //    it to the advisor's own account would corrupt it. Warn once, return.
+      //  • EDIT mode → PROCEED, but every sink below (backup, save, version) is
+      //    redirected to the CLIENT's uid via saveTarget() — never the advisor's.
+      //  • no impersonation → normal self-save (unchanged).
       const imp = useImpersonationStore.getState()
-      if (imp.client) {
+      if (imp.client && imp.mode !== 'edit') {
         // Warn once per session — but only for changes made AFTER entry
         // settled (the entry's own reset+applySnapshot fire this too).
         if (!viewEditWarned.current && Date.now() - imp.startedAt > 2000) {
@@ -221,19 +237,83 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       // crashes, or the beacon is blocked, next login can restore from here.
       if (backupTimer.current) clearTimeout(backupTimer.current)
       backupTimer.current = setTimeout(() => {
-        // Guard at FIRE time too — a timer armed just before impersonation
-        // started must not mirror the client's data into the advisor's backup.
-        if (useImpersonationStore.getState().client) return
+        // Resolve the target at FIRE time. In edit mode the backup is keyed to
+        // the CLIENT's uid; a view-mode timer that armed just before entry must
+        // still never mirror the client's data (target.editMode === false).
+        const target = saveTarget()
+        if (target.imp.client && !target.editMode) return
+        if (!target.uid) return
         const snap = collectSnapshot()
         const json = JSON.stringify(snap)
         if (json === lastBackupJson.current) return
-        writeLocalBackup(user.uid, snap)
+        writeLocalBackup(target.uid, snap)
         lastBackupJson.current = json
       }, BACKUP_DEBOUNCE_MS)
 
       // ── Firestore debounced save (unchanged from before) ──
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
+        // ── ADVISOR EDIT-MODE WRITE PATH ──────────────────────────────────
+        // Resolve the target at FIRE time. In edit mode we REDIRECT the write
+        // to the CLIENT's doc (authorized by the Firestore write rule: active
+        // link + access=='write'). The advisor's own account is never touched.
+        const target = saveTarget()
+        if (target.editMode) {
+          if (!target.uid) return
+          const clientUid  = target.uid
+          const advisorUid = useAuthStore.getState().user?.uid
+          if (!advisorUid) return   // advisor logged out mid-debounce → abort
+
+          const snap = collectSnapshot()
+          const json = JSON.stringify(snap)
+          if (json === lastSavedJson.current) {
+            if (useSyncStore.getState().isDirty) useSyncStore.getState().setDirty(false)
+            return
+          }
+          const size = snapshotSize(snap)
+          if (size > MAX_BYTES) {
+            setStatus('error', `נתונים גדולים מדי לשמירה (${Math.round(size / 1024)}KB)`)
+            return
+          }
+          if (!navigator.onLine) { setStatus('offline'); return }
+
+          setStatus('saving')
+          try {
+            // Concurrent-edit detection (BEST-EFFORT, not a lock): if the client
+            // touched their own doc since our baseline, warn — last-save-wins,
+            // we still overwrite. Skew buffer avoids false positives.
+            try {
+              const cur      = await getDoc(doc(db, 'users', clientUid))
+              const remoteTs = typeof cur.data()?.updatedAt?.toMillis === 'function'
+                ? cur.data()!.updatedAt.toMillis() : 0
+              if (remoteTs > clientDocBaseline.current + RESTORE_SKEW_MS) {
+                toast.warning('⚠️ הלקוח עדכן נתונים במקביל — השמירה שלך תדרוס אותם.', { duration: 6000 })
+              }
+            } catch { /* probe failed — proceed with the save anyway */ }
+
+            await saveClientDataAsAdvisor(clientUid, snap, advisorUid)
+            lastSavedJson.current      = json
+            clientDocBaseline.current  = Date.now()
+            markSaved()
+            const nowJson = JSON.stringify(collectSnapshot())
+            if (nowJson === json) useSyncStore.getState().setDirty(false)
+
+            // Version snapshot in the CLIENT's OWN history (client can rewind
+            // an advisor edit). Throttled + silent-failure like the self-path.
+            const now = Date.now()
+            if (now - lastVersionAt.current > VERSION_INTERVAL_MS) {
+              lastVersionAt.current = now
+              createVersion(clientUid, snap, size).catch(err => {
+                console.warn('[DataSync] client version creation failed:', err)
+              })
+            }
+          } catch (err) {
+            setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
+          }
+          return
+        }
+
+        // ── NORMAL SELF-SAVE PATH ─────────────────────────────────────────
         // Belt-and-suspenders: even if the cleanup race somehow leaves a stale
         // timer armed, re-verify the current authed UID matches the one this
         // closure captured. If the user logged out (or switched accounts)
@@ -242,7 +322,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         if (currentUid !== user.uid) return
 
         // Guard at FIRE time too (see backup timer above) — never write the
-        // impersonated client's data anywhere.
+        // VIEW-mode impersonated client's data anywhere.
         if (useImpersonationStore.getState().client) return
 
         const snap = collectSnapshot()
@@ -316,6 +396,30 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     }
   }, [user, hydrated, setStatus, markSaved])
 
+  // ── 2b. Advisor edit-mode baseline seed ──
+  // Entering edit mode, editFullAccount() runs resetAllStores()+applySnapshot(client)
+  // then start(client,'edit',updatedAt) — all synchronously. Those store writes
+  // fire triggerSave, which in edit mode arms a save timer targeting the CLIENT
+  // doc. Left alone, that first (entry) save would push the client's own data
+  // back and mint a spurious version. This subscribe fires on start() — AFTER
+  // the snapshot is applied — and seeds lastSaved/lastBackup to the just-applied
+  // state, so the pending entry save (2s debounce) sees no diff and no-ops. It
+  // also seeds the concurrent-edit baseline from the client doc's entry updatedAt.
+  useEffect(() => {
+    const unsub = useImpersonationStore.subscribe((state, prev) => {
+      const enteringEdit = !!state.client && state.mode === 'edit'
+        && (state.startedAt !== prev.startedAt || prev.mode !== 'edit' || !prev.client)
+      if (!enteringEdit) return
+      const json = JSON.stringify(collectSnapshot())
+      lastSavedJson.current     = json
+      lastBackupJson.current    = json
+      clientDocBaseline.current = state.clientUpdatedAt || 0
+      lastVersionAt.current     = 0        // allow the first real edit to version
+      viewEditWarned.current    = false
+    })
+    return () => unsub()
+  }, [])
+
   // ── 3. Mirror mapping installments/debts/savings into all monthly tabs ──
   // Subscribe to any mapping change; on user pause (500ms debounce) call
   // syncFromMapping with no monthId → updates EVERY existing month.
@@ -388,8 +492,24 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const uid = user.uid
 
     function flushIfDirty() {
-      // ADVISOR VIEW-AS-CLIENT GUARD: never beacon/mirror the client's data.
-      if (useImpersonationStore.getState().client) return
+      const imp = useImpersonationStore.getState()
+      if (imp.client) {
+        // EDIT mode: mirror the client's in-progress edits to THEIR localStorage
+        // key (safe, device-local) but NEVER sendBeacon — /api/save-snapshot
+        // derives the uid from the advisor's token, so a POST would write the
+        // client's data into the advisor's account. Local backup + the next
+        // debounced save (also client-targeted) cover the close.
+        // VIEW mode: don't touch anything.
+        if (imp.mode === 'edit' && imp.client.uid) {
+          const snap = collectSnapshot()
+          const json = JSON.stringify(snap)
+          if (json !== lastBackupJson.current) {
+            writeLocalBackup(imp.client.uid, snap)
+            lastBackupJson.current = json
+          }
+        }
+        return
+      }
       const snap = collectSnapshot()
       const json = JSON.stringify(snap)
       if (json === lastSavedJson.current) return   // nothing to save

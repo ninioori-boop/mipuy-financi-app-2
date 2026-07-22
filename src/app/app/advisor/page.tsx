@@ -71,7 +71,7 @@ export default function AdvisorPage() {
       if (!data) { toast.error('אין נתונים לצפייה עבור הלקוח הזה.'); return }
       // Order matters: raise the guard BEFORE touching the stores, so the
       // store-change subscriptions can never schedule a save of client data.
-      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email })
+      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email }, 'view')
       // Wipe the advisor's own data first — applySnapshot skips sections the
       // client never filled, and without the reset those tabs would keep
       // showing the ADVISOR's numbers instead of the client's empty state.
@@ -80,6 +80,54 @@ export default function AdvisorPage() {
       router.push('/app/home')
     } catch {
       toast.error('טעינת חשבון הלקוח נכשלה.')
+    }
+  }
+
+  /** Enter EDIT mode (write). Only offered when the client granted access:'write'.
+   *  Order is critical (doctor note): resetAllStores()+applySnapshot(client) FIRST,
+   *  THEN start(...,'edit',updatedAt) — the start() fires DataSync's baseline seed
+   *  synchronously AFTER the snapshot is applied, so the entry itself never mints a
+   *  spurious client save/version. Saves are redirected to the client's uid by
+   *  DataSync; the advisor's own account is never touched. Exit = full reload. */
+  async function editFullAccount(c: MockClient) {
+    if (c.access !== 'write') { toast.error('אין הרשאת עריכה מהלקוח.'); return }
+    try {
+      const snap = await getDoc(doc(db, 'users', c.id))
+      const raw  = snap.exists() ? snap.data() : null
+      const data = raw?.data ?? null
+      if (!data) { toast.error('אין נתונים לעריכה עבור הלקוח הזה.'); return }
+      const updatedAt = typeof raw?.updatedAt?.toMillis === 'function' ? raw.updatedAt.toMillis() : 0
+      resetAllStores()
+      applySnapshot(data)
+      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email }, 'edit', updatedAt)
+      router.push('/app/home')
+    } catch {
+      toast.error('טעינת חשבון הלקוח נכשלה.')
+    }
+  }
+
+  /** Advisor asks the client for edit access — sets requestedAccess:'write' on the
+   *  link. The client approves (ConsentGate at entry, or SharingControl). Never
+   *  grants write itself. */
+  async function requestEdit(c: MockClient) {
+    try {
+      await callable<{ clientUid: string }, { ok: boolean }>('requestEditAccess')({ clientUid: c.id })
+      toast.success('בקשת עריכה נשלחה ללקוח. הוא יאשר בכניסה הבאה לחשבון.')
+      await refetch()
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || 'שליחת הבקשה נכשלה.')
+    }
+  }
+
+  /** Advisor updates the engagement stage after a meeting. 'סוף תהליך' auto-
+   *  expires edit access server-side; refetch reflects the new access tier. */
+  async function setStage(c: MockClient, stage: string) {
+    try {
+      await callable<{ clientUid: string; stage: string }, { ok: boolean }>('setClientStage')({ clientUid: c.id, stage })
+      toast.success(`שלב הליווי עודכן: ${stage}`)
+      await refetch()
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || 'עדכון השלב נכשל.')
     }
   }
 
@@ -99,6 +147,9 @@ export default function AdvisorPage() {
         client={openClient}
         onExit={() => setOpenClientId(null)}
         onViewFull={() => viewFullAccount(openClient)}
+        onEditFull={() => editFullAccount(openClient)}
+        onRequestEdit={() => requestEdit(openClient)}
+        onSetStage={(stage) => setStage(openClient, stage)}
       />
     )
   }

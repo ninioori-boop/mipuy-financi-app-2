@@ -10,6 +10,22 @@ export async function saveUserData(uid: string, data: unknown): Promise<void> {
   await setDoc(doc(db, 'users', uid), { data, updatedAt: serverTimestamp() }, { merge: true })
 }
 
+/**
+ * Save a CLIENT's snapshot while an advisor is editing it (view-as-client edit
+ * mode). Same shape as saveUserData but also stamps the transparency marker as
+ * TOP-LEVEL fields (never inside `data`, so it can't round-trip into the
+ * snapshot / version diffs). merge:true preserves the client's own `data` fields
+ * we didn't send. The advisor→client WRITE is authorized by the Firestore rule
+ * (active link + access=='write').
+ */
+export async function saveClientDataAsAdvisor(clientUid: string, data: unknown, advisorUid: string): Promise<void> {
+  await setDoc(
+    doc(db, 'users', clientUid),
+    { data, updatedAt: serverTimestamp(), lastAdvisorEditAt: serverTimestamp(), lastAdvisorEditByUid: advisorUid },
+    { merge: true },
+  )
+}
+
 export interface LoadedUserData {
   data:      unknown
   updatedAt: number   // epoch ms; 0 if the doc predates serverTimestamp tracking

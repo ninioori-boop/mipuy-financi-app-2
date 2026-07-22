@@ -8,18 +8,23 @@ const { getAuth } = require("firebase-admin/auth");
 initializeApp();
 const db = getFirestore();
 
-const CONSENT_VERSION = "v1";
+const CONSENT_VERSION = "v1";          // view-only consent
+const EDIT_CONSENT_VERSION = "v2";     // separate consent to let the advisor EDIT
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Advisor-controlled engagement stage. Reaching 'סוף תהליך' auto-expires edit
+// access (access→'read'). Order matters (index used by the dashboard).
+const ENGAGEMENT_STAGES = ["היכרות", "מיפוי", "תקציב", "בקרה", "תוכנית כלכלית", "סוף תהליך"];
+const FINAL_STAGE = "סוף תהליך";
 
 // Resend API key — stored as a Firebase secret (firebase functions:secrets:set
 // RESEND_API_KEY). Never in code or env files.
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 
 const APP_URL = "https://app.orimipuy.com";
-// Until the orimipuy.com domain is verified in Resend, only Resend's onboarding
-// sender works (and only to the Resend account owner's inbox). After DNS
-// verification, switch to the branded sender below.
-const MAIL_FROM = "הכלכלן של הבית <onboarding@resend.dev>";
+// orimipuy.com is verified in Resend (DKIM/SPF/MX in Route 53, 2026-07-21), so
+// invitations go out from the branded sender to any recipient.
+const MAIL_FROM = "הכלכלן של הבית <invite@orimipuy.com>";
 
 /** Simple RTL Hebrew invitation email. Inline styles only (email-client safe). */
 function inviteEmailHtml(email) {
@@ -32,7 +37,7 @@ function inviteEmailHtml(email) {
         היועץ הפיננסי שלך הזמין אותך למערכת "הכלכלן של הבית": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
       </p>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
-        ההרשמה פשוטה: נכנסים לקישור, נרשמים עם כתובת המייל הזאת בדיוק
+        פשוט נכנסים לקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
         (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
@@ -41,7 +46,7 @@ function inviteEmailHtml(email) {
         </a>
       </div>
       <p style="font-size:12px;color:#8a8178;line-height:1.6;margin:0;">
-        חשוב: יש להירשם עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
+        חשוב: יש להתחבר עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
       </p>
     </div>
     <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת הכלכלן של הבית · ${APP_URL.replace("https://", "")}</p>
@@ -147,23 +152,44 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
   }
 
-  // 3) New clients only — reject an email that already has an account.
+  // 3) Existing accounts may be invited ONLY if Ori explicitly listed them
+  //    below (family/testing). Any other email that already has an account is
+  //    rejected — the system stays "new clients only" for everyone else.
+  //    An allowed existing user sees the one-time consent prompt on next
+  //    sign-in; declining changes nothing for them.
+  const EXISTING_INVITE_ALLOWED = [
+    // lowercased emails Ori approves for linking an EXISTING account:
+    "rotemgovrin@gmail.com",
+    "rotemgovrin1@gmail.com",
+    "ninioori@gmail.com",
+  ];
+  let existingUid = null;
   try {
-    await getAuth().getUserByEmail(email);
-    throw new HttpsError("already-exists", "למשתמש הזה כבר קיים חשבון במערכת.");
+    existingUid = (await getAuth().getUserByEmail(email)).uid;
   } catch (e) {
-    if (e instanceof HttpsError) throw e;
     if (e.code !== "auth/user-not-found") throw e; // real error — surface it
-    // not-found = good, continue.
+  }
+  if (existingUid && !EXISTING_INVITE_ALLOWED.includes(email)) {
+    throw new HttpsError("already-exists", "למשתמש הזה כבר קיים חשבון במערכת.");
   }
 
-  // 4) Exclusivity — one practice at a time. If a pending invite from a
-  //    DIFFERENT practice exists, block; same practice is idempotent.
+  // 4) Exclusivity — one practice at a time.
+  //    (a) A pending invite from a DIFFERENT practice blocks; same practice is
+  //        idempotent. (b) For an existing account: an ACTIVE link with a
+  //        different practice blocks (declined/revoked don't — the client can
+  //        reconsider a new invite).
   const pendingRef = db.collection("clientLinks").doc(pendingId(email));
   const pendingSnap = await pendingRef.get();
   if (pendingSnap.exists && pendingSnap.data().practiceId !== practiceId
       && pendingSnap.data().status === "pending") {
     throw new HttpsError("already-exists", "הלקוח כבר הוזמן על ידי יועץ אחר.");
+  }
+  if (existingUid) {
+    const linkSnap = await db.collection("clientLinks").doc(existingUid).get();
+    if (linkSnap.exists && linkSnap.data().status === "active"
+        && linkSnap.data().practiceId !== practiceId) {
+      throw new HttpsError("already-exists", "הלקוח כבר משתף יועץ אחר.");
+    }
   }
 
   // 5) Atomic: allowlist the email + write the pending link.
@@ -234,6 +260,40 @@ exports.setClientSharing = onCall(async (request) => {
       }
     }
 
+    // ── Resolve the access tier ──────────────────────────────────────────────
+    // Default: PRESERVE what the link already had — never silently downgrade a
+    // write-tier link on an unrelated status change (the old hardcoded 'read'
+    // was a latent bug once write exists).
+    let access = source.access || "read";
+    let clearRequested = false;
+    const wantAccess = request.data?.access;
+    if (wantAccess !== undefined) {
+      if (!["read", "write"].includes(String(wantAccess))) {
+        throw new HttpsError("invalid-argument", "רמת גישה לא תקינה.");
+      }
+      if (wantAccess === "write") {
+        // Granting EDIT: sharing must be active, the advisor must have asked,
+        // and the client must echo the v2 edit-consent version. This is the
+        // ONLY path that ever sets access:'write' — and only the client (this
+        // callable runs as the client, on their own uid-keyed link) can do it.
+        if (status !== "active") {
+          throw new HttpsError("failed-precondition", "צריך לשתף לפני מתן הרשאת עריכה.");
+        }
+        if (source.requestedAccess !== "write") {
+          throw new HttpsError("failed-precondition", "אין בקשת עריכה פעילה מהיועץ.");
+        }
+        if (String(request.data?.consentVersion ?? "") !== EDIT_CONSENT_VERSION) {
+          throw new HttpsError("failed-precondition", "גרסת הסכמת עריכה לא תואמת.");
+        }
+        access = "write";
+      } else {
+        access = "read"; // stop editing / decline the edit request
+      }
+      clearRequested = true; // the client responded to the edit request
+    }
+    // Any un-share also drops edit access.
+    if (status === "declined" || status === "revoked") { access = "read"; clearRequested = true; }
+
     const now = FieldValue.serverTimestamp();
     const linkDoc = {
       status,
@@ -241,7 +301,7 @@ exports.setClientSharing = onCall(async (request) => {
       invitedEmail: source.invitedEmail || email,
       invitedByUid: source.invitedByUid,
       practiceId: source.practiceId,
-      access: "read",
+      access,
       consentVersion: source.consentVersion || CONSENT_VERSION,
       invitedAt: source.createdAt || now,
       statusChangedAt: now,
@@ -249,6 +309,8 @@ exports.setClientSharing = onCall(async (request) => {
     };
     if (!linkSnap.exists) linkDoc.createdAt = now;
     if (status === "active") linkDoc.consentAt = now;
+    if (access === "write") linkDoc.editConsentAt = now;
+    if (clearRequested) linkDoc.requestedAccess = FieldValue.delete();
 
     tx.set(linkRef, linkDoc, { merge: true });
 
@@ -259,4 +321,72 @@ exports.setClientSharing = onCall(async (request) => {
 
     return { ok: true, status };
   });
+});
+
+/**
+ * requestEditAccess — the advisor asks the client for EDIT permission.
+ *
+ * Sets only `requestedAccess:'write'` + bumps `consentVersion` to v2 on the
+ * client's link, so the client's ConsentGate re-prompts on next sign-in. It
+ * NEVER grants `access:'write'` itself — only the client can, by accepting
+ * (setClientSharing). The advisor must own an active link to this client.
+ */
+exports.requestEditAccess = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+  const advisorSnap = await db.collection("advisors").doc(callerUid).get();
+  if (!advisorSnap.exists) throw new HttpsError("permission-denied", "רק יועץ יכול לבקש עריכה.");
+
+  const clientUid = String(request.data?.clientUid ?? "");
+  if (!clientUid) throw new HttpsError("invalid-argument", "חסר מזהה לקוח.");
+
+  const linkRef = db.collection("clientLinks").doc(clientUid);
+  const linkSnap = await linkRef.get();
+  if (!linkSnap.exists || linkSnap.data().status !== "active"
+      || linkSnap.data().invitedByUid !== callerUid) {
+    throw new HttpsError("failed-precondition", "אין קשר פעיל ללקוח הזה.");
+  }
+
+  await linkRef.set({
+    requestedAccess: "write",
+    consentVersion: EDIT_CONSENT_VERSION,
+    editRequestedAt: FieldValue.serverTimestamp(),
+    editRequestedByUid: callerUid,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return { ok: true };
+});
+
+/**
+ * setClientStage — the advisor records the client's engagement stage (after
+ * each meeting). Reaching the FINAL stage ('סוף תהליך') AUTO-EXPIRES edit
+ * access (access→'read'), so write permission never lingers past the process.
+ * Never grants write. Advisor must own an active link to this client.
+ */
+exports.setClientStage = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+  const advisorSnap = await db.collection("advisors").doc(callerUid).get();
+  if (!advisorSnap.exists) throw new HttpsError("permission-denied", "רק יועץ יכול לעדכן שלב.");
+
+  const clientUid = String(request.data?.clientUid ?? "");
+  const stage = String(request.data?.stage ?? "");
+  if (!clientUid) throw new HttpsError("invalid-argument", "חסר מזהה לקוח.");
+  if (!ENGAGEMENT_STAGES.includes(stage)) throw new HttpsError("invalid-argument", "שלב לא תקין.");
+
+  const linkRef = db.collection("clientLinks").doc(clientUid);
+  const linkSnap = await linkRef.get();
+  if (!linkSnap.exists || linkSnap.data().invitedByUid !== callerUid) {
+    throw new HttpsError("failed-precondition", "אין קשר ללקוח הזה.");
+  }
+
+  const patch = { stage, updatedAt: FieldValue.serverTimestamp() };
+  // Terminal stage ends the engagement → edit access expires automatically.
+  if (stage === FINAL_STAGE) patch.access = "read";
+  await linkRef.set(patch, { merge: true });
+
+  return { ok: true, stage, access: patch.access ?? (linkSnap.data().access || "read") };
 });

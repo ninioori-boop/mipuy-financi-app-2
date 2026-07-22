@@ -11,9 +11,9 @@ import { hasLabAccess } from '@/lib/labAccess'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
-import { EnablePushCard } from '@/components/home/EnablePushCard'
 import { BudgetReviewReminder } from '@/components/home/BudgetReviewReminder'
 import { SharingControl } from '@/components/client/SharingControl'
+import { AdvisorEditMarker } from '@/components/client/AdvisorEditMarker'
 
 function currentMonth() {
   const d = new Date()
@@ -173,9 +173,6 @@ export default function HomePage() {
         </Link>
       )}
 
-      {/* Branded push opt-in — renders only where push can actually work */}
-      <EnablePushCard />
-
       {/* Proactive coach insights — the app speaks first */}
       <InsightCards />
 
@@ -210,6 +207,9 @@ export default function HomePage() {
           </Link>
         ))}
       </div>
+
+      {/* Transparency: when the advisor last edited this account (if ever). */}
+      <AdvisorEditMarker />
 
       {/* Advisor-sharing control — renders ONLY for clients linked to an
           advisor (one null read otherwise). Grant/revoke sharing anytime. */}
