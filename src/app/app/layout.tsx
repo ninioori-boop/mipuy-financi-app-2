@@ -110,15 +110,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [])
 
-  // Advisor-linked clients get a "פרטיות ושיתוף" menu entry (revoke/grant
-  // sharing). One cheap own-doc read; everyone else sees nothing new.
+  // Two cheap own-doc reads that drive conditional menu entries; both fail-open,
+  // so a regular client (neither doc exists) sees no change:
+  //  - clientLinks/{uid}  → "פרטיות · שיתוף עם היועץ" (the client is advisor-linked)
+  //  - advisors/{uid}     → "ניהול · הלקוחות שלי" (the user IS an advisor — the
+  //    real role, NOT hasLabAccess, so Rotem and future advisors get it too)
   const [hasAdvisorLink, setHasAdvisorLink] = useState(false)
+  const [isAdvisorRole, setIsAdvisorRole]   = useState(false)
   useEffect(() => {
-    if (!user) { setHasAdvisorLink(false); return }
+    if (!user) { setHasAdvisorLink(false); setIsAdvisorRole(false); return }
     let alive = true
-    getDoc(doc(db, 'clientLinks', user.uid))
-      .then(snap => { if (alive) setHasAdvisorLink(snap.exists()) })
-      .catch(() => { if (alive) setHasAdvisorLink(false) })
+    Promise.all([
+      getDoc(doc(db, 'clientLinks', user.uid)).catch(() => null),
+      getDoc(doc(db, 'advisors', user.uid)).catch(() => null),
+    ]).then(([linkSnap, advSnap]) => {
+      if (!alive) return
+      setHasAdvisorLink(!!linkSnap?.exists())
+      setIsAdvisorRole(!!advSnap?.exists())
+    })
     return () => { alive = false }
   }, [user])
 
@@ -150,6 +159,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const visibleGroups = groups
     .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
     .filter(g => g.items.length > 0)
+  // Advisors (real advisors/{uid} role) get the client-management dashboard at
+  // the TOP — it's their primary workspace. Regular clients never see it.
+  if (isAdvisorRole) {
+    visibleGroups.unshift({
+      title: 'ניהול',
+      items: [{ href: '/app/advisor', emoji: '👥', label: 'הלקוחות שלי' }],
+    })
+  }
   if (hasAdvisorLink) {
     visibleGroups.push({
       title: 'פרטיות',
@@ -300,9 +317,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="border-b border-line bg-surface2 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sticky top-0 z-30">
         <div className="flex items-center gap-3 min-w-0">
-          {/* The advisor dashboard and owner-admin screens are their own worlds —
-              the personal-tabs menu is noise there, so the hamburger hides. */}
-          {pathname !== '/app/advisor' && pathname !== '/app/admin' && (
+          {/* The owner-admin screen is its own world (URL-only), so the personal-
+              tabs menu stays hidden there. The advisor dashboard IS now a menu
+              destination ("ניהול · הלקוחות שלי"), so it keeps the hamburger — an
+              advisor needs to round-trip back to their own tabs. */}
+          {pathname !== '/app/admin' && (
             <button
               onClick={() => setDrawerOpen(true)}
               className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
