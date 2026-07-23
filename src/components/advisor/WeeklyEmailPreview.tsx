@@ -1,12 +1,17 @@
 'use client'
 
+import { useState } from 'react'
+import { toast } from 'sonner'
+import { callable } from '@/lib/firebase'
 import {
   fmt, clientTotals, weeklyDigestGroups, isSnapshotable,
   STAGE_LABELS, type MockClient,
 } from '@/lib/advisorMock'
 
-// Screen 4 — a rendered preview of the advisor's weekly digest email. Static:
-// no sending, no scheduling. Composed from the same mock roster.
+// Screen 4 — a preview of the advisor's weekly digest email, plus a "send me now"
+// action that triggers the real server-side digest (sendDigestNow) to the
+// advisor's OWN email. The real email adds budget standing + action flags per
+// client; this preview shows the roster + cashflow at a glance.
 
 interface Props {
   clients:     MockClient[]
@@ -46,15 +51,40 @@ function Group({ icon, title, tone, clients }: { icon: string; title: string; to
 export function WeeklyEmailPreview({ clients, advisorName, onClose }: Props) {
   const g     = weeklyDigestGroups(clients)
   const today = new Date().toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
+  const [busy, setBusy] = useState(false)
+
+  async function sendNow() {
+    setBusy(true)
+    try {
+      const res = await callable<Record<string, never>, { ok: boolean; sent: boolean; clientCount: number; email: string }>('sendDigestNow')({})
+      const { sent, clientCount, email } = res.data
+      if (sent) toast.success(`הסיכום נשלח למייל שלך (${email}) · ${clientCount} לקוחות.`)
+      else if (clientCount === 0) toast.info('אין עדיין לקוחות פעילים לשלוח עליהם סיכום.')
+      else toast.error('השליחה נכשלה — נסה שוב עוד רגע.')
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || 'השליחה נכשלה.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16">
-      <button
-        onClick={onClose}
-        className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors"
-      >
-        ⟵ חזרה לדשבורד
-      </button>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <button
+          onClick={onClose}
+          className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm text-txt hover:border-gold/40 transition-colors"
+        >
+          ⟵ חזרה לדשבורד
+        </button>
+        <button
+          onClick={sendNow}
+          disabled={busy}
+          className="min-h-[44px] rounded-full bg-gold text-surface px-5 text-sm font-bold hover:bg-gold-light transition-colors disabled:opacity-50"
+        >
+          {busy ? 'שולח…' : '📧 שלח לי את הסיכום עכשיו'}
+        </button>
+      </div>
 
       {/* Email frame */}
       <div className="rounded-2xl border border-line bg-surface2 overflow-hidden">
@@ -81,7 +111,9 @@ export function WeeklyEmailPreview({ clients, advisorName, onClose }: Props) {
         </div>
       </div>
 
-      <p className="text-[11px] text-muted-txt text-center">תצוגה מקדימה. המייל יישלח אוטומטית בכל יום ראשון (בשלב מאוחר יותר).</p>
+      <p className="text-[11px] text-muted-txt text-center">
+        תצוגה מקדימה. המייל האמיתי נשלח <b>אליך בלבד</b> (לא ללקוחות) בכל יום ראשון בבוקר, וכולל לכל לקוח גם מצב תקציב והצעות לפעולה לקראת הפגישה. אפשר לשלוח לעצמך עכשיו לבדיקה.
+      </p>
     </div>
   )
 }
