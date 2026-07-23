@@ -26,97 +26,19 @@ function formatDate(iso: string) {
   return `${d}/${m}/${y}`
 }
 
-// ── Next-steps checklist ────────────────────────────────────────────────────
-// "משימות לפגישה הבאה" stays a plain string (persisted as-is + rendered in the
-// PDF export), but we surface it as a checklist: each line is a task and a
-// leading "✓ " marks it done. Toggling / editing / adding / removing all
-// serialize back to the same newline-joined string, so existing notes survive
-// and nothing downstream (sync, PDF) has to change.
-const DONE_RE = /^\s*[✓✔]\s+/
-function taskUid() { return Math.random().toString(36).slice(2) }
-type ChecklistItem = { id: string; text: string; done: boolean }
-
-function parseChecklist(value: string): ChecklistItem[] {
-  return (value ?? '')
-    .split('\n')
-    .filter(line => line.trim() !== '')
-    .map(line => ({ id: taskUid(), done: DONE_RE.test(line), text: line.replace(DONE_RE, '') }))
-}
-function serializeChecklist(items: ChecklistItem[]): string {
-  return items
-    .filter(it => it.text.trim() !== '')
-    .map(it => (it.done ? '✓ ' : '') + it.text.trim())
-    .join('\n')
-}
-
-function NextStepsChecklist({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  // Seeded from `value` once (parent remounts per meeting via key={m.id}). While
-  // editing, local state drives and every change is pushed up for persistence.
-  const [items, setItems] = useState<ChecklistItem[]>(() => parseChecklist(value))
-
-  function commit(next: ChecklistItem[]) {
-    setItems(next)
-    onChange(serializeChecklist(next))
-  }
-  const toggle   = (id: string) => commit(items.map(it => it.id === id ? { ...it, done: !it.done } : it))
-  const editText = (id: string, text: string) => commit(items.map(it => it.id === id ? { ...it, text } : it))
-  const remove   = (id: string) => commit(items.filter(it => it.id !== id))
-  // A fresh empty row lives in local state only until it gets text (serialize
-  // drops empties), so an accidental "add" never persists a blank task.
-  const add = () => setItems(prev => [...prev, { id: taskUid(), text: '', done: false }])
-
-  return (
-    <div className="space-y-1.5">
-      {items.length === 0 && (
-        <p className="text-xs text-muted-txt/70 italic px-1 py-1">אין עדיין משימות — לחצו &quot;הוסף משימה&quot; כדי להתחיל.</p>
-      )}
-      {items.map(it => (
-        <div key={it.id} className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => toggle(it.id)}
-            aria-pressed={it.done}
-            aria-label={it.done ? 'בטל סימון הושלם' : 'סמן כהושלם'}
-            className={`shrink-0 size-7 rounded-md border flex items-center justify-center text-sm transition-colors ${
-              it.done ? 'bg-gold/20 border-gold/60 text-gold' : 'bg-surface border-line hover:border-gold/60'
-            }`}
-          >
-            {it.done ? '✓' : ''}
-          </button>
-          <input
-            value={it.text}
-            onChange={e => editText(it.id, e.target.value)}
-            placeholder="תיאור המשימה…"
-            className={`flex-1 min-w-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:border-gold/60 ${
-              it.done ? 'line-through text-muted-txt' : 'text-txt'
-            }`}
-          />
-          <button
-            type="button"
-            onClick={() => remove(it.id)}
-            aria-label="מחק משימה"
-            className="shrink-0 size-9 flex items-center justify-center rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={add}
-        className="mt-1 text-xs px-3 py-2 rounded-lg border border-dashed border-line text-muted-txt hover:text-gold hover:border-gold/50 transition-colors"
-      >
-        ＋ הוסף משימה
-      </button>
-    </div>
-  )
-}
-
 export default function MeetingsPage() {
-  const { meetings, add, update, remove } = useMeetingsStore()
+  const { meetings, add, update, remove, addTask, toggleTask, updateTaskText, deleteTask } = useMeetingsStore()
   const [filter, setFilter] = useState<MeetingType | 'all'>('all')
   const [openId, setOpenId] = useState<string | null>(null)
   const [exportingId, setExportingId] = useState<string | null>(null)
+  const [newTaskText, setNewTaskText] = useState('')
+
+  function addTaskNow(meetingId: string) {
+    const t = newTaskText.trim()
+    if (!t) return
+    addTask(meetingId, t)
+    setNewTaskText('')
+  }
 
   const filtered = useMemo(() => {
     const list = filter === 'all' ? meetings : meetings.filter(m => m.type === filter)
@@ -326,15 +248,75 @@ export default function MeetingsPage() {
                       />
                     </div>
 
+                    {/* Task checklist — advisor assigns, client checks off. Counted in the weekly digest. */}
+                    {(() => {
+                      const tasks = m.tasks ?? []
+                      const doneCount = tasks.filter(t => t.done).length
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
+                            {tasks.length > 0 && (
+                              <span className="text-[11px] text-gold tabular-nums">{doneCount}/{tasks.length} הושלמו</span>
+                            )}
+                          </div>
+                          <div className="mt-1 space-y-1.5">
+                            {tasks.map(t => (
+                              <div key={t.id} className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={t.done}
+                                  onChange={() => toggleTask(m.id, t.id)}
+                                  className="h-4 w-4 accent-gold shrink-0 cursor-pointer"
+                                  aria-label="סמן כבוצע"
+                                />
+                                <input
+                                  value={t.text}
+                                  onChange={e => updateTaskText(m.id, t.id, e.target.value)}
+                                  className={`flex-1 bg-transparent border-b border-transparent focus:border-line px-0.5 py-1 text-sm focus:outline-none ${t.done ? 'line-through text-muted-txt' : 'text-txt'}`}
+                                  placeholder="תיאור המשימה…"
+                                />
+                                <button
+                                  onClick={() => deleteTask(m.id, t.id)}
+                                  className="text-muted-txt hover:text-expense text-sm shrink-0 w-6 h-6 flex items-center justify-center"
+                                  aria-label="מחק משימה"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                            {tasks.length === 0 && (
+                              <p className="text-xs text-muted-txt/70">אין עדיין משימות. הוסיפו משימה למטה.</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              value={newTaskText}
+                              onChange={e => setNewTaskText(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTaskNow(m.id) } }}
+                              placeholder="הוסף משימה חדשה…"
+                              className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
+                            />
+                            <button
+                              onClick={() => addTaskNow(m.id)}
+                              className="shrink-0 rounded-lg bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 px-4 py-2 text-sm font-semibold transition-colors"
+                            >
+                              הוסף
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
-                      <div className="mt-1.5">
-                        <NextStepsChecklist
-                          key={m.id}
-                          value={m.nextSteps ?? ''}
-                          onChange={v => update(m.id, { nextSteps: v })}
-                        />
-                      </div>
+                      <label className="text-xs font-semibold text-muted-txt">הערות נוספות</label>
+                      <textarea
+                        value={m.nextSteps ?? ''}
+                        onChange={e => update(m.id, { nextSteps: e.target.value })}
+                        rows={3}
+                        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
+                        placeholder="הערות חופשיות (לא נספרות כמשימות)…"
+                      />
                     </div>
 
                     <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
