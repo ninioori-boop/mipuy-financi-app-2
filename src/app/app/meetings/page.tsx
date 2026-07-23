@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useMeetingsStore, MEETING_LABELS, type MeetingType, type Meeting } from '@/stores/meetingsStore'
+import { useSyncStore } from '@/stores/syncStore'
 
 const TYPES: MeetingType[] = ['mapping', 'budget', 'review', 'plan']
 
@@ -27,11 +28,18 @@ function formatDate(iso: string) {
 }
 
 export default function MeetingsPage() {
-  const { meetings, add, update, remove, addTask, toggleTask, updateTaskText, deleteTask } = useMeetingsStore()
+  const { meetings, add, update, remove, addTask, toggleTask, updateTaskText, deleteTask, migrateLegacyTasks } = useMeetingsStore()
+  const hydrated = useSyncStore(s => s.hydrated)
   const [filter, setFilter] = useState<MeetingType | 'all'>('all')
   const [openId, setOpenId] = useState<string | null>(null)
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [newTaskText, setNewTaskText] = useState('')
+
+  // Once the client's data has loaded, convert any legacy free-text "next steps"
+  // (which WAS the tasks list) into real checkable tasks. Idempotent — no-op once
+  // migrated. Runs for the advisor's own account, and for a client's data while
+  // the advisor edits it (persisted to the client by DataSync in edit mode).
+  useEffect(() => { if (hydrated) migrateLegacyTasks() }, [hydrated, migrateLegacyTasks])
 
   function addTaskNow(meetingId: string) {
     const t = newTaskText.trim()

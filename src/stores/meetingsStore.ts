@@ -58,9 +58,16 @@ interface MeetingsState {
   toggleTask:     (meetingId: string, taskId: string) => void
   updateTaskText: (meetingId: string, taskId: string, text: string) => void
   deleteTask:     (meetingId: string, taskId: string) => void
+
+  /** One-time migration: meetings created before the checklist existed stored
+   *  their tasks as free-text lines in `nextSteps` (the field WAS labelled
+   *  "משימות לפגישה הבאה"). Convert each non-empty line into a checkable task and
+   *  clear nextSteps, so existing client tasks regain their checkbox. Idempotent
+   *  (skips meetings that already have tasks) — safe to call on every load. */
+  migrateLegacyTasks: () => void
 }
 
-export const useMeetingsStore = create<MeetingsState>((set) => ({
+export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   meetings: [],
 
   add: (type) => {
@@ -130,4 +137,18 @@ export const useMeetingsStore = create<MeetingsState>((set) => ({
           : m,
       ),
     })),
+
+  migrateLegacyTasks: () => {
+    let changed = false
+    const next = get().meetings.map(m => {
+      if ((m.tasks ?? []).length > 0) return m            // already migrated / has tasks
+      const legacy = (m.nextSteps ?? '').trim()
+      if (!legacy) return m                                // nothing to convert
+      const tasks = legacy.split('\n').map(l => l.trim()).filter(Boolean).map(text => ({ id: uid(), text, done: false }))
+      if (!tasks.length) return m
+      changed = true
+      return { ...m, tasks, nextSteps: '', updatedAt: Date.now() }   // move lines → tasks, clear the text
+    })
+    if (changed) set({ meetings: next })                   // only persist when something actually moved
+  },
 }))
