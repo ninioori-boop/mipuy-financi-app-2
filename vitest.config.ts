@@ -10,6 +10,9 @@ export default defineConfig({
     // (reading 'config')" at import time), failing all files. Sequential is
     // reliable and fast enough for this suite (~9s, 106 tests).
     fileParallelism: false,
+    // functions/test/* are Firestore-rules tests — they need the Firebase
+    // emulator and functions/ deps, and run separately (see docs/security-hardening.md).
+    exclude: ['**/node_modules/**', 'functions/**'],
   },
   resolve: {
     alias: {
