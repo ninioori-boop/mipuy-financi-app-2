@@ -110,15 +110,42 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [])
 
-  // Advisor-linked clients get a "פרטיות ושיתוף" menu entry (revoke/grant
-  // sharing). One cheap own-doc read; everyone else sees nothing new.
+  // Three cheap own-doc reads that drive conditional menu entries; all fail-open,
+  // so a regular client (none of the docs exist) sees no change:
+  //  - clientLinks/{uid}     → "פרטיות · שיתוף עם היועץ" (the client is advisor-linked)
+  //  - advisors/{uid}        → "ניהול · הלקוחות שלי" (the user IS an advisor — the
+  //    real role, NOT hasLabAccess, so Rotem and future advisors get it too)
+  //  - platformOwners/{uid}  → "ניהול · ניהול פלטפורמה" (the owner oversight screen)
   const [hasAdvisorLink, setHasAdvisorLink] = useState(false)
+  const [isAdvisorRole, setIsAdvisorRole]   = useState(false)
+  const [isFirmOwner, setIsFirmOwner]       = useState(false)   // advisor whose advisors/{uid}.role === 'owner' (manages a practice)
+  const [isOwnerRole, setIsOwnerRole]       = useState(false)
   useEffect(() => {
-    if (!user) { setHasAdvisorLink(false); return }
+    if (!user) { setHasAdvisorLink(false); setIsAdvisorRole(false); setIsFirmOwner(false); setIsOwnerRole(false); return }
     let alive = true
-    getDoc(doc(db, 'clientLinks', user.uid))
-      .then(snap => { if (alive) setHasAdvisorLink(snap.exists()) })
-      .catch(() => { if (alive) setHasAdvisorLink(false) })
+    Promise.all([
+      getDoc(doc(db, 'clientLinks', user.uid)).catch(() => null),
+      getDoc(doc(db, 'advisors', user.uid)).catch(() => null),
+      getDoc(doc(db, 'platformOwners', user.uid)).catch(() => null),
+    ]).then(async ([linkSnap, advSnap, ownerSnap]) => {
+      if (!alive) return
+      const adv = advSnap?.exists() ? advSnap.data() : null
+      setHasAdvisorLink(!!linkSnap?.exists())
+      setIsAdvisorRole(!!adv)
+      setIsOwnerRole(!!ownerSnap?.exists())
+      // Firm page is for REAL firms only: the caller owns a practice that has
+      // MORE than one advisor. A freelancer (solo practice, still role 'owner')
+      // gets no firm page — just their advisor dashboard.
+      if (adv?.role === 'owner' && adv.practiceId) {
+        try {
+          const p = await getDoc(doc(db, 'practices', adv.practiceId))
+          const uids = p.exists() ? p.data().advisorUids : null
+          if (alive) setIsFirmOwner(Array.isArray(uids) && uids.length > 1)
+        } catch { if (alive) setIsFirmOwner(false) }
+      } else if (alive) {
+        setIsFirmOwner(false)
+      }
+    })
     return () => { alive = false }
   }, [user])
 
@@ -150,6 +177,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const visibleGroups = groups
     .map(g => ({ ...g, items: g.items.filter(item => !item.advisorOnly || isAdvisor) }))
     .filter(g => g.items.length > 0)
+  // "ניהול" group at the TOP — advisors get the client dashboard, the platform
+  // owner also gets the oversight screen. Regular clients get neither.
+  const manageItems: TabItem[] = []
+  if (isAdvisorRole) manageItems.push({ href: '/app/advisor', emoji: '👥', label: 'הלקוחות שלי' })
+  if (isFirmOwner)   manageItems.push({ href: '/app/firm',    emoji: '🏢', label: 'המשרד שלי' })
+  if (isOwnerRole)   manageItems.push({ href: '/app/admin',   emoji: '🛡️', label: 'ניהול פלטפורמה' })
+  if (manageItems.length > 0) {
+    visibleGroups.unshift({ title: 'ניהול', items: manageItems })
+  }
   if (hasAdvisorLink) {
     visibleGroups.push({
       title: 'פרטיות',
@@ -300,17 +336,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="border-b border-line bg-surface2 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2 sticky top-0 z-30">
         <div className="flex items-center gap-3 min-w-0">
-          {/* The advisor dashboard and owner-admin screens are their own worlds —
-              the personal-tabs menu is noise there, so the hamburger hides. */}
-          {pathname !== '/app/advisor' && pathname !== '/app/admin' && (
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
-              aria-label="פתח תפריט"
-            >
-              ☰
-            </button>
-          )}
+          {/* Both the advisor dashboard and the owner-admin screen are now menu
+              destinations (the "ניהול" group), so the hamburger shows everywhere —
+              advisors/owners need to round-trip back to their own tabs. */}
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="text-txt text-xl leading-none w-9 h-9 flex items-center justify-center rounded-lg border border-line hover:bg-surface3 hover:border-gold/60 transition-colors"
+            aria-label="פתח תפריט"
+          >
+            ☰
+          </button>
           <span className="font-bold text-gold tracking-wide truncate text-base sm:text-xl">
             <span className="hidden sm:inline">The Home Economist</span>
             <span className="sm:hidden">THE</span>

@@ -4,7 +4,7 @@ import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firesto
 import { db } from '@/lib/firebase'
 import type { Snapshot } from '@/lib/dataSync'
 import {
-  emptyFin, nameFromEmail, clientTotals,
+  emptyFin, nameFromEmail, clientTotals, STAGE_LABELS,
   type MockClient, type MockClientFinancials, type Lifecycle, type ClientFlag,
 } from '@/lib/advisorMock'
 
@@ -20,8 +20,18 @@ interface ClientLink {
   invitedEmail: string
   invitedByUid: string
   practiceId: string
+  access?: 'read' | 'write'
+  requestedAccess?: 'write'
+  stage?: string          // one of STAGE_LABELS; set by setClientStage (advisor)
   updatedAt?: unknown
   statusChangedAt?: unknown
+}
+
+/** Map the stored stage STRING to the numeric MockClient.stage (index in
+ *  STAGE_LABELS). Unknown/absent → 0 ('היכרות'). */
+function stageIndex(stage?: string): MockClient['stage'] {
+  const i = stage ? STAGE_LABELS.indexOf(stage as (typeof STAGE_LABELS)[number]) : -1
+  return (i >= 0 ? i : 0) as MockClient['stage']
 }
 
 const msToIso = (ms?: number) => (ms ? new Date(ms).toISOString().slice(0, 10) : '')
@@ -66,14 +76,6 @@ function deriveFlags(fin: MockClientFinancials): ClientFlag[] {
   return out
 }
 
-/** Rough progress stage from data presence, until a real stage model exists. */
-function deriveStage(fin: MockClientFinancials): MockClient['stage'] {
-  const hasMapping = fin.income.length + fin.fixed.length + fin.variable.length > 0
-  const hasGoals = fin.goals.some(g => g.name || g.required > 0)
-  if (!hasMapping) return 1
-  return hasGoals ? 3 : 2
-}
-
 const LIFECYCLE_FROM_STATUS: Record<string, Lifecycle> = {
   pending: 'pending', active: 'active', declined: 'declined', revoked: 'revoked',
 }
@@ -95,10 +97,12 @@ export async function listAdvisorClients(advisorUid: string): Promise<MockClient
       name: nameFromEmail(l.invitedEmail),
       email: l.invitedEmail,
       lifecycle,
-      stage: 0,
+      stage: stageIndex(l.stage),
       lastActivity: msToIso(tsToMs(l.statusChangedAt) ?? tsToMs(l.updatedAt)),
       flags: [],
       fin: emptyFin(),
+      access: l.access ?? 'read',
+      requestedAccess: l.requestedAccess,
     }
 
     if (lifecycle === 'active' && l.clientUid) {
@@ -108,7 +112,6 @@ export async function listAdvisorClients(advisorUid: string): Promise<MockClient
         const fin = snapshotToClientFinancials(data)
         client.fin = fin
         client.flags = deriveFlags(fin)
-        client.stage = deriveStage(fin)
         const upd = msToIso(tsToMs(uDoc.data()?.updatedAt))
         if (upd) { client.clientLastSeen = upd; client.lastActivity = upd }
       } catch {

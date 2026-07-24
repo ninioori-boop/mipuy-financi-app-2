@@ -1,19 +1,25 @@
 'use client'
 
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
-import { fmt, isSnapshotable, neglectFlags, type MockClient } from '@/lib/advisorMock'
+import { fmt, isSnapshotable, neglectFlags, STAGE_LABELS, type MockClient } from '@/lib/advisorMock'
 import { LifecycleBadge, NeglectPill, FlagPill } from './StatusPills'
 import { Avatar } from './Avatar'
 
-// Screen 3 — the advisor "enters" a client's account. Prototype: read-only,
-// fed by mock data, reusing the real CashflowSummary. The impersonation banner
-// and the "someone else editing" warning are visual only (no real access).
+// Screen 3 — the advisor "enters" a client's account. Real data: view + (with
+// the client's edit consent) edit. The edit controls below drive the real
+// impersonation flow via the parent's handlers.
 
 interface Props {
   client:      MockClient
   onExit:      () => void
   /** Enter read-only view-as-client mode (all tabs show this client's data). */
-  onViewFull?: () => void
+  onViewFull?:   () => void
+  /** Enter EDIT mode — only wired when the client granted access:'write'. */
+  onEditFull?:   () => void
+  /** Ask the client for edit access (sets requestedAccess:'write'). */
+  onRequestEdit?: () => void
+  /** Update the engagement stage after a meeting. */
+  onSetStage?:   (stage: string) => void
 }
 
 const dateFmt = (iso: string) => {
@@ -22,11 +28,27 @@ const dateFmt = (iso: string) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('he-IL', { month: '2-digit', year: 'numeric' })
 }
 
-export function ClientDetailView({ client, onExit, onViewFull }: Props) {
+const FINAL_STAGE = 'סוף תהליך'
+
+export function ClientDetailView({ client, onExit, onViewFull, onEditFull, onRequestEdit, onSetStage }: Props) {
   const f = client.fin
   const snap = isSnapshotable(client)
   const goals = f.goals.filter(g => g.name || g.required > 0)
   const neg = neglectFlags(client)
+
+  const isActive    = client.lifecycle === 'active'
+  const canEdit     = client.access === 'write'
+  const editPending = !canEdit && client.requestedAccess === 'write'
+  const currentStage = STAGE_LABELS[client.stage] ?? STAGE_LABELS[0]
+
+  function onStageChange(next: string) {
+    if (!onSetStage || next === currentStage) return
+    if (next === FINAL_STAGE) {
+      const ok = window.confirm('סימון "סוף תהליך" יסגור אוטומטית את הרשאת העריכה שלך אצל הלקוח. להמשיך?')
+      if (!ok) return
+    }
+    onSetStage(next)
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6 pb-16">
@@ -36,18 +58,47 @@ export function ClientDetailView({ client, onExit, onViewFull }: Props) {
         <div className="flex items-center gap-3 min-w-0">
           <Avatar name={client.name} size="lg" />
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wider text-gold/80">אתה עורך את החשבון של</div>
+            <div className="text-[11px] uppercase tracking-wider text-gold/80">כרטיס הלקוח של</div>
             <div className="text-base font-bold text-txt truncate">{client.name}</div>
             <div className="text-xs text-muted-txt truncate" dir="ltr">{client.email}</div>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Access badge */}
+          {snap && (
+            <span className={`text-xs font-semibold rounded-full px-3 py-1.5 ${
+              canEdit ? 'bg-income/15 text-income'
+                : editPending ? 'bg-gold/15 text-gold'
+                : 'bg-surface border border-line text-muted-txt'
+            }`}>
+              {canEdit ? '✏️ עריכה מאושרת' : editPending ? '⏳ בקשת עריכה נשלחה' : '👁️ צפייה בלבד'}
+            </span>
+          )}
+          {/* View — always available on a snapshotable client */}
           {snap && onViewFull && (
             <button
               onClick={onViewFull}
-              className="min-h-[44px] rounded-full bg-gold text-surface px-4 text-sm font-bold hover:bg-gold-light transition-colors whitespace-nowrap"
+              className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm font-semibold text-txt hover:border-gold/40 transition-colors whitespace-nowrap"
             >
               🖥️ צפה בכל הטאבים
+            </button>
+          )}
+          {/* Edit — only when the client granted write access */}
+          {snap && canEdit && onEditFull && (
+            <button
+              onClick={onEditFull}
+              className="min-h-[44px] rounded-full bg-gold text-surface px-4 text-sm font-bold hover:bg-gold-light transition-colors whitespace-nowrap"
+            >
+              ✏️ ערוך את החשבון
+            </button>
+          )}
+          {/* Request edit — active client, still read, no pending request */}
+          {snap && isActive && !canEdit && !editPending && onRequestEdit && (
+            <button
+              onClick={onRequestEdit}
+              className="min-h-[44px] rounded-full bg-surface border border-gold/40 px-4 text-sm font-semibold text-gold hover:bg-gold/10 transition-colors whitespace-nowrap"
+            >
+              בקש הרשאת עריכה
             </button>
           )}
           <button
@@ -58,6 +109,26 @@ export function ClientDetailView({ client, onExit, onViewFull }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Engagement-stage control — advisor updates it after each meeting */}
+      {snap && isActive && onSetStage && (
+        <div className="rounded-2xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wider text-gold">שלב הליווי</div>
+            <p className="text-xs text-muted-txt mt-0.5">עדכן אחרי כל פגישה. סימון &quot;סוף תהליך&quot; סוגר אוטומטית את הרשאת העריכה.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-muted-txt">שלב:</span>
+            <select
+              value={currentStage}
+              onChange={e => onStageChange(e.target.value)}
+              className="min-h-[44px] rounded-full bg-surface border border-line px-4 text-sm font-semibold text-txt focus:border-gold/50 focus:outline-none"
+            >
+              {STAGE_LABELS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
 
       {/* Client meta strip */}
       <div className="rounded-2xl border border-line bg-surface2 p-4 flex items-center justify-between gap-3 flex-wrap">
@@ -114,7 +185,11 @@ export function ClientDetailView({ client, onExit, onViewFull }: Props) {
             </div>
           </div>
 
-          <p className="text-[11px] text-muted-txt text-center">תצוגה מוקטנת לצורך הדגמת העיצוב. בגרסה המלאה כאן ייערכו המיפוי, התקציב והיעדים ישירות.</p>
+          <p className="text-[11px] text-muted-txt text-center">
+            {canEdit
+              ? 'לעריכת המיפוי, התקציב והיעדים ישירות, היכנס עם "ערוך את החשבון".'
+              : 'סקירה מהירה. לצפייה מלאה בכל הטאבים השתמש ב"צפה בכל הטאבים".'}
+          </p>
         </>
       ) : (
         <div className="rounded-2xl border border-line bg-surface2 p-8 text-center space-y-2">

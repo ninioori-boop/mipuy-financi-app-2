@@ -7,7 +7,13 @@
  * Cleanup afterwards with: npx tsx scripts/cleanup-impersonation-test.ts
  *
  * Requires service-account-key.json at project root (gitignored).
- *   npx tsx scripts/setup-impersonation-test.ts
+ *   npx tsx scripts/setup-impersonation-test.ts          # view tier (access:'read')
+ *   npx tsx scripts/setup-impersonation-test.ts --write   # edit tier (access:'write', v2)
+ *
+ * The --write variant seeds the link at the WRITE tier (as if the client had
+ * accepted an edit request) so the Stage-3 advisor-edit path can be verified:
+ * an advisor edit must land in the CLIENT's doc + version history, and the
+ * advisor's own doc (income 99999) must stay untouched. Probe: check-client-write.ts.
  */
 import { cert, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -52,10 +58,15 @@ async function main() {
   await db.collection("advisors").doc(advisorUid).set(
     { email: ADVISOR_EMAIL, practiceId, role: "owner", createdAt: FieldValue.serverTimestamp() }, { merge: true });
 
-  // Active consented link advisor→client.
+  // Active consented link advisor→client. --write seeds the WRITE tier.
+  const writeTier = process.argv.includes("--write");
   await db.collection("clientLinks").doc(clientUid).set({
     status: "active", clientUid, invitedEmail: CLIENT_EMAIL, invitedByUid: advisorUid,
-    practiceId, access: "read", consentVersion: "v1",
+    practiceId,
+    access: writeTier ? "write" : "read",
+    consentVersion: writeTier ? "v2" : "v1",
+    ...(writeTier ? { editConsentAt: FieldValue.serverTimestamp() } : {}),
+    stage: "מיפוי",
     consentAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
     statusChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
@@ -106,7 +117,7 @@ async function main() {
   await db.collection("users").doc(advisorUid).set(
     { data: advisorSnapshot, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
-  console.log("✅ fixture ready");
+  console.log("✅ fixture ready" + (writeTier ? " (WRITE tier — advisor may edit)" : " (view tier)"));
   console.log("advisorUid=" + advisorUid);
   console.log("clientUid=" + clientUid);
 }

@@ -53,3 +53,19 @@ scripts/businessdb-candidates/.benchmark-baseline.json
 clients.md
 clients.html
 .export-clients.log
+
+# functions deps
+functions/node_modules/
+
+# business/private documents at repo root — live in OneDrive/Drive, not in git
+hatzaa-*.md
+hatzaa-*.html
+hatzaa-*.docx
+hoskem-*.md
+hoskem-*.html
+proposal-*.html
+costs-operating.html
+invoicing/
+play-store-assets/
+*.jpeg
+*.jpg

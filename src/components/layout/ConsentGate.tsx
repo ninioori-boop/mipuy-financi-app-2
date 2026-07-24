@@ -22,25 +22,41 @@ export function ConsentGate({ children }: { children: ReactNode }) {
 
   const [status, setStatus] = useState<'checking' | 'clear' | 'pending'>('clear')
   const [invite, setInvite] = useState<PendingInvite | null>(null)
+  const [variant, setVariant] = useState<'view' | 'edit'>('view')
 
   useEffect(() => {
     const email = user?.email?.toLowerCase()
-    if (!email) { setStatus('clear'); return }
+    const uid   = user?.uid
+    if (!email || !uid) { setStatus('clear'); return }
     let alive = true
     setStatus('checking')
-    getDoc(doc(db, 'clientLinks', `pending_${email}`))
-      .then(snap => {
+    // Two independent reads: the pre-registration invite (pending_{email}) and
+    // the active link keyed by uid (which carries an edit REQUEST). A brand-new
+    // view invite takes priority; otherwise an outstanding edit request shows.
+    Promise.all([
+      getDoc(doc(db, 'clientLinks', `pending_${email}`)).catch(() => null),
+      getDoc(doc(db, 'clientLinks', uid)).catch(() => null),
+    ])
+      .then(([pendingSnap, linkSnap]) => {
         if (!alive) return
-        if (snap.exists() && snap.data().status === 'pending') {
-          setInvite({ consentVersion: snap.data().consentVersion || 'v1' })
+        if (pendingSnap?.exists() && pendingSnap.data().status === 'pending') {
+          setInvite({ consentVersion: pendingSnap.data().consentVersion || 'v1' })
+          setVariant('view')
           setStatus('pending')
-        } else {
-          setStatus('clear')
+          return
         }
+        const l = linkSnap?.exists() ? linkSnap.data() : null
+        if (l && l.status === 'active' && l.requestedAccess === 'write' && l.access !== 'write') {
+          setInvite({ consentVersion: l.consentVersion || 'v2' })
+          setVariant('edit')
+          setStatus('pending')
+          return
+        }
+        setStatus('clear')
       })
       .catch(() => { if (alive) setStatus('clear') }) // fail-open — never block the app
     return () => { alive = false }
-  }, [user?.email])
+  }, [user?.email, user?.uid])
 
   // No user or a public route → app renders normally (AuthProvider owns /auth redirects).
   if (!user || isPublic) return <>{children}</>
@@ -49,7 +65,7 @@ export function ConsentGate({ children }: { children: ReactNode }) {
     return <div className="min-h-[100dvh] grid place-items-center text-muted-txt">טוען…</div>
   }
   if (status === 'pending' && invite) {
-    return <ConsentScreen invite={invite} onResolved={() => setStatus('clear')} />
+    return <ConsentScreen invite={invite} variant={variant} onResolved={() => setStatus('clear')} />
   }
   return <>{children}</>
 }

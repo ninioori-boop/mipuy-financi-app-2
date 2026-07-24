@@ -25,6 +25,8 @@ import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useRecurringStore, type RecurringRule } from '@/stores/recurringStore'
+import { useSubscriptionPrefsStore, type DismissedSub } from '@/stores/subscriptionPrefsStore'
+import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -88,6 +90,12 @@ export interface Snapshot {
     rules:  ReturnType<typeof useRecurringStore.getState>['rules']
     posted: ReturnType<typeof useRecurringStore.getState>['posted']
   }
+  subscriptionPrefs: {
+    dismissed: ReturnType<typeof useSubscriptionPrefsStore.getState>['dismissed']
+  }
+  budgetReminder: {
+    dismissed: ReturnType<typeof useBudgetReminderStore.getState>['dismissed']
+  }
   business: {
     businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
     revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
@@ -133,6 +141,8 @@ export function collectSnapshot(): Snapshot {
   const cb = useCategoryBudgetStore.getState()
   const clp = useClientProfileStore.getState()
   const rc = useRecurringStore.getState()
+  const sp = useSubscriptionPrefsStore.getState()
+  const br = useBudgetReminderStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
 
@@ -166,6 +176,8 @@ export function collectSnapshot(): Snapshot {
     categoryBudgets: { budgets: cb.budgets },
     clientProfile: { hasBusiness: clp.hasBusiness },
     recurring: { rules: rc.rules, posted: rc.posted },
+    subscriptionPrefs: { dismissed: sp.dismissed },
+    budgetReminder: { dismissed: br.dismissed },
     business: {
       businessType: b.businessType,
       revenue: b.revenue, cogs: b.cogs, opex: b.opex,
@@ -372,6 +384,34 @@ export function applySnapshot(raw: unknown): void {
     })
   }
 
+  // subscription prefs — merchants the client dismissed from the detected list
+  // (cancelled, or "not a subscription"). Old snapshots lack the key → guard
+  // skips it and the store keeps its default (empty). Each entry is sanitized to
+  // a { reason, name } shape so a malformed value can't poison the list.
+  if (isObject(raw.subscriptionPrefs) && isObject(raw.subscriptionPrefs.dismissed)) {
+    const src = raw.subscriptionPrefs.dismissed as Record<string, unknown>
+    const dismissed: Record<string, DismissedSub> = {}
+    for (const [key, v] of Object.entries(src)) {
+      if (!isObject(v)) continue
+      const reason = v.reason === 'not-sub' ? 'not-sub' : 'cancelled'
+      const name   = typeof v.name === 'string' ? v.name : key
+      dismissed[key] = { reason, name }
+    }
+    useSubscriptionPrefsStore.setState({ dismissed })
+  }
+
+  // budget reminder — target months whose "review your budget" nudge was already
+  // handled. Old snapshots lack the key → guard skips it. Coerce to a clean
+  // { "YYYY-MM" -> true } map so a malformed value can't poison the reminder.
+  if (isObject(raw.budgetReminder) && isObject(raw.budgetReminder.dismissed)) {
+    const src = raw.budgetReminder.dismissed as Record<string, unknown>
+    const dismissed: Record<string, true> = {}
+    for (const [ym, v] of Object.entries(src)) {
+      if (v) dismissed[ym] = true
+    }
+    useBudgetReminderStore.setState({ dismissed })
+  }
+
   // business
   if (isObject(raw.business)) {
     const b = raw.business as Partial<Snapshot['business']>
@@ -443,6 +483,8 @@ export function resetAllStores(): void {
   useCategoryBudgetStore.setState({ budgets: {} })
   useClientProfileStore.setState({ hasBusiness: null })
   useRecurringStore.setState({ rules: [], posted: {} })
+  useSubscriptionPrefsStore.setState({ dismissed: {} })
+  useBudgetReminderStore.setState({ dismissed: {} })
   useBusinessStore.setState({
     businessType: DEFAULT_BUSINESS.businessType,
     revenue: [], cogs: [], opex: [],

@@ -61,11 +61,11 @@ beforeEach(async () => {
   });
 });
 
-async function setLink(status) {
+async function setLink(status, access = "read") {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), "clientLinks", CLIENT), {
       status, clientUid: CLIENT, invitedEmail: CLIENT_EMAIL,
-      invitedByUid: ADVISOR, practiceId: "p1", access: "read",
+      invitedByUid: ADVISOR, practiceId: "p1", access,
     });
   });
 }
@@ -102,9 +102,46 @@ test("a DIFFERENT advisor cannot read the client even when active", async () => 
   await assertFails(getDoc(doc(authed(OTHER_ADVISOR, "b@example.com"), "users", CLIENT)));
 });
 
-test("advisor CANNOT write the client doc (read-only stage)", async () => {
-  await setLink("active");
+test("advisor CANNOT write the client doc at READ tier", async () => {
+  await setLink("active", "read");
   await assertFails(setDoc(doc(authed(ADVISOR, ADVISOR_EMAIL), "users", CLIENT), { data: { hacked: 1 } }, { merge: true }));
+});
+
+// ── Advisor WRITE tier (Stage 3) ────────────────────────────────────────────
+test("advisor WRITES client doc + versions when active link is access:'write'", async () => {
+  await setLink("active", "write");
+  const advDb = authed(ADVISOR, ADVISOR_EMAIL);
+  await assertSucceeds(setDoc(doc(advDb, "users", CLIENT), { data: { edited: 1 } }, { merge: true }));
+  await assertSucceeds(setDoc(doc(advDb, "users", CLIENT, "versions", "v1"), { savedAt: 1, snapshot: {}, size: 2 }));
+  // still reads it too
+  await assertSucceeds(getDoc(doc(advDb, "users", CLIENT)));
+});
+
+test("advisor with write tier but NON-active link cannot write", async () => {
+  for (const s of ["pending", "declined", "revoked"]) {
+    await setLink(s, "write");
+    await assertFails(setDoc(doc(authed(ADVISOR, ADVISOR_EMAIL), "users", CLIENT), { data: { x: 1 } }, { merge: true }));
+  }
+});
+
+test("a DIFFERENT advisor cannot write even at write tier", async () => {
+  await setLink("active", "write");
+  await assertFails(setDoc(doc(authed(OTHER_ADVISOR, "b@example.com"), "users", CLIENT), { data: { x: 1 } }, { merge: true }));
+});
+
+test("owner still writes own doc + versions at write-tier-enabled rules", async () => {
+  await setLink("active", "write");
+  const clientDb = authed(CLIENT, CLIENT_EMAIL);
+  await assertSucceeds(setDoc(doc(clientDb, "users", CLIENT), { data: { mine: 1 }, updatedAt: 2 }, { merge: true }));
+  await assertSucceeds(setDoc(doc(clientDb, "users", CLIENT, "versions", "own1"), { savedAt: 2, snapshot: {}, size: 1 }));
+});
+
+test("advisor cannot write an unrelated random user's doc", async () => {
+  await setLink("active", "write");
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", "randomUser"), { data: {}, updatedAt: 1 });
+  });
+  await assertFails(setDoc(doc(authed(ADVISOR, ADVISOR_EMAIL), "users", "randomUser"), { data: { x: 1 } }, { merge: true }));
 });
 
 test("client A cannot read client B", async () => {

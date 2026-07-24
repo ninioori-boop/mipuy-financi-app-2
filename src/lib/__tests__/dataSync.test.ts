@@ -109,7 +109,7 @@ function populateAllStores() {
     meetings: [{
       id: 'mt1', type: 'mapping', date: '2026-06-01',
       title: 'session 1', summary: 'first meeting',
-      actionItems: 'review docs', nextSteps: 'budget plan',
+      actionItems: 'review docs', nextSteps: 'budget plan', tasks: [],
       prepNotes: 'prep points', createdAt: 1717200000000, updatedAt: 1717200000000,
     }],
   })

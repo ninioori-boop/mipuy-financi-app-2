@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
@@ -9,8 +9,12 @@ import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
+import { EditEntrySheet } from '@/components/expenses/EditEntrySheet'
+import { SmartBudgetSuggest } from '@/components/expenses/SmartBudgetSuggest'
 import { useClientMode } from '@/hooks/useClientMode'
 import { useRecurringStore } from '@/stores/recurringStore'
+import { computeBudgetStatus } from '@/lib/budgetStatus'
+import { notifyBudget } from '@/lib/budgetToast'
 
 function today() {
   const d = new Date()
@@ -41,6 +45,12 @@ function dayLabel(iso: string): string {
 const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
+// Entries sitting on these payment-method placeholders carry a generic string
+// ("העברה בביט", "משיכת מזומן") as their "merchant" — not a real business.
+// Learning it would override the placeholder for every future Bit/ATM charge,
+// and through the shared pool poison every account. Fix the entry, never learn.
+const NO_LEARN_CATS = new Set(['ביט ללא מעקב', 'מזומן ללא מעקב'])
+
 export default function ExpensesPage() {
   const router = useRouter()
   const clientMode = useClientMode()   // in-app: declutter for the phone
@@ -53,10 +63,20 @@ export default function ExpensesPage() {
   const [selMonth, setSelMonth] = useState(currentMonth())
   const [showBudgetEditor, setShowBudgetEditor] = useState(false)
   const [showRecurring, setShowRecurring] = useState(false)
+  const [showAllBudgetCats, setShowAllBudgetCats] = useState(false)
   const [amount, setAmount]     = useState('')
   const [category, setCategory] = useState('')
   const [note, setNote]         = useState('')
   const [date, setDate]         = useState(today())
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Deep-link from the home budget-review reminder: #budget opens the editor.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#budget') {
+      setShowBudgetEditor(true)
+    }
+  }, [])
+  const editingEntry = editingId ? entries.find(e => e.id === editingId) ?? null : null
 
   // Recurring-rule add form
   const [rName, setRName] = useState('')
@@ -90,20 +110,11 @@ export default function ExpensesPage() {
     toast.success(`נרשם: ${icon(category)} ${category} · ${fmt(amt)}`)
 
     // Budget alert — does this expense push the category near/over its monthly cap?
-    // `entries` here is the pre-add list (closure), so + rounded = the new total.
-    const budget = budgets[category]
-    if (budget) {
-      const ym = date.slice(0, 7)
-      const spent = entries
-        .filter(e => e.category === category && e.date.slice(0, 7) === ym)
-        .reduce((s, e) => s + e.amount, 0) + rounded
-      const pct = spent / budget
-      if (pct >= 1) {
-        toast.error(`⚠️ חריגה מהתקציב ל${category}: ${fmt(spent)} מתוך ${fmt(budget)} (${Math.round(pct * 100)}%)`)
-      } else if (pct >= 0.8) {
-        toast.warning(`מתקרב לתקציב ל${category}: ${Math.round(pct * 100)}% (${fmt(spent)} מתוך ${fmt(budget)})`)
-      }
-    }
+    // `entries` here is the pre-add list (closure), so addedAmount folds in the new charge.
+    notifyBudget(
+      computeBudgetStatus({ budgets, entries, category, addedAmount: rounded, ym: date.slice(0, 7) }),
+      category,
+    )
   }
 
   const monthEntries = useMemo(
@@ -136,11 +147,14 @@ export default function ExpensesPage() {
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
   }, [entries, selMonth])
 
-  // Auto-captured entries the categorizer couldn't place (landed on 'שונות',
-  // note carries the ingestion #ref) — surfaced for a one-tap fix that learns.
+  // Auto-captured entries that need a human to pick the right category — the
+  // catch-all 'שונות' plus the payment-method placeholders ('ביט ללא מעקב',
+  // 'מזומן ללא מעקב') that Bit/cash transfers land on. Note carries the
+  // ingestion #ref. Surfaced for a one-tap fix that also learns for next time.
+  const REVIEW_CATS = useMemo(() => new Set(['שונות', 'ביט ללא מעקב', 'מזומן ללא מעקב']), [])
   const pendingReview = useMemo(
-    () => monthEntries.filter(e => e.category === 'שונות' && / #\S+$/.test(e.note)),
-    [monthEntries],
+    () => monthEntries.filter(e => REVIEW_CATS.has(e.category) && / #\S+$/.test(e.note)),
+    [monthEntries, REVIEW_CATS],
   )
 
   // One-tap suggestion chips: the user's most-used categories, padded with
@@ -155,11 +169,19 @@ export default function ExpensesPage() {
     return [...new Set([...top, ...defaults])].slice(0, 6)
   }, [entries])
 
-  function fixCategory(id: string, note: string, cat: string) {
+  // Default the add-form category to the user's top category once (while still
+  // empty), so the hot path is just "type amount → Enter". Once the user picks a
+  // category it sticks — handleAdd keeps category+date between adds.
+  useEffect(() => {
+    if (!category && suggestedCats.length > 0) setCategory(suggestedCats[0])
+  }, [suggestedCats, category])
+
+  function fixCategory(id: string, note: string, fromCat: string, cat: string) {
     update(id, { category: cat })
     const merchant = note.replace(/ #\S+$/, '').trim()
-    if (merchant) learn(merchant, cat)
-    toast.success(`${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓`)
+    const teach = Boolean(merchant) && !NO_LEARN_CATS.has(fromCat)
+    if (teach) learn(merchant, cat)
+    toast.success(teach ? `${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓` : `${icon(cat)} קוטלג ל${cat} ✓`)
   }
 
   // One-tap budget adoption: pull the current calendar month's PLAN values from
@@ -194,6 +216,17 @@ export default function ExpensesPage() {
 
   // Quick category -> spent-this-month lookup, for the budget editor list.
   const spentByCat = useMemo(() => new Map(catTotals), [catTotals])
+
+  // Budget-editor rows: clients get a short list (budgeted + most-used) so they
+  // don't scroll 44 rows on a phone; "הצג הכל" reveals the full list. Advisor = full.
+  const budgetEditorCats = useMemo(() => {
+    if (!clientMode || showAllBudgetCats) return ALL_CATEGORIES
+    const keep = new Set<string>([
+      ...ALL_CATEGORIES.filter(c => (budgets[c] ?? 0) > 0),
+      ...suggestedCats,
+    ])
+    return ALL_CATEGORIES.filter(c => keep.has(c))
+  }, [clientMode, showAllBudgetCats, budgets, suggestedCats])
 
   // Rows for the breakdown = every category spent this month, PLUS any budgeted
   // category with no spend yet (so the user sees the full budget picture at 0%).
@@ -234,19 +267,17 @@ export default function ExpensesPage() {
     <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gold">🧾 תיעוד הוצאות</h1>
-        <p className="text-muted-txt text-sm mt-1 hidden sm:block">
-          רשמו כל הוצאה ברגע שהיא קורית ושייכו אותה לקטגוריה. יומן עצמאי — לא מתחבר לדוחות או לתקציב החודשי.
-        </p>
+      <div className="flex items-baseline justify-between gap-2 px-1 pt-1">
+        <h1 className="text-2xl font-extrabold text-gold tracking-tight">🧾 תיעוד הוצאות</h1>
+        <p className="text-muted-txt text-sm hidden sm:block">יומן עצמאי — לא מתחבר לדוחות</p>
       </div>
 
-      {/* Quick add */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-3">
-        <div className="text-sm font-semibold text-txt">➕ הוצאה חדשה</div>
-        <div className="grid grid-cols-2 sm:grid-cols-[7rem_1fr_8rem_auto] gap-2 sm:gap-3 items-end">
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">סכום ₪</label>
+      {/* Quick add — the primary action, big & prominent */}
+      <div className="rounded-3xl border border-line bg-surface2 p-5 space-y-3">
+        <div className="text-lg font-bold text-txt">➕ הוצאה חדשה</div>
+        <div className="grid grid-cols-2 sm:grid-cols-[8rem_1fr_9rem_auto] gap-2.5 items-end">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-txt">סכום ₪</label>
             <input
               type="number"
               inputMode="numeric"
@@ -256,31 +287,33 @@ export default function ExpensesPage() {
               placeholder="₪"
               min={0}
               style={{ direction: 'ltr' }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[52px] text-lg text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">קטגוריה</label>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-txt">קטגוריה</label>
             <CategoryPicker
               value={category}
               onChange={setCategory}
+              suggested={suggestedCats}
               variant="field"
               placeholder="בחר קטגוריה…"
+              className="min-h-[52px]"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-[11px] text-muted-txt">תאריך</label>
+          <div className="space-y-1.5 col-span-2 sm:col-span-1">
+            <label className="text-xs text-muted-txt">תאריך</label>
             <input
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
               style={{ direction: 'ltr' }}
-              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[52px] text-sm text-txt focus:outline-none focus:border-gold/60"
             />
           </div>
           <button
             onClick={handleAdd}
-            className="col-span-2 sm:col-span-1 bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 rounded-lg px-5 py-2 text-sm font-semibold transition-colors whitespace-nowrap"
+            className="col-span-2 sm:col-span-1 min-h-[52px] bg-gold text-surface rounded-xl px-6 text-base font-extrabold hover:bg-gold-light active:bg-gold-dark transition-colors whitespace-nowrap"
           >
             הוסף
           </button>
@@ -290,12 +323,12 @@ export default function ExpensesPage() {
           onChange={e => setNote(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
           placeholder="הערה (לא חובה) — איפה / על מה…"
-          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+          className="w-full rounded-xl border border-line bg-surface px-3.5 min-h-[48px] text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
         />
       </div>
 
       {/* Month switcher + total + transfer */}
-      <div className="rounded-xl border border-line bg-surface2 p-4 space-y-3">
+      <div className="rounded-2xl border border-line bg-surface2 p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setSelMonth(shiftMonth(selMonth, -1))}
@@ -320,9 +353,9 @@ export default function ExpensesPage() {
             )}
           </div>
           <div className="text-end">
-            <div className="text-[11px] text-muted-txt">סה&quot;כ החודש</div>
-            <div className="text-xl font-black text-expense tabular-nums">{fmt(monthTotal)}</div>
-            <div className="text-[11px] text-muted-txt">{monthEntries.length} רישומים</div>
+            <div className="text-xs text-muted-txt">סה&quot;כ החודש</div>
+            <div className="text-3xl font-extrabold text-expense tabular-nums tracking-tight">{fmt(monthTotal)}</div>
+            <div className="text-xs text-muted-txt">{monthEntries.length} רישומים</div>
           </div>
         </div>
 
@@ -362,7 +395,7 @@ export default function ExpensesPage() {
                     {suggestedCats.map(cat => (
                       <button
                         key={cat}
-                        onClick={() => fixCategory(e.id, e.note, cat)}
+                        onClick={() => fixCategory(e.id, e.note, e.category, cat)}
                         className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-txt hover:border-gold/60 hover:text-gold active:bg-gold/10 transition-colors min-h-[36px]"
                       >
                         {icon(cat)} {cat}
@@ -371,7 +404,8 @@ export default function ExpensesPage() {
                     <div className="min-w-[7.5rem]">
                       <CategoryPicker
                         value=""
-                        onChange={cat => fixCategory(e.id, e.note, cat)}
+                        onChange={cat => fixCategory(e.id, e.note, e.category, cat)}
+                        suggested={suggestedCats}
                         variant="field"
                         placeholder="עוד…"
                       />
@@ -423,8 +457,9 @@ export default function ExpensesPage() {
                 ⚡ אמץ מהתקציב החודשי
               </button>
             </div>
+            <SmartBudgetSuggest />
             <div className="max-h-80 overflow-y-auto space-y-1.5 pe-1">
-              {ALL_CATEGORIES.map(cat => {
+              {budgetEditorCats.map(cat => {
                 const spent = spentByCat.get(cat) ?? 0
                 return (
                   <div key={cat} className="flex items-center justify-between gap-2">
@@ -448,6 +483,14 @@ export default function ExpensesPage() {
                 )
               })}
             </div>
+            {clientMode && !showAllBudgetCats && (
+              <button
+                onClick={() => setShowAllBudgetCats(true)}
+                className="text-xs text-gold/80 hover:text-gold transition-colors py-2 min-h-[36px]"
+              >
+                הצג את כל הקטגוריות
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -531,6 +574,7 @@ export default function ExpensesPage() {
                 <CategoryPicker
                   value={rCategory}
                   onChange={setRCategory}
+                  suggested={suggestedCats}
                   variant="field"
                   placeholder="בחר…"
                 />
@@ -599,29 +643,40 @@ export default function ExpensesPage() {
           {byDay.map(([day, items]) => {
             const dayTotal = items.reduce((s, e) => s + e.amount, 0)
             return (
-              <div key={day} className="rounded-xl border border-line bg-surface2 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 bg-surface3/40 border-b border-line">
-                  <span className="text-xs font-semibold text-txt">{dayLabel(day)}</span>
-                  <span className="text-xs text-muted-txt tabular-nums">{fmt(dayTotal)}</span>
+              <div key={day} className="rounded-2xl border border-line bg-surface2 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-surface3/40 border-b border-line">
+                  <span className="text-sm font-bold text-txt">{dayLabel(day)}</span>
+                  <span className="text-sm text-muted-txt tabular-nums">{fmt(dayTotal)}</span>
                 </div>
                 <div className="divide-y divide-line">
                   {items.map(e => (
-                    <div key={e.id} className="group flex items-center gap-3 px-4 py-2.5">
-                      <span className="text-lg shrink-0">{icon(e.category)}</span>
+                    <div key={e.id} className="group flex items-center gap-2.5 sm:gap-3.5 px-3 sm:px-4 py-3">
+                      <span className="w-11 h-11 shrink-0 grid place-items-center rounded-xl text-xl bg-gold/10 border border-gold/20">{icon(e.category)}</span>
                       <div className="flex-1 min-w-0">
                         <CategoryPicker
                           value={e.category}
+                          suggested={suggestedCats}
                           onChange={cat => {
                             update(e.id, { category: cat })
                             const merchant = e.note.replace(/ #\S+$/, '').trim()
-                            if (merchant) learn(merchant, cat)
-                            toast.success(merchant ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
+                            const teach = Boolean(merchant) && !NO_LEARN_CATS.has(e.category)
+                            if (teach) learn(merchant, cat)
+                            toast.success(teach ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
                           }}
                           variant="plain"
+                          className="!text-base font-semibold min-h-[44px]"
                         />
-                        {e.note && <div className="text-xs text-muted-txt truncate">{e.note}</div>}
+                        {e.note && <div className="text-sm text-muted-txt truncate">{e.note}</div>}
                       </div>
-                      <span className="text-sm font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                      <span className="text-lg font-bold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                      <button
+                        onClick={() => setEditingId(e.id)}
+                        className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-gold active:text-gold sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"
+                        title="ערוך הוצאה"
+                        aria-label="ערוך הוצאה"
+                      >
+                        ✎
+                      </button>
                       <button
                         onClick={() => {
                           const gone = e
@@ -646,6 +701,24 @@ export default function ExpensesPage() {
             )
           })}
         </div>
+      )}
+
+      {editingEntry && (
+        <EditEntrySheet
+          entry={editingEntry}
+          suggested={suggestedCats}
+          onClose={() => setEditingId(null)}
+          onSave={patch => {
+            update(editingEntry.id, patch)
+            // If the category changed here, teach the shared DB — same loop as the
+            // inline row picker (guarded against the Bit/cash placeholders).
+            if (patch.category !== editingEntry.category) {
+              const merchant = patch.note.replace(/ #\S+$/, '').trim()
+              if (merchant && !NO_LEARN_CATS.has(editingEntry.category)) learn(merchant, patch.category)
+            }
+            toast.success('ההוצאה עודכנה ✓')
+          }}
+        />
       )}
     </div>
   )

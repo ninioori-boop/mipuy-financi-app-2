@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useMeetingsStore, MEETING_LABELS, type MeetingType, type Meeting } from '@/stores/meetingsStore'
+import { useSyncStore } from '@/stores/syncStore'
 
 const TYPES: MeetingType[] = ['mapping', 'budget', 'review', 'plan']
 
@@ -27,10 +28,25 @@ function formatDate(iso: string) {
 }
 
 export default function MeetingsPage() {
-  const { meetings, add, update, remove } = useMeetingsStore()
+  const { meetings, add, update, remove, addTask, toggleTask, updateTaskText, deleteTask, migrateLegacyTasks } = useMeetingsStore()
+  const hydrated = useSyncStore(s => s.hydrated)
   const [filter, setFilter] = useState<MeetingType | 'all'>('all')
   const [openId, setOpenId] = useState<string | null>(null)
   const [exportingId, setExportingId] = useState<string | null>(null)
+  const [newTaskText, setNewTaskText] = useState('')
+
+  // Once the client's data has loaded, convert any legacy free-text "next steps"
+  // (which WAS the tasks list) into real checkable tasks. Idempotent — no-op once
+  // migrated. Runs for the advisor's own account, and for a client's data while
+  // the advisor edits it (persisted to the client by DataSync in edit mode).
+  useEffect(() => { if (hydrated) migrateLegacyTasks() }, [hydrated, migrateLegacyTasks])
+
+  function addTaskNow(meetingId: string) {
+    const t = newTaskText.trim()
+    if (!t) return
+    addTask(meetingId, t)
+    setNewTaskText('')
+  }
 
   const filtered = useMemo(() => {
     const list = filter === 'all' ? meetings : meetings.filter(m => m.type === filter)
@@ -240,14 +256,74 @@ export default function MeetingsPage() {
                       />
                     </div>
 
+                    {/* Task checklist — advisor assigns, client checks off. Counted in the weekly digest. */}
+                    {(() => {
+                      const tasks = m.tasks ?? []
+                      const doneCount = tasks.filter(t => t.done).length
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
+                            {tasks.length > 0 && (
+                              <span className="text-[11px] text-gold tabular-nums">{doneCount}/{tasks.length} הושלמו</span>
+                            )}
+                          </div>
+                          <div className="mt-1 space-y-1.5">
+                            {tasks.map(t => (
+                              <div key={t.id} className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={t.done}
+                                  onChange={() => toggleTask(m.id, t.id)}
+                                  className="h-4 w-4 accent-gold shrink-0 cursor-pointer"
+                                  aria-label="סמן כבוצע"
+                                />
+                                <input
+                                  value={t.text}
+                                  onChange={e => updateTaskText(m.id, t.id, e.target.value)}
+                                  className={`flex-1 bg-transparent border-b border-transparent focus:border-line px-0.5 py-1 text-sm focus:outline-none ${t.done ? 'line-through text-muted-txt' : 'text-txt'}`}
+                                  placeholder="תיאור המשימה…"
+                                />
+                                <button
+                                  onClick={() => deleteTask(m.id, t.id)}
+                                  className="text-muted-txt hover:text-expense text-sm shrink-0 w-6 h-6 flex items-center justify-center"
+                                  aria-label="מחק משימה"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                            {tasks.length === 0 && (
+                              <p className="text-xs text-muted-txt/70">אין עדיין משימות. הוסיפו משימה למטה.</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              value={newTaskText}
+                              onChange={e => setNewTaskText(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTaskNow(m.id) } }}
+                              placeholder="הוסף משימה חדשה…"
+                              className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
+                            />
+                            <button
+                              onClick={() => addTaskNow(m.id)}
+                              className="shrink-0 rounded-lg bg-gold/20 hover:bg-gold/30 text-gold border border-gold/40 px-4 py-2 text-sm font-semibold transition-colors"
+                            >
+                              הוסף
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
                     <div>
-                      <label className="text-xs font-semibold text-muted-txt">משימות לפגישה הבאה</label>
+                      <label className="text-xs font-semibold text-muted-txt">הערות נוספות</label>
                       <textarea
                         value={m.nextSteps ?? ''}
                         onChange={e => update(m.id, { nextSteps: e.target.value })}
-                        rows={6}
+                        rows={3}
                         className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 mt-1 leading-relaxed whitespace-pre-wrap"
-                        placeholder="כתבו כאן את המשימות לפגישה הבאה…"
+                        placeholder="הערות חופשיות (לא נספרות כמשימות)…"
                       />
                     </div>
 

@@ -277,7 +277,10 @@ export default function ImportPage() {
           )}
 
           <div className="rounded-xl border border-line bg-surface2 p-6">
-            <SmartPatterns transactions={transactions} />
+            {/* Display-only here: the import tab routes everything to the chosen
+                month via the "שלח ביצוע לתקציב" CTA below, so no send-to-mapping
+                buttons (those belong to the credit tab). */}
+            <SmartPatterns transactions={transactions} showSend={false} />
           </div>
 
           <div className="rounded-xl border border-line bg-surface2 p-6">

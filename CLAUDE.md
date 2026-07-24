@@ -7,8 +7,9 @@
 |-----|-----|
 | **context7** | כשצריך תיעוד של ספרייה (Next.js, Firebase, Zustand, shadcn) |
 | **playwright** | כשצריך לפתוח דפדפן ולבדוק UI |
+| **Google Drive** | אורי אישר במפורש (25/06/2026) — מותר ליצור/להעלות קבצים לדרייב שלו (למשל חשבוניות/גיליונות) |
 
-**אסור להשתמש ב:** Gmail, Google Calendar, Google Drive, Canva, Microsoft 365, Vercel MCP, GitHub MCP.
+**אסור להשתמש ב:** Gmail, Google Calendar, Canva, Microsoft 365, Vercel MCP, GitHub MCP.
 לכל פעולת git/npm/vercel — השתמש ב-Bash ישירות.
 
 ---
@@ -132,6 +133,13 @@ src/
 env vars ב-.env.local (לא לcommit):
 - `NEXT_PUBLIC_FIREBASE_*` — client-side
 - `ANTHROPIC_API_KEY` — server-side בלבד, אסור NEXT_PUBLIC_
+
+---
+
+## Vercel / פריסה
+**שני פרויקטי Vercel מחוברים ל-repo הזה — אל תתבלבל:**
+- ✅ **`mipuy-financi-app-2-3nay`** — הפרויקט **הפעיל** (staging חי): `mipuy-financi-app-2-3nay.vercel.app`. זה הירוק שצריך לעבור.
+- ❌ **`mipuy-financi-app-2`** — פרויקט **ישן/זנוח** מלפני המעבר לנוכחי. נכשל בכל deploy ו**צובע X אדום על כל PR — להתעלם, זה לא הקוד שלנו.** (אפשר לנתק אותו ב-Vercel → Settings → Git בהזדמנות.)
 
 ---
 
