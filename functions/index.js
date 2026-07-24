@@ -500,7 +500,23 @@ function actionFlags(data, totals, ba, updatedMs, tstats, since) {
   if (totals.cashflow < 0) flags.push({ tone: "red", text: `תזרים שלילי של ${ils(-totals.cashflow)} — ההוצאות גבוהות מההכנסות.` });
   for (const o of ba.overCats.slice(0, 3)) flags.push({ tone: "orange", text: `חריגה בקטגוריית "${o.cat}": ${ils(o.spent)} מתוך ${ils(o.cap)} החודש.` });
   if (tstats && tstats.open > 0) flags.push({ tone: "orange", text: `נותרו ${tstats.open} משימות פתוחות שהוקצו ללקוח (מתוך ${tstats.total}).` });
-  if (since && since.daysAgo >= 14 && since.newCount === 0) flags.push({ tone: "orange", text: `מאז הפגישה האחרונה (לפני ${since.daysAgo} ימים) הלקוח לא תיעד אף הוצאה — ייתכן ניתוק.` });
+  const sinceDisconnect = since && since.daysAgo >= 14 && since.newCount === 0;
+  if (sinceDisconnect) flags.push({ tone: "orange", text: `מאז הפגישה האחרונה (לפני ${since.daysAgo} ימים) הלקוח לא תיעד אף הוצאה — ייתכן ניתוק.` });
+  // Expense-logging lapse — mirrors the dashboard's TRACKING_STALE_DAYS=5 pill
+  // (src/lib/advisorMock.ts trackingStatus). Skipped when the stronger
+  // since-meeting disconnect flag above already fired.
+  if (!sinceDisconnect) {
+    const entries = data && data.expenseLog && Array.isArray(data.expenseLog.entries) ? data.expenseLog.entries : [];
+    let lastLog = 0;
+    for (const e of entries) {
+      const t = num(e && e.createdAt) || Date.parse((e && e.date) || "") || 0;
+      if (t > lastLog) lastLog = t;
+    }
+    if (lastLog) {
+      const staleDays = Math.floor((Date.now() - lastLog) / 86400000);
+      if (staleDays >= 5) flags.push({ tone: "orange", text: `הלקוח לא תיעד הוצאות כבר ${staleDays} ימים.` });
+    }
+  }
   const m = (data && data.mapping) || {};
   const savingsMo = Array.isArray(m.savings) ? m.savings.reduce((s, r) => s + num(r && r.monthlyContribution), 0) : 0;
   if (totals.cashflow > 1000 && savingsMo < totals.cashflow * 0.5) {
