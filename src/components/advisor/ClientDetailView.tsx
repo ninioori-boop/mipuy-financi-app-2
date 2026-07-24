@@ -1,8 +1,8 @@
 'use client'
 
 import { CashflowSummary } from '@/components/mapping/CashflowSummary'
-import { fmt, isSnapshotable, neglectFlags, STAGE_LABELS, type MockClient } from '@/lib/advisorMock'
-import { LifecycleBadge, NeglectPill, FlagPill } from './StatusPills'
+import { fmt, isSnapshotable, neglectFlags, trackingStatus, STAGE_LABELS, type MockClient } from '@/lib/advisorMock'
+import { LifecycleBadge, NeglectPill, FlagPill, TrackingPill } from './StatusPills'
 import { Avatar } from './Avatar'
 
 // Screen 3 — the advisor "enters" a client's account. Real data: view + (with
@@ -35,6 +35,7 @@ export function ClientDetailView({ client, onExit, onViewFull, onEditFull, onReq
   const snap = isSnapshotable(client)
   const goals = f.goals.filter(g => g.name || g.required > 0)
   const neg = neglectFlags(client)
+  const trk = trackingStatus(client)
 
   const isActive    = client.lifecycle === 'active'
   const canEdit     = client.access === 'write'
@@ -136,9 +137,18 @@ export function ClientDetailView({ client, onExit, onViewFull, onEditFull, onReq
           <LifecycleBadge lifecycle={client.lifecycle} />
           {client.flags.map(fl => <FlagPill key={fl} flag={fl} />)}
           {neg.map(n => <NeglectPill key={n} flag={n} />)}
+          <TrackingPill status={trk} />
           {client.phone && <span className="text-xs text-muted-txt" dir="ltr">{client.phone}</span>}
         </div>
-        <div className="text-xs text-muted-txt">פעילות אחרונה: {new Date(client.lastActivity).toLocaleDateString('he-IL')}</div>
+        <div className="text-xs text-muted-txt">
+          פעילות אחרונה: {new Date(client.lastActivity).toLocaleDateString('he-IL')}
+          {trk?.kind === 'ok' && (
+            <span className="text-income"> · ✏️ תיעד {trk.last7} הוצאות בשבוע האחרון</span>
+          )}
+          {trk?.kind === 'stale' && client.lastExpenseAt && (
+            <span> · תיעוד אחרון: {new Date(client.lastExpenseAt).toLocaleDateString('he-IL')}</span>
+          )}
+        </div>
       </div>
 
       {/* Concurrency warning — static demo */}

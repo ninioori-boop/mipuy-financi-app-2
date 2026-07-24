@@ -46,6 +46,10 @@ export interface MockClient {
   lastActivity:   string        // ISO date — most recent touch of any kind
   clientLastSeen?: string       // ISO date — client last logged in / logged an expense
   advisorLastSeen?: string      // ISO date — advisor last opened this account
+  // Expense-log engagement (real clients only — advisorClients fills these from
+  // the snapshot; mock clients leave them undefined so no tracking pill shows).
+  lastExpenseAt?:  string       // ISO date the client last LOGGED an expense (createdAt)
+  expensesLast7?:  number       // entries logged in the past 7 days
   flags:          ClientFlag[]
   beingEdited?:   boolean        // powers the static "someone else editing" demo
   fin:            MockClientFinancials
@@ -293,6 +297,31 @@ export function neglectFlags(c: MockClient): NeglectFlag[] {
   return out
 }
 
+// ── Expense-tracking engagement ──────────────────────────────────────────────
+// Sharper than the 30-day neglect flags: daily expense logging is the habit the
+// coaching is built on, so the advisor should hear about a lapse within days,
+// not weeks. Only fires for active clients whose engagement data is actually
+// known (expensesLast7 set by advisorClients) — mock clients return null.
+
+export const TRACKING_STALE_DAYS = 5
+
+export type TrackingStatus =
+  | { kind: 'stale'; days: number }   // logged before, quiet ≥ TRACKING_STALE_DAYS
+  | { kind: 'never' }                 // stage תקציב+ but never logged an expense
+  | { kind: 'ok'; last7: number }     // actively logging
+  | null                              // not active / engagement unknown (mocks)
+
+export function trackingStatus(c: MockClient): TrackingStatus {
+  if (c.lifecycle !== 'active' || c.expensesLast7 === undefined) return null
+  if (!c.lastExpenseAt) {
+    // Before the תקציב stage the client isn't expected to log yet — stay quiet.
+    return c.stage >= 2 ? { kind: 'never' } : null
+  }
+  const d = daysSince(c.lastExpenseAt)
+  if (d >= TRACKING_STALE_DAYS && isFinite(d)) return { kind: 'stale', days: d }
+  return { kind: 'ok', last7: c.expensesLast7 }
+}
+
 /** Is a single goal on track — will the planned monthly contribution reach the
  *  target by the target date? (5% tolerance.) */
 function isGoalOnTrack(g: GoalRow): boolean {
@@ -344,7 +373,8 @@ export function dashboardSections(clients: MockClient[]): DashboardSections {
     if (c.lifecycle === 'pending')                              { out.pending.push(c); continue }
     if (c.lifecycle === 'declined' || c.lifecycle === 'revoked') { out.notSharing.push(c); continue }
     if (c.lifecycle === 'active' && hasFlags(c))                { out.attention.push(c); continue }
-    if (neglectFlags(c).length > 0)                            { out.neglected.push(c); continue }
+    const trk = trackingStatus(c)
+    if (neglectFlags(c).length > 0 || trk?.kind === 'stale' || trk?.kind === 'never') { out.neglected.push(c); continue }
     out.progressing.push(c)
   }
   return out

@@ -1,10 +1,10 @@
 'use client'
 
 import {
-  fmt, clientTotals, isSnapshotable, goalsOnTrack, neglectFlags,
+  fmt, clientTotals, isSnapshotable, goalsOnTrack, neglectFlags, trackingStatus,
   type MockClient,
 } from '@/lib/advisorMock'
-import { LifecycleBadge, StageIndicator, FlagPill, NeglectPill } from './StatusPills'
+import { LifecycleBadge, StageIndicator, FlagPill, NeglectPill, TrackingPill } from './StatusPills'
 import { Avatar } from './Avatar'
 
 // A single client card — the dashboard's core unit. Whole card is one button
@@ -50,6 +50,8 @@ export function ClientCard({ client: c, onOpen }: Props) {
   const t    = snap ? clientTotals(c.fin) : null
   const g    = snap ? goalsOnTrack(c.fin) : { onTrack: 0, total: 0 }
   const neg  = neglectFlags(c)
+  const trk  = trackingStatus(c)
+  const trkAlert = trk?.kind === 'stale' || trk?.kind === 'never'
   const hist = c.fin.cashflowHistory
   const positive = (t?.cashflow ?? 0) >= 0
 
@@ -105,10 +107,11 @@ export function ClientCard({ client: c, onOpen }: Props) {
               <StageIndicator stage={c.stage} />
               <span className="text-[11px] text-muted-txt whitespace-nowrap">פעילות: {dateFmt(c.lastActivity)}</span>
             </div>
-            {(c.flags.length > 0 || neg.length > 0) && (
+            {(c.flags.length > 0 || neg.length > 0 || trkAlert) && (
               <div className="flex flex-wrap gap-1.5">
                 {c.flags.map(f => <FlagPill key={f} flag={f} />)}
                 {neg.map(n => <NeglectPill key={n} flag={n} />)}
+                <TrackingPill status={trk} />
               </div>
             )}
           </div>

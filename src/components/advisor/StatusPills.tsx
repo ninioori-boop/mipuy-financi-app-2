@@ -1,6 +1,6 @@
 'use client'
 
-import type { Lifecycle, ClientFlag, NeglectFlag } from '@/lib/advisorMock'
+import type { Lifecycle, ClientFlag, NeglectFlag, TrackingStatus } from '@/lib/advisorMock'
 import { FLAG_LABELS, NEGLECT_LABELS, STAGE_LABELS } from '@/lib/advisorMock'
 
 // Small presentational pills for the advisor dashboard. Refined "magic-portfolio"
@@ -41,6 +41,20 @@ export function FlagPill({ flag }: { flag: ClientFlag }) {
 export function NeglectPill({ flag }: { flag: NeglectFlag }) {
   // NEGLECT_LABELS already carry an emoji marker, so no leading dot here.
   return <span className={`${CHIP} border-gold/30 text-gold bg-gold/10`}>{NEGLECT_LABELS[flag]}</span>
+}
+
+// Expense-tracking engagement pill. Renders nothing when the client is logging
+// fine (the card stays quiet) — the detail view shows the positive state.
+export function TrackingPill({ status }: { status: TrackingStatus }) {
+  if (!status || status.kind === 'ok') return null
+  if (status.kind === 'never') {
+    return <span className={`${CHIP} border-gold/30 text-gold bg-gold/10`}>✏️ עוד לא התחיל לתעד</span>
+  }
+  return (
+    <span className={`${CHIP} border-expense/30 text-expense bg-expense/10`}>
+      ✏️ לא תיעד {status.days} ימים
+    </span>
+  )
 }
 
 export function OkPill() {

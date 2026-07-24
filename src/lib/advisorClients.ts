@@ -114,6 +114,21 @@ export async function listAdvisorClients(advisorUid: string): Promise<MockClient
         client.flags = deriveFlags(fin)
         const upd = msToIso(tsToMs(uDoc.data()?.updatedAt))
         if (upd) { client.clientLastSeen = upd; client.lastActivity = upd }
+
+        // Expense-log engagement: when the client last LOGGED an entry
+        // (createdAt = the moment of logging; the entry's `date` is only a
+        // fallback for pre-createdAt rows) + how many they logged this week.
+        // Feeds trackingStatus() → the "לא תיעד X ימים" pill.
+        const entries = data?.expenseLog?.entries ?? []
+        const weekAgo = Date.now() - 7 * 86_400_000
+        let lastMs = 0, last7 = 0
+        for (const e of entries) {
+          const t = e.createdAt || new Date(e.date).getTime() || 0
+          if (t > lastMs) lastMs = t
+          if (t >= weekAgo) last7++
+        }
+        client.expensesLast7 = last7
+        if (lastMs) client.lastExpenseAt = msToIso(lastMs)
       } catch {
         // read denied / missing — keep as active with empty data
       }

@@ -173,7 +173,7 @@ export default function BankPage() {
               : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } },
           ]
         } else {
-          const rows = await parseExcelFile(file)
+          const rows = await parseExcelFile(file, { allSheets: true })
           content = [{ type: 'text', text:
             'חלץ את כל התנועות מדוח הבנק הבא (טבלה, עמודות מופרדות ב‑| ). ' +
             'שים לב לעמודת הסכום עם הסימן (מינוס=חיוב) והתעלם מעמודת היתרה הרצה וממספרי רצף:\n\n' +
