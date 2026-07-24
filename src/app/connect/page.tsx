@@ -40,6 +40,7 @@ export default function ConnectPage() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
+  const [isNativeApp, setIsNativeApp] = useState(false)
   const [copied, setCopied] = useState(false)
   const [resetMsg, setResetMsg] = useState('')
 
@@ -73,6 +74,16 @@ export default function ConnectPage() {
   // iPhone has no native app to receive the token → show a copy-token flow (for the Shortcut).
   useEffect(() => {
     setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent))
+  }, [])
+
+  // The native iOS app opens this page in Safari with ?native=1 — it CAN
+  // receive the mipuytracker:// deep link (like Android), so skip the iOS
+  // Shortcut wizard. Persisted in sessionStorage so it survives the Google
+  // sign-in round trip on this page.
+  useEffect(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get('native') === '1'
+    if (fromQuery) sessionStorage.setItem('connectNative', '1')
+    if (fromQuery || sessionStorage.getItem('connectNative') === '1') setIsNativeApp(true)
   }, [])
 
   async function signInEmail(e: FormEvent) {
@@ -229,7 +240,7 @@ export default function ConnectPage() {
           <div className="text-5xl mb-4">✅</div>
           <p className="text-income font-semibold mb-4">התחברת בהצלחה!</p>
 
-          {isIOS ? (
+          {isIOS && !isNativeApp ? (
             <>
               <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 1 · העתק את הטוקן</p>
               <div
