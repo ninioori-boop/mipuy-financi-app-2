@@ -118,9 +118,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   //  - platformOwners/{uid}  → "ניהול · ניהול פלטפורמה" (the owner oversight screen)
   const [hasAdvisorLink, setHasAdvisorLink] = useState(false)
   const [isAdvisorRole, setIsAdvisorRole]   = useState(false)
+  const [isFirmOwner, setIsFirmOwner]       = useState(false)   // advisor whose advisors/{uid}.role === 'owner' (manages a practice)
   const [isOwnerRole, setIsOwnerRole]       = useState(false)
   useEffect(() => {
-    if (!user) { setHasAdvisorLink(false); setIsAdvisorRole(false); setIsOwnerRole(false); return }
+    if (!user) { setHasAdvisorLink(false); setIsAdvisorRole(false); setIsFirmOwner(false); setIsOwnerRole(false); return }
     let alive = true
     Promise.all([
       getDoc(doc(db, 'clientLinks', user.uid)).catch(() => null),
@@ -128,8 +129,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       getDoc(doc(db, 'platformOwners', user.uid)).catch(() => null),
     ]).then(([linkSnap, advSnap, ownerSnap]) => {
       if (!alive) return
+      const adv = advSnap?.exists() ? advSnap.data() : null
       setHasAdvisorLink(!!linkSnap?.exists())
-      setIsAdvisorRole(!!advSnap?.exists())
+      setIsAdvisorRole(!!adv)
+      setIsFirmOwner(adv?.role === 'owner')
       setIsOwnerRole(!!ownerSnap?.exists())
     })
     return () => { alive = false }
@@ -167,6 +170,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // owner also gets the oversight screen. Regular clients get neither.
   const manageItems: TabItem[] = []
   if (isAdvisorRole) manageItems.push({ href: '/app/advisor', emoji: '👥', label: 'הלקוחות שלי' })
+  if (isFirmOwner)   manageItems.push({ href: '/app/firm',    emoji: '🏢', label: 'המשרד שלי' })
   if (isOwnerRole)   manageItems.push({ href: '/app/admin',   emoji: '🛡️', label: 'ניהול פלטפורמה' })
   if (manageItems.length > 0) {
     visibleGroups.unshift({ title: 'ניהול', items: manageItems })
