@@ -127,13 +127,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       getDoc(doc(db, 'clientLinks', user.uid)).catch(() => null),
       getDoc(doc(db, 'advisors', user.uid)).catch(() => null),
       getDoc(doc(db, 'platformOwners', user.uid)).catch(() => null),
-    ]).then(([linkSnap, advSnap, ownerSnap]) => {
+    ]).then(async ([linkSnap, advSnap, ownerSnap]) => {
       if (!alive) return
       const adv = advSnap?.exists() ? advSnap.data() : null
       setHasAdvisorLink(!!linkSnap?.exists())
       setIsAdvisorRole(!!adv)
-      setIsFirmOwner(adv?.role === 'owner')
       setIsOwnerRole(!!ownerSnap?.exists())
+      // Firm page is for REAL firms only: the caller owns a practice that has
+      // MORE than one advisor. A freelancer (solo practice, still role 'owner')
+      // gets no firm page — just their advisor dashboard.
+      if (adv?.role === 'owner' && adv.practiceId) {
+        try {
+          const p = await getDoc(doc(db, 'practices', adv.practiceId))
+          const uids = p.exists() ? p.data().advisorUids : null
+          if (alive) setIsFirmOwner(Array.isArray(uids) && uids.length > 1)
+        } catch { if (alive) setIsFirmOwner(false) }
+      } else if (alive) {
+        setIsFirmOwner(false)
+      }
     })
     return () => { alive = false }
   }, [user])
