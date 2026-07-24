@@ -7,6 +7,7 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   getIdToken,
+  sendPasswordResetEmail,
   type User,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
@@ -14,11 +15,13 @@ import { auth } from '@/lib/firebase'
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
 
-// One-tap import of the shared iOS Shortcut. Authored once on a real iPhone
-// and shared via iCloud (Apple refuses headless signing, so the /mipuy.shortcut
-// CI-signing path was abandoned). After adding, the client pastes their token
-// into the shortcut's Text box — see the on-page instructions.
-const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/859eb60273434daaa96c1a7fe64cbb2e'
+// One-tap import of the shared iOS Shortcut ("THE HOME ECONOMIST 1"). Authored
+// on Ori's iPhone (2026-07-14, v2: single notify.text dictionary get — zero
+// manual variable wiring). Holds ALL the logic: POST {token, merchant} →
+// notify.text → lock-screen notification. The client pastes their token into
+// the Text box; their Wallet automation builds "[Amount] [Merchant]" text and
+// runs this shortcut (the server's extractFromRaw splits amount/merchant).
+const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/69275622abc0441491f7cb88bca7cc9b'
 
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
@@ -37,7 +40,9 @@ export default function ConnectPage() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
+  const [isNativeApp, setIsNativeApp] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [resetMsg, setResetMsg] = useState('')
 
   const fetchToken = useCallback(async (user: User) => {
     setPhase('fetching')
@@ -71,6 +76,16 @@ export default function ConnectPage() {
     setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent))
   }, [])
 
+  // The native iOS app opens this page in Safari with ?native=1 — it CAN
+  // receive the mipuytracker:// deep link (like Android), so skip the iOS
+  // Shortcut wizard. Persisted in sessionStorage so it survives the Google
+  // sign-in round trip on this page.
+  useEffect(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get('native') === '1'
+    if (fromQuery) sessionStorage.setItem('connectNative', '1')
+    if (fromQuery || sessionStorage.getItem('connectNative') === '1') setIsNativeApp(true)
+  }, [])
+
   async function signInEmail(e: FormEvent) {
     e.preventDefault()
     setError('')
@@ -98,6 +113,28 @@ export default function ConnectPage() {
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
         setError('ההתחברות עם Google נכשלה, נסה שוב')
       }
+    }
+  }
+
+  // Sets/resets a password by email. Crucial on iPhone: Google sign-in is
+  // unreliable in iOS Safari (bounces back to the home screen), so iPhone
+  // clients need the email+password path — including clients who signed up
+  // with Google and never had a password (the reset link SETS one on the same
+  // account).
+  async function resetPassword() {
+    setError('')
+    setResetMsg('')
+    const addr = email.trim()
+    if (!addr) {
+      setError('כתוב את המייל שלך למעלה ואז הקש שוב על "שכחתי סיסמה"')
+      return
+    }
+    try {
+      await sendPasswordResetEmail(auth, addr)
+      setResetMsg('שלחנו לך למייל קישור לקביעת סיסמה. אחרי שתקבע — חזור לכאן והתחבר איתה.')
+    } catch {
+      // Don't reveal whether the address exists — same message either way.
+      setResetMsg('אם המייל רשום במערכת — נשלח אליו קישור לקביעת סיסמה.')
     }
   }
 
@@ -160,6 +197,14 @@ export default function ConnectPage() {
           </form>
 
           {error && <p className="text-expense text-sm mt-4">{error}</p>}
+          {resetMsg && <p className="text-income text-sm mt-4">{resetMsg}</p>}
+
+          <button
+            onClick={resetPassword}
+            className="mt-3 text-xs text-muted-txt underline hover:text-gold transition-colors"
+          >
+            שכחתי סיסמה / אין לי סיסמה
+          </button>
 
           <div className="flex items-center gap-3 my-5">
             <div className="h-px bg-line flex-1" />
@@ -173,6 +218,13 @@ export default function ConnectPage() {
           >
             התחבר עם Google
           </button>
+          {isIOS && (
+            <p className="mt-2 text-xs text-muted-txt leading-relaxed">
+              נרשמת עם Google? באייפון הכניסה עם Google עובדת רק בדפדפן ספארי
+              רגיל, וגם שם לפעמים נתקעת. אם זה קורה: הקש על «שכחתי סיסמה», קבע
+              סיסמה דרך הקישור שיגיע למייל, והתחבר איתה כאן.
+            </p>
+          )}
         </div>
       )}
 
@@ -188,9 +240,9 @@ export default function ConnectPage() {
           <div className="text-5xl mb-4">✅</div>
           <p className="text-income font-semibold mb-4">התחברת בהצלחה!</p>
 
-          {isIOS ? (
+          {isIOS && !isNativeApp ? (
             <>
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 1 · העתק את הטוקן</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 1 · העתק את הטוקן</p>
               <div
                 dir="ltr"
                 className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
@@ -204,33 +256,45 @@ export default function ConnectPage() {
                 {copied ? '✓ הועתק' : '📋 העתק טוקן'}
               </button>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 2 · הוסף את ה-Shortcut והדבק את הטוקן</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 2 · הוסף את הקיצור והדבק את הטוקן</p>
               <a
                 href={SHORTCUT_ICLOUD_URL}
                 className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors mb-3"
               >
-                📲 הוסף את ה-Shortcut
+                📲 הוסף את הקיצור
               </a>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
                 אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
-                הקש על <span className="text-txt font-semibold">Mipuy</span> →
-                מחק את «הדבק כאן טוקן» מהתיבה הצהובה →
+                לחיצה <span className="text-txt font-semibold">ארוכה</span> על{' '}
+                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+                «עריכה» → מחק את «הדבק כאן טוקן» מתיבת המלל →
                 <span className="text-txt font-semibold"> הדבק את הטוקן</span> שהעתקת בשלב 1 → סיום.
               </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 3 · צור את האוטומציה (חד־פעמי, 2 דקות)</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed mb-6">
-                באפליקציית קיצורי דרך: לשונית <span className="text-txt font-semibold">אוטומציה</span> → ＋ →
-                בחר <span className="text-txt font-semibold">«עסקה»</span> (Transaction) →
-                בחר את הכרטיסים → <span className="text-txt font-semibold">«הפעלה מיידית»</span> →
-                הוסף פעולה <span className="text-txt font-semibold">«הפעל קיצור דרך»</span> →
-                בחר <span className="text-txt font-semibold">Mipuy</span> → סיום.
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 3 · צור את האוטומציה (חד־פעמי, ~2 דקות)</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
+                בקיצורי דרך: לשונית <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> (האמצעית)
+                → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> →
+                «כאשר אני מקיש» → בחר את הכרטיסים שלך →
+                <span className="text-txt font-semibold"> «הפעל מיד»</span> → הבא.
                 <br />
-                מעכשיו כל תשלום Apple Pay נרשם לבד ✨
+                עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» למטה):
+                <br />
+                <span className="text-txt font-semibold">① «מלל»</span> — הקש בתיבה →
+                «בחירת משתנה» → <span className="text-txt font-semibold">«קלט של קיצור»</span> →
+                הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span> →
+                הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
+                בחר <span className="text-txt font-semibold">«בית עסק»</span>.
+                <br />
+                <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
+                הקש על «קיצור דרך» → בחר{' '}
+                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
+                <br />
+                מעכשיו כל תשלום Apple Pay נרשם לבד — עם התראה וסטטוס תקציב ✨
               </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-right">שלב 4 · הוסף את האפליקציה למסך הבית</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-right leading-relaxed">
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 4 · הוסף את האפליקציה למסך הבית</p>
+              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
                 בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
                 → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
                 <br />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
+import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { checkRateLimit } from '@/lib/rateLimit'
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'bad request body' }, { status: 400 })
   }
-  const { token, merchant, amount, date, ref, category: catOverride } = body as Record<string, unknown>
+  const { token, merchant, amount, date, ref, category: catOverride, source } = body as Record<string, unknown>
 
   const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
   if (!verified) {
@@ -58,8 +59,27 @@ export async function POST(req: NextRequest) {
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
   }
-  let amt = typeof amount === 'number' ? amount : parseFloat(String(amount))
-  let cleanMerchant = merchant.trim()
+  // The iOS Shortcut's transaction "Amount" arrives as a CURRENCY-FORMATTED
+  // STRING ("₪32.83", "32.83 ₪", "$32.83") — parseFloat("₪32.83") is NaN — so
+  // pull the first money-looking number out of it. (Comma = thousands sep in
+  // he-IL; period = decimal.) Plain numbers still pass straight through.
+  let amt = parseAmountLoose(amount)
+  // iOS renders the transaction's Amount/Merchant with invisible bidi control
+  // marks (RLM/LRM etc.) around the ₪ — they break the currency-anchored
+  // regexes below and pollute the merchant name for categorization.
+  let cleanMerchant = stripInvisible(merchant).trim()
+
+  // Echo/loop guard: a miswired iOS Shortcut can call ITSELF and feed our own
+  // notification text back as the "merchant" ("נרשם: נרשם: … קוטלג ל…"),
+  // creating an infinite capture loop that only died on MAX_MERCHANT (seen in
+  // the field: one ₪44 tap → a recursive notification flood + junk expense
+  // rows). A merchant that carries our notify signature is never a real
+  // business — reject it, which also kills the loop on its first round trip
+  // (no notify in the response → the shortcut's dictionary step stops the run).
+  if (/^נרשם:|קוטלג ל/.test(cleanMerchant)) {
+    console.log('[transaction] ECHO_REJECTED')
+    return NextResponse.json({ error: 'echo' }, { status: 400 })
+  }
 
   // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
   // Merchant/Amount properties from the Apple Pay transaction (the editor
@@ -84,9 +104,48 @@ export async function POST(req: NextRequest) {
   // Explicit category (manual entry from the app) wins. Otherwise: learned
   // corrections (shared — same DB the credit/import/expenses tabs teach) →
   // BUSINESS_DB → AI fallback.
+  // Bit/Paybox person-to-person transfers carry the RECIPIENT'S NAME, not a
+  // business — substring lookups and the AI both mis-guess on person names
+  // (e.g. "אורן" → a restaurant / a barber). So a transfer ALWAYS lands in
+  // "ביט ללא מעקב" (bypassing learned/DB/AI entirely); only an explicit
+  // category from the app's manual entry overrides. Re-categorizing a specific
+  // transfer is done per-entry in the expenses tab.
+  const isTransfer = typeof source === 'string' && /ביט|פייבוקס|paybox|\bbit\b/i.test(source)
+
+  // Duplicate-fire guard: iOS Wallet automations can fire several times for
+  // ONE physical payment (transaction updates / re-triggers — seen in the
+  // field: one ₪14 tap → a burst of identical POSTs). Same merchant+amount
+  // arriving again within the window = the same payment; skip the inbox write
+  // and the push, but answer normally so the shortcut doesn't error.
+  const DEDUP_WINDOW_MS = 180_000
+  const inboxRef = db.collection('transactionInbox').doc(uid)
+  const roundedAmt = Math.round(amt * 100) / 100
+  // Manual entries (explicit category from the app) are deliberate — a human
+  // adding the same amount twice on purpose must not be swallowed.
+  if (typeof catOverride !== 'string') try {
+    const parent = await inboxRef.get()
+    const last = parent.exists
+      ? (parent.data()?.last as { m?: string; a?: number; at?: number; cat?: string } | undefined)
+      : undefined
+    if (
+      last &&
+      last.m === cleanMerchant &&
+      last.a === roundedAmt &&
+      typeof last.at === 'number' &&
+      Date.now() - last.at < DEDUP_WINDOW_MS
+    ) {
+      console.log(`[transaction] DUPLICATE_SKIPPED uid=${uid}`)
+      const category = typeof last.cat === 'string' ? last.cat : 'שונות'
+      const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+      return NextResponse.json({ ok: true, duplicate: true, category, notify })
+    }
+  } catch { /* guard is best-effort — never blocks a capture */ }
+
   let category: string
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
     category = catOverride
+  } else if (isTransfer) {
+    category = 'ביט ללא מעקב'
   } else {
     const learnedDB = await loadSharedLearned(db)
     category = categorize(cleanMerchant, learnedDB)
@@ -101,16 +160,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await db
-    .collection('transactionInbox').doc(uid)
-    .collection('items').add({
-      merchant:  cleanMerchant,
-      amount:    Math.round(amt * 100) / 100,
-      date:      dateStr,
-      category,
-      ref:       refStr,
-      createdAt: FieldValue.serverTimestamp(),
-    })
+  await inboxRef.collection('items').add({
+    merchant:  cleanMerchant,
+    amount:    roundedAmt,
+    date:      dateStr,
+    category,
+    ref:       refStr,
+    createdAt: FieldValue.serverTimestamp(),
+  })
+  // Fingerprint for the duplicate-fire guard above (best-effort).
+  await inboxRef
+    .set({ last: { m: cleanMerchant, a: roundedAmt, at: Date.now(), cat: category } }, { merge: true })
+    .catch(() => { /* guard metadata only */ })
 
   // uid + bucket only — no merchant/amount detail logged.
   console.log(`[transaction] uid=${uid} cat=${category}`)
@@ -120,6 +181,17 @@ export async function POST(req: NextRequest) {
   // NOTE: `category` must stay the FIRST "category" key in the JSON — old APKs
   // extract it by scanning for the first occurrence.
   const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+
+  // Branded Web-Push to the user's installed apps (iOS PWA / browsers) — the
+  // app-name-and-icon notification. Best-effort like notify itself: never
+  // fails the request; inert until the VAPID keys are configured.
+  await sendPushToUser(db, uid, {
+    title: notify.title,
+    body: notify.body,
+    url: '/app/expenses',
+    // Identical captures replace each other on screen instead of stacking.
+    tag: refStr ?? `${cleanMerchant}|${roundedAmt}|${dateStr}`,
+  })
 
   return NextResponse.json({ ok: true, category, notify })
 }
@@ -133,10 +205,14 @@ export async function POST(req: NextRequest) {
  */
 async function buildNotify(
   db: Firestore, uid: string, category: string, amount: number, merchant: string, ym: string,
-): Promise<{ title: string; body: string; warn: boolean }> {
+): Promise<{ title: string; body: string; text: string; warn: boolean }> {
   const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
   const title = `נרשם: ${merchant} · ${nis(amount)}`
-  let body = `קוטלג ל${category} ✓`
+  // Categories that beg for a human to pick the right one → invite a tap.
+  const NEEDS_REVIEW = new Set(['שונות', 'ביט ללא מעקב', 'מזומן ללא מעקב'])
+  let body = NEEDS_REVIEW.has(category)
+    ? `קוטלג ל${category} — הקש לעדכון הקטגוריה`
+    : `קוטלג ל${category} ✓`
   let warn = false
   try {
     const snap = await db.collection('users').doc(uid).get()
@@ -161,7 +237,11 @@ async function buildNotify(
       }
     }
   } catch { /* best-effort — the default text is fine */ }
-  return { title, body, warn }
+  // `text` = title + body in ONE field, for the iOS Shortcut: a single
+  // "Get Dictionary Value notify.text" auto-wires into Show Notification with
+  // zero manual variable picking (two identical "ערך המילון" chips proved
+  // impossible to wire correctly by hand). Android keeps using title/body.
+  return { title, body, text: `${title}\n${body}`, warn }
 }
 
 /**
@@ -170,6 +250,24 @@ async function buildNotify(
  * after the number), then a bare first-number as last resort. The remainder of
  * the string, cleaned of separators, becomes the merchant.
  */
+// Strips invisible bidi/zero-width control chars iOS embeds in transaction
+// text (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, BOM).
+function stripInvisible(s: string): string {
+  return s.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+}
+
+/**
+ * Parses an amount that may be a plain number OR a currency-formatted string
+ * from the iOS Shortcut ("₪32.83", "32.83 ₪", "$1,234.56"). Returns NaN if no
+ * number is found. Commas are treated as thousands separators (he-IL uses a
+ * period for the decimal).
+ */
+function parseAmountLoose(v: unknown): number {
+  if (typeof v === 'number') return v
+  const m = String(v ?? '').match(/[0-9][0-9,]*(?:\.[0-9]+)?/)
+  return m ? parseFloat(m[0].replace(/,/g, '')) : NaN
+}
+
 function extractFromRaw(raw: string): { merchant: string; amount: number } | null {
   const m =
     raw.match(/(?:₪|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/)
