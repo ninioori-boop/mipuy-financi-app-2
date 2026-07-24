@@ -69,3 +69,7 @@ invoicing/
 play-store-assets/
 *.jpeg
 *.jpg
+
+# playwright artifacts
+test-results/
+playwright-report/

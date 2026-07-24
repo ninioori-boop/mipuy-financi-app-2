@@ -12,7 +12,8 @@ export default defineConfig({
     fileParallelism: false,
     // functions/test/* are Firestore-rules tests — they need the Firebase
     // emulator and functions/ deps, and run separately (see docs/security-hardening.md).
-    exclude: ['**/node_modules/**', 'functions/**'],
+    // tests/e2e/* are Playwright specs (npm run test:e2e), not vitest.
+    exclude: ['**/node_modules/**', 'functions/**', 'tests/e2e/**'],
   },
   resolve: {
     alias: {
