@@ -6,6 +6,7 @@ import { ConsentGate } from '@/components/layout/ConsentGate'
 import { DataSync } from '@/components/layout/DataSync'
 import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner'
 import { CookieBanner } from '@/components/layout/CookieBanner'
+import { GoogleAnalytics } from '@/components/layout/GoogleAnalytics'
 import { Toaster } from '@/components/ui/sonner'
 
 const rubik = Rubik({
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <CookieBanner />
         <ImpersonationBanner />
         <Toaster position="bottom-center" />
+        <GoogleAnalytics />
       </body>
     </html>
   )

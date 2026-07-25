@@ -49,3 +49,6 @@ service-account-key.json
 clients.md
 clients.html
 .export-clients.log
+funnel-report.md
+funnel-report.json
+data-report.html

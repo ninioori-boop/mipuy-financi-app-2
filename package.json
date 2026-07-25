@@ -8,7 +8,9 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "export:clients": "tsx scripts/export-clients.ts"
+    "export:clients": "tsx scripts/export-clients.ts",
+    "report:funnel": "tsx scripts/funnel-report.ts",
+    "report:data": "tsx scripts/data-report.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
