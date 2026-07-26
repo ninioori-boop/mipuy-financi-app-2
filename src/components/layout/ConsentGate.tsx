@@ -22,7 +22,7 @@ export function ConsentGate({ children }: { children: ReactNode }) {
 
   const [status, setStatus] = useState<'checking' | 'clear' | 'pending'>('clear')
   const [invite, setInvite] = useState<PendingInvite | null>(null)
-  const [variant, setVariant] = useState<'view' | 'edit'>('view')
+  const [variant, setVariant] = useState<'view' | 'edit' | 'view-edit'>('view')
 
   useEffect(() => {
     const email = user?.email?.toLowerCase()
@@ -40,8 +40,13 @@ export function ConsentGate({ children }: { children: ReactNode }) {
       .then(([pendingSnap, linkSnap]) => {
         if (!alive) return
         if (pendingSnap?.exists() && pendingSnap.data().status === 'pending') {
-          setInvite({ consentVersion: pendingSnap.data().consentVersion || 'v1' })
-          setVariant('view')
+          const pd = pendingSnap.data()
+          // Combined view+edit invites (the default now) carry requestedAccess:
+          // 'write' + consentVersion v2 → one screen grants both. Legacy view-only
+          // invites (no requestedAccess) still show the view-only screen.
+          const combined = pd.requestedAccess === 'write'
+          setInvite({ consentVersion: pd.consentVersion || (combined ? 'v2' : 'v1') })
+          setVariant(combined ? 'view-edit' : 'view')
           setStatus('pending')
           return
         }

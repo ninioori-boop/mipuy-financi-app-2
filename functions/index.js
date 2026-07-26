@@ -205,7 +205,14 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     invitedByUid: callerUid,
     practiceId,
     clientUid: null,
-    consentVersion: CONSENT_VERSION,
+    // Combined view+edit consent: the client approves BOTH viewing and editing
+    // in ONE screen at first sign-in, instead of view now + a separate edit
+    // request later. Pre-arming the invite with the v2 (edit) consent version +
+    // requestedAccess:'write' lets setClientSharing's EXISTING edit-consent path
+    // grant write on that single acceptance — no rule/security change. Write is
+    // still only ever set BY THE CLIENT, gated on the explicit v2 checkbox.
+    consentVersion: EDIT_CONSENT_VERSION,
+    requestedAccess: "write",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
