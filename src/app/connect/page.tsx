@@ -11,6 +11,7 @@ import {
   type User,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
+import { BRAND } from '@/lib/brand'
 
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
@@ -156,7 +157,7 @@ export default function ConnectPage() {
 
   return (
     <main className="min-h-screen bg-surface text-txt flex flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-2xl font-bold text-gold mb-1">הכלכלן של הבית</h1>
+      <h1 className="text-2xl font-bold text-gold mb-1">{BRAND.nameHe}</h1>
       <p className="text-muted-txt text-sm mb-10">חיבור אפליקציית מעקב ההוצאות</p>
 
       {phase === 'loading' && (

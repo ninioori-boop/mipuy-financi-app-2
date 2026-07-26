@@ -4,6 +4,7 @@ import { Document, Page, Text, View, StyleSheet, Font, pdf } from '@react-pdf/re
 import type { AnnualRow, AnnualDebtRow } from '@/stores/annualStore'
 import type { MonthData } from '@/stores/monthlyStore'
 import { MONTH_IDS } from '@/lib/constants'
+import { BRAND } from '@/lib/brand'
 
 Font.register({
   family: 'Heebo',
@@ -34,7 +35,7 @@ function fmt(n: number) {
 }
 
 const C = {
-  gold:   '#A88844',
+  gold:   BRAND.colors.goldDark,
   dark:   '#1A1A1A',
   line:   '#D8CFB7',
   txt:    '#1A1A1A',
@@ -218,13 +219,13 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
   return (
     <Document
       title={`תכנון שנתי ${input.year}`}
-      author="The Home Economist"
+      author={BRAND.nameEn}
     >
       {/* Page 1: Cover + sections */}
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>The Home Economist</Text>
+            <Text style={s.brand}>{BRAND.nameEn}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <Text style={s.title}>תכנון שנתי {input.year}</Text>
@@ -286,7 +287,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         </View>
 
         <View style={s.footer} fixed>
-          <Text>The Home Economist · תכנון שנתי {input.year}</Text>
+          <Text>{BRAND.nameEn} · תכנון שנתי {input.year}</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>
@@ -295,7 +296,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
       <Page size="A4" orientation="landscape" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>The Home Economist</Text>
+            <Text style={s.brand}>{BRAND.nameEn}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <Text style={s.title}>פירוט חודשי {input.year}</Text>
@@ -365,7 +366,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         </View>
 
         <View style={s.footer} fixed>
-          <Text>The Home Economist · תכנון שנתי {input.year}</Text>
+          <Text>{BRAND.nameEn} · תכנון שנתי {input.year}</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>

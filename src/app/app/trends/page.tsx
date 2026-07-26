@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { MONTHS_LIST } from '@/lib/constants'
+import { BRAND } from '@/lib/brand'
 
 const SHORT = ['ינו','פבר','מרץ','אפר','מאי','יוני','יולי','אוג','ספט','אוק','נוב','דצמ']
 
@@ -200,8 +201,8 @@ export default function TrendsPage() {
           <AreaChart data={cashflowData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
             <defs>
               <linearGradient id="cfGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#C9A86C" stopOpacity={0.35} />
-                <stop offset="95%" stopColor="#C9A86C" stopOpacity={0.02} />
+                <stop offset="5%"  stopColor={BRAND.colors.gold} stopOpacity={0.35} />
+                <stop offset="95%" stopColor={BRAND.colors.gold} stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
@@ -210,8 +211,8 @@ export default function TrendsPage() {
               tickFormatter={tickFmt} width={44} />
             <ReferenceLine y={0} stroke="#3A3A3A" strokeWidth={1.5} />
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTipCash} />
-            <Area type="monotone" dataKey="תזרים" stroke="#C9A86C" strokeWidth={2}
-              fill="url(#cfGrad)" dot={{ fill: '#C9A86C', r: 4, strokeWidth: 0 }}
+            <Area type="monotone" dataKey="תזרים" stroke={BRAND.colors.gold} strokeWidth={2}
+              fill="url(#cfGrad)" dot={{ fill: BRAND.colors.gold, r: 4, strokeWidth: 0 }}
               activeDot={{ r: 8, strokeWidth: 0 }} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>

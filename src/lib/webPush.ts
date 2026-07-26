@@ -1,5 +1,6 @@
 import webpush from 'web-push'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
+import { BRAND } from '@/lib/brand'
 
 // Branded Web-Push delivery — sends the capture/budget notification to the
 // user's installed apps (iOS 16.4+ home-screen PWA, Android/desktop browsers),
@@ -30,7 +31,7 @@ function ensureConfigured(): boolean {
     configured = false
     return false
   }
-  webpush.setVapidDetails('mailto:ninioori@gmail.com', pub, priv)
+  webpush.setVapidDetails(`mailto:${BRAND.contactEmail}`, pub, priv)
   configured = true
   return true
 }

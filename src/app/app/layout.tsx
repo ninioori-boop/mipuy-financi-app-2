@@ -11,6 +11,7 @@ import { useSyncStore } from '@/stores/syncStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { hasLabAccess } from '@/lib/labAccess'
 import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
+import { BRAND } from '@/lib/brand'
 
 // Curated client-mobile tab set (shown in the in-app WebView's bottom nav).
 // Business tabs are appended only when the client has a business. Annual is
@@ -277,7 +278,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             ☰
           </button>
-          <span className="font-bold text-gold tracking-wide">הכלכלן של הבית</span>
+          <span className="font-bold text-gold tracking-wide">{BRAND.nameHe}</span>
         </header>
 
         {/* Side drawer — RTL, opens from the right (like the system) */}
@@ -347,8 +348,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ☰
           </button>
           <span className="font-bold text-gold tracking-wide truncate text-base sm:text-xl">
-            <span className="hidden sm:inline">The Home Economist</span>
-            <span className="sm:hidden">THE</span>
+            <span className="hidden sm:inline">{BRAND.nameEn}</span>
+            <span className="sm:hidden">{BRAND.wordmarkShort}</span>
           </span>
           <span className="hidden sm:block"><SaveStatusBar /></span>
         </div>

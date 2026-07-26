@@ -3,6 +3,7 @@
 import { Document, Page, Text, View, StyleSheet, Font, pdf } from '@react-pdf/renderer'
 import type { Meeting } from '@/stores/meetingsStore'
 import { MEETING_LABELS } from '@/stores/meetingsStore'
+import { BRAND } from '@/lib/brand'
 
 Font.register({
   family: 'Heebo',
@@ -13,7 +14,7 @@ Font.register({
 })
 
 const C = {
-  gold:  '#A88844',
+  gold:  BRAND.colors.goldDark,
   txt:   '#1A1A1A',
   muted: '#6B6357',
   line:  '#D8CFB7',
@@ -82,11 +83,11 @@ function formatDate(iso: string) {
 function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
   const today = new Date().toLocaleDateString('he-IL')
   return (
-    <Document title={meeting.title} author="The Home Economist">
+    <Document title={meeting.title} author={BRAND.nameEn}>
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>The Home Economist</Text>
+            <Text style={s.brand}>{BRAND.nameEn}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginTop: 6 }}>
@@ -129,7 +130,7 @@ function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
         )}
 
         <View style={s.footer} fixed>
-          <Text>The Home Economist · סיכום פגישה</Text>
+          <Text>{BRAND.nameEn} · סיכום פגישה</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>

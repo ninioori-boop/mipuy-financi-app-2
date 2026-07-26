@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { BRAND } from '@/lib/brand'
 
 // ── types ──────────────────────────────────────────────────────────────────
 type CalcMode    = 'byAmount'  | 'byPayment'
@@ -270,7 +271,7 @@ export default function LoansPage() {
                     <td style={{ padding: '6px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#8A8178', fontWeight: 600 }}>
                       {row.month}
                     </td>
-                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#C9A86C', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: BRAND.colors.gold, fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
                       {fmt(row.payment, 2)}
                     </td>
                     <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>
@@ -287,7 +288,7 @@ export default function LoansPage() {
                 {/* Totals row */}
                 <tr style={{ backgroundColor: '#1e1e1e', position: 'sticky', bottom: 0 }}>
                   <td style={{ padding: '8px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#F0EDEA', fontWeight: 700 }}>סך הכל</td>
-                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#C9A86C', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: BRAND.colors.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(totalPayment, 2)}
                   </td>
                   <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>

@@ -8,6 +8,7 @@ import { ImpersonationBanner } from '@/components/layout/ImpersonationBanner'
 import { CookieBanner } from '@/components/layout/CookieBanner'
 import { GoogleAnalytics } from '@/components/layout/GoogleAnalytics'
 import { Toaster } from '@/components/ui/sonner'
+import { BRAND } from '@/lib/brand'
 
 const rubik = Rubik({
   subsets: ['latin', 'hebrew'],
@@ -15,16 +16,16 @@ const rubik = Rubik({
 })
 
 export const metadata: Metadata = {
-  title: 'The Home Economist',
-  description: 'מיפוי פיננסי חכם',
+  title: BRAND.nameEn,
+  description: BRAND.tagline,
   // iPhone "Add to Home Screen" — installs like an app, opens full-screen.
   appleWebApp: {
     capable: true,
-    title: 'מעקב הוצאות',
+    title: BRAND.appShortName,
     statusBarStyle: 'black-translucent',
   },
   icons: {
-    apple: '/apple-touch-icon.png',
+    apple: BRAND.logo.appleTouch,
   },
 }
 

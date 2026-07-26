@@ -1,8 +1,10 @@
 // Public account + data deletion page (required by Google Play's data-deletion
 // policy). No auth — must be reachable by anyone.
+import { BRAND } from '@/lib/brand'
+
 export const metadata = {
-  title: 'מחיקת חשבון ונתונים — הכלכלן של הבית',
-  description: 'איך למחוק את החשבון והנתונים באפליקציית מעקב הוצאות — הכלכלן של הבית.',
+  title: `מחיקת חשבון ונתונים — ${BRAND.nameHe}`,
+  description: `איך למחוק את החשבון והנתונים באפליקציית ${BRAND.appShortName} — ${BRAND.nameHe}.`,
 }
 
 export default function DeleteAccountPage() {
@@ -11,14 +13,14 @@ export default function DeleteAccountPage() {
       <div className="w-full max-w-2xl space-y-6">
         <header className="space-y-1">
           <h1 className="text-2xl font-bold text-gold">מחיקת חשבון ונתונים</h1>
-          <p className="text-muted-txt text-sm">אפליקציית „מעקב הוצאות — הכלכלן של הבית” · com.orimipuy.tracker</p>
+          <p className="text-muted-txt text-sm">אפליקציית „{BRAND.appShortName} — {BRAND.nameHe}” · {BRAND.androidPackage}</p>
         </header>
 
         <section className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
           <h2 className="font-semibold text-txt">איך לבקש מחיקה</h2>
           <p className="text-sm text-muted-txt leading-relaxed">
             כדי למחוק את חשבונך ואת כל הנתונים הקשורים אליו, שלח/י אימייל לכתובת{' '}
-            <a href="mailto:ninioori@gmail.com?subject=בקשת מחיקת חשבון" className="text-gold hover:underline">ninioori@gmail.com</a>{' '}
+            <a href={`mailto:${BRAND.contactEmail}?subject=בקשת מחיקת חשבון`} className="text-gold hover:underline">{BRAND.contactEmail}</a>{' '}
             עם הנושא „בקשת מחיקת חשבון”, מכתובת האימייל שאיתה נרשמת. הבקשה תטופל תוך 30 יום, ותקבל/י אישור במייל.
           </p>
         </section>
@@ -36,7 +38,7 @@ export default function DeleteAccountPage() {
         </section>
 
         <footer className="text-xs text-muted-txt pt-2">
-          לשאלות: <a href="mailto:ninioori@gmail.com" className="text-gold hover:underline">ninioori@gmail.com</a>
+          לשאלות: <a href={`mailto:${BRAND.contactEmail}`} className="text-gold hover:underline">{BRAND.contactEmail}</a>
         </footer>
       </div>
     </div>
