@@ -27,22 +27,77 @@ const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const APP_URL = BRAND.appUrl;
 const MAIL_FROM = BRAND.mailFrom;
 
+const MAIL_HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+
+/** Rough relative luminance (0..1) of a #hex color. */
+function hexLum(hex) {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Accent for the email button/eyebrow. Emails sit on a white card, so a very
+ * light brand accent (e.g. white) would vanish — fall through the practice's
+ * palette until something dark enough for white, else the default gold.
+ */
+function pickEmailAccent(colors) {
+  for (const c of [colors?.gold, colors?.goldDark, colors?.surface, BRAND.gold]) {
+    if (typeof c === "string" && MAIL_HEX_RE.test(c) && hexLum(c) < 0.72) return c;
+  }
+  return BRAND.gold;
+}
+
+/**
+ * Brand for outbound mail: the inviting advisor's practice brand when set,
+ * else the deployment default. The sending ADDRESS stays our verified sender;
+ * only the display name changes per practice (their own domain is a later,
+ * per-firm Resend verification).
+ */
+async function mailBrandForPractice(practiceId) {
+  const base = {
+    nameHe: BRAND.nameHe,
+    wordmark: BRAND.wordmarkEn,
+    accent: BRAND.gold,
+    buttonText: "#1a1a1a",
+    from: BRAND.mailFrom,
+  };
+  if (!practiceId) return base;
+  try {
+    const snap = await db.collection("practices").doc(practiceId).get();
+    const b = snap.exists ? snap.data().brand : null;
+    if (!b || typeof b !== "object") return base;
+    const nameHe = typeof b.nameHe === "string" && b.nameHe.trim() ? b.nameHe.trim() : base.nameHe;
+    const accent = pickEmailAccent(b.colors);
+    return {
+      nameHe,
+      wordmark: typeof b.nameEn === "string" && b.nameEn.trim() ? b.nameEn.trim() : nameHe,
+      accent,
+      buttonText: hexLum(accent) > 0.5 ? "#1a1a1a" : "#ffffff",
+      from: `${nameHe} <invite@orimipuy.com>`,
+    };
+  } catch {
+    return base;
+  }
+}
+
 /** Simple RTL Hebrew invitation email. Inline styles only (email-client safe). */
-function inviteEmailHtml(email) {
+function inviteEmailHtml(email, b) {
   return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
     <div style="background:#ffffff;border:1px solid #e5e0d8;border-radius:12px;padding:28px;">
-      <div style="font-size:13px;color:#a8894c;letter-spacing:2px;margin-bottom:6px;">${BRAND.wordmarkEn}</div>
+      <div style="font-size:13px;color:${b.accent};letter-spacing:2px;margin-bottom:6px;">${b.wordmark}</div>
       <h1 style="font-size:22px;color:#1a1a1a;margin:0 0 14px;">הוזמנת למערכת ליווי פיננסי</h1>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 12px;">
-        היועץ הפיננסי שלך הזמין אותך למערכת "${BRAND.nameHe}": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
+        היועץ הפיננסי שלך הזמין אותך למערכת "${b.nameHe}": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
       </p>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
         פשוט נכנסים לקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
         (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
-        <a href="${APP_URL}" style="background:${BRAND.gold};color:#1a1a1a;text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
+        <a href="${APP_URL}" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
           להרשמה למערכת
         </a>
       </div>
@@ -50,7 +105,7 @@ function inviteEmailHtml(email) {
         חשוב: יש להתחבר עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
       </p>
     </div>
-    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת ${BRAND.nameHe} · ${APP_URL.replace("https://", "")}</p>
+    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת ${b.nameHe} · ${APP_URL.replace("https://", "")}</p>
   </div>
 </body></html>`;
 }
@@ -60,7 +115,7 @@ function inviteEmailHtml(email) {
  * not break the invite itself (the client is already allowlisted + linked).
  * Returns true when Resend accepted the send.
  */
-async function sendInviteEmail(toEmail) {
+async function sendInviteEmail(toEmail, b) {
   const key = RESEND_API_KEY.value();
   if (!key) return false;
   try {
@@ -68,10 +123,10 @@ async function sendInviteEmail(toEmail) {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: MAIL_FROM,
+        from: b.from,
         to: [toEmail],
-        subject: `הוזמנת למערכת הליווי הפיננסי של ${BRAND.nameHe}`,
-        html: inviteEmailHtml(toEmail),
+        subject: `הוזמנת למערכת הליווי הפיננסי של ${b.nameHe}`,
+        html: inviteEmailHtml(toEmail, b),
       }),
     });
     if (!res.ok) {
@@ -212,8 +267,9 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
   }, { merge: true });
   await batch.commit();
 
-  // Best-effort invitation email — the invite is already recorded either way.
-  const emailSent = await sendInviteEmail(email);
+  // Best-effort invitation email — the invite is already recorded either way,
+  // branded per the inviting advisor's practice.
+  const emailSent = await sendInviteEmail(email, await mailBrandForPractice(practiceId));
 
   return { ok: true, status: "pending", email, emailSent };
 });
