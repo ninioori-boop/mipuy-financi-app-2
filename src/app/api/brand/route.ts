@@ -20,6 +20,22 @@ export async function GET(req: NextRequest) {
 
   const authHeader = req.headers.get('authorization') || ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+
+  // Public branch: brand by practiceId, for the pre-login page reached from a
+  // branded invite link (?b=practiceId). Brand data (name + colors) is public
+  // by nature — it is shown to anyone the firm invites.
+  const pid = req.nextUrl.searchParams.get('practiceId')
+  if (!token && pid) {
+    try {
+      const snap = await db.collection('practices').doc(pid).get()
+      const brand = sanitizePracticeBrand(snap.exists ? snap.data()?.brand : null)
+      return NextResponse.json({ practiceId: pid, brand })
+    } catch (err) {
+      console.error(`[brand] public pid=${pid}`, err)
+      return NextResponse.json({ error: 'lookup failed' }, { status: 500 })
+    }
+  }
+
   if (!token) {
     return NextResponse.json({ error: 'missing token' }, { status: 401 })
   }

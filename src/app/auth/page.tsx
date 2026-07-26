@@ -1,7 +1,7 @@
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { EmailAuthForm } from '@/components/auth/EmailAuthForm'
 import { ShaderAnimation } from '@/components/ui/shader-animation'
-import { BRAND } from '@/lib/brand'
+import { BrandNameEn, BrandTagline } from '@/components/layout/BrandProvider'
 
 export default function AuthPage() {
   return (
@@ -32,9 +32,9 @@ export default function AuthPage() {
               <span className="text-2xl">🏠</span>
             </div>
             <h1 className="text-2xl font-bold text-gold drop-shadow-[0_2px_12px_rgba(201,168,108,0.4)]">
-              {BRAND.nameEn}
+              <BrandNameEn />
             </h1>
-            <p className="text-white/70 text-sm mt-1">{BRAND.tagline}</p>
+            <p className="text-white/70 text-sm mt-1"><BrandTagline /></p>
           </div>
 
           {/* Glass login card */}

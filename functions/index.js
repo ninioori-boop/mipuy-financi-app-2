@@ -62,6 +62,7 @@ async function mailBrandForPractice(practiceId) {
     accent: BRAND.gold,
     buttonText: "#1a1a1a",
     from: BRAND.mailFrom,
+    practiceId: null,
   };
   if (!practiceId) return base;
   try {
@@ -76,6 +77,7 @@ async function mailBrandForPractice(practiceId) {
       accent,
       buttonText: hexLum(accent) > 0.5 ? "#1a1a1a" : "#ffffff",
       from: `${nameHe} <invite@orimipuy.com>`,
+      practiceId,
     };
   } catch {
     return base;
@@ -97,7 +99,7 @@ function inviteEmailHtml(email, b) {
         (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
-        <a href="${APP_URL}" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
+        <a href="${b.practiceId ? `${APP_URL}/auth?b=${encodeURIComponent(b.practiceId)}` : APP_URL}" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
           להרשמה למערכת
         </a>
       </div>
