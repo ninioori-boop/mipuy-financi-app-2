@@ -96,3 +96,84 @@ export const BRAND: Brand = BRANDS[activeId] ?? BRANDS.orimipuy
 
 /** Bare domain of the app (e.g. shown in advisor instructions). */
 export const BRAND_DOMAIN = BRAND.appUrl.replace(/^https?:\/\//, '')
+
+/**
+ * Per-practice brand override — the "directions" strategy: every licensed firm
+ * (practice) carries its own branding, stored at practices/{practiceId}.brand
+ * and resolved after login via /api/brand. Everything is optional; whatever a
+ * firm doesn't set falls back to the deployment default above.
+ */
+export interface PracticeBrand {
+  nameHe?: string
+  nameEn?: string
+  wordmarkShort?: string
+  tagline?: string
+  logoUrl?: string
+  contactEmail?: string
+  colors?: Partial<Brand['colors']>
+}
+
+/** Keys a PracticeBrand may carry — used to sanitize DB data before use. */
+export const PRACTICE_BRAND_STRING_KEYS = [
+  'nameHe', 'nameEn', 'wordmarkShort', 'tagline', 'logoUrl', 'contactEmail',
+] as const
+
+export const PRACTICE_BRAND_COLOR_KEYS = [
+  'gold', 'goldLight', 'goldDark', 'surface', 'surface2', 'surface3',
+  'line', 'txt', 'mutedTxt', 'income', 'expense',
+] as const
+
+const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+
+/** Drop unknown keys / non-string values / non-hex colors from raw DB data. */
+export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
+  if (!raw || typeof raw !== 'object') return null
+  const src = raw as Record<string, unknown>
+  const out: PracticeBrand = {}
+  for (const k of PRACTICE_BRAND_STRING_KEYS) {
+    const v = src[k]
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim()
+  }
+  if (src.colors && typeof src.colors === 'object') {
+    const colors: Partial<Brand['colors']> = {}
+    for (const k of PRACTICE_BRAND_COLOR_KEYS) {
+      const v = (src.colors as Record<string, unknown>)[k]
+      if (typeof v === 'string' && HEX_RE.test(v.trim())) colors[k] = v.trim()
+    }
+    if (Object.keys(colors).length) out.colors = colors
+  }
+  return Object.keys(out).length ? out : null
+}
+
+/** The default brand with a practice's overrides layered on top. */
+export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefined): Brand {
+  if (!practice) return base
+  return {
+    ...base,
+    nameHe: practice.nameHe ?? base.nameHe,
+    nameEn: practice.nameEn ?? base.nameEn,
+    wordmarkShort: practice.wordmarkShort ?? practice.nameEn ?? base.wordmarkShort,
+    tagline: practice.tagline ?? base.tagline,
+    contactEmail: practice.contactEmail ?? base.contactEmail,
+    colors: { ...base.colors, ...practice.colors },
+  }
+}
+
+/**
+ * Which CSS custom properties each brand color drives (globals.css :root/.dark).
+ * Inline styles on <html> override both theme blocks, so applying these
+ * re-skins every screen that uses the Tailwind tokens — i.e. all of them.
+ */
+export const BRAND_CSS_VARS: Record<keyof Brand['colors'], string[]> = {
+  gold:      ['--gold', '--primary', '--accent', '--ring'],
+  goldLight: ['--gold-light'],
+  goldDark:  ['--gold-dark'],
+  surface:   ['--surface', '--background'],
+  surface2:  ['--surface2', '--card', '--popover'],
+  surface3:  ['--surface3', '--secondary', '--muted'],
+  line:      ['--line', '--border', '--input'],
+  txt:       ['--txt', '--foreground', '--card-foreground', '--popover-foreground', '--secondary-foreground'],
+  mutedTxt:  ['--muted-txt', '--muted-foreground'],
+  income:    ['--income'],
+  expense:   ['--expense'],
+}

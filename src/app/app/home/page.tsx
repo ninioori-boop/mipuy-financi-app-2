@@ -8,7 +8,7 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useAuthStore } from '@/stores/authStore'
 import { hasLabAccess } from '@/lib/labAccess'
-import { BRAND } from '@/lib/brand'
+import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
 import { SafeToSpendToday } from '@/components/home/SafeToSpendToday'
@@ -117,7 +117,7 @@ export default function HomePage() {
       {/* Greeting */}
       <div className="flex items-baseline justify-between gap-2 px-1 pt-1">
         <h1 className="text-2xl font-extrabold text-txt tracking-tight">
-          {firstName ? `שלום ${firstName} 👋` : `${BRAND.nameHe} 👋`}
+          {firstName ? `שלום ${firstName} 👋` : <><BrandNameHe /> 👋</>}
         </h1>
         <span className="text-sm text-muted-txt">{monthLabel(ym)}</span>
       </div>

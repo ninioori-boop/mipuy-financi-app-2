@@ -14,7 +14,7 @@ import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
 import { parseGeneratedMapping, validateMapping, type GeneratedMapping } from '@/lib/autoMap'
-import { BRAND } from '@/lib/brand'
+import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
 import type { Transaction } from '@/types/transaction'
 
@@ -489,7 +489,7 @@ export default function AutoMapPage() {
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6">
         <h1 className="text-2xl font-bold text-gold mb-1">🧪 מיפוי אוטומטי (ניסיוני)</h1>
         <p className="text-muted-txt text-sm">
-          מעבדה עצמאית: מזינים את נתוני הלקוח (Excel · PDF · תמונות · טקסט), ה‑AI קורא הכל ובונה תמונת מצב — מיפוי שלם לפי עקרונות {BRAND.nameHe}.
+          מעבדה עצמאית: מזינים את נתוני הלקוח (Excel · PDF · תמונות · טקסט), ה‑AI קורא הכל ובונה תמונת מצב — מיפוי שלם לפי עקרונות <BrandNameHe />.
           <strong className="text-txt"> מנותק מהמערכת</strong> — שום דבר לא נשמר למיפוי הרגיל עד שתלחץ "העתק למיפוי".
         </p>
       </div>
