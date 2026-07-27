@@ -11,6 +11,7 @@ export const runtime = 'nodejs'
 export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params
   const authUrl = new URL('/auth', req.nextUrl.origin)
+  let resolved = false
 
   if (/^[a-z0-9-]{2,32}$/.test(slug)) {
     try {
@@ -20,13 +21,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
         if (!hit.empty) {
           authUrl.searchParams.set('b', hit.docs[0].id)
           authUrl.searchParams.set('utm_source', 'shortlink')
+          resolved = true
         }
       }
     } catch { /* fall through to plain login */ }
   }
 
+  // Cache ONLY successful resolutions — a transient failure must never pin the
+  // unsigned fallback into the CDN for everyone.
   return NextResponse.redirect(authUrl, {
     status: 302,
-    headers: { 'Cache-Control': 'public, max-age=300, s-maxage=3600' },
+    headers: {
+      'Cache-Control': resolved ? 'public, max-age=300, s-maxage=3600' : 'no-store',
+    },
   })
 }
