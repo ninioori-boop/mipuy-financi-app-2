@@ -2,13 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Advisor identification for cross-user reads (mirrors src/lib/labAccess.ts
-    // LAB_EMAILS — rules can't import app code, keep the two in sync). Used ONLY
+    // Advisor identification for cross-user reads — ROLE-BASED: any provisioned
+    // advisor (advisors/{uid} is written only by the admin provisioning script,
+    // never by clients — it falls under the catch-all deny for writes). Used ONLY
     // for the intake cross-read below. The advisor↔client management system
     // (clientLinks) does NOT use this — it keys off invitedByUid on the link.
     function isAdvisor() {
       return request.auth != null
-        && request.auth.token.email in ['ninioori@gmail.com', 'eden00076@gmail.com'];
+        && exists(/databases/$(database)/documents/advisors/$(request.auth.uid));
     }
 
     // Platform owner (super-admin) — reads the oversight ledger across all

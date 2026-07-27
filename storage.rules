@@ -2,17 +2,14 @@ rules_version = '2';
 
 // Client document intake. Clients upload files for the advisor to review and
 // build a mapping from. A client writes/reads/deletes only their own folder;
-// the advisor (emails below) may read everyone's. Additive — no other storage
-// path is affected.
-//
-// NOTE: advisor emails are duplicated from src/lib/labAccess.ts (LAB_EMAILS)
-// because Storage rules can't import app code. Keep the two in sync.
+// any provisioned advisor (advisors/{uid} in Firestore, admin-managed) may
+// read everyone's. Additive — no other storage path is affected.
 service firebase.storage {
   match /b/{bucket}/o {
 
     function isAdvisor() {
       return request.auth != null
-        && request.auth.token.email in ['ninioori@gmail.com', 'eden00076@gmail.com'];
+        && firestore.exists(/databases/(default)/documents/advisors/$(request.auth.uid));
     }
 
     match /intake/{userId}/{fileName=**} {
