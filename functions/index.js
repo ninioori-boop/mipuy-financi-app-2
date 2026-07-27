@@ -316,6 +316,151 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
   return { ok: true, status: "pending", email, emailSent };
 });
 
+/** Advisor-invite email — same shell as the client invite, advisor-flavored copy. */
+function advisorInviteEmailHtml(email, b) {
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
+    <div style="background:#ffffff;border:1px solid #e5e0d8;border-radius:12px;padding:28px;">
+      <div style="font-size:13px;color:${b.accent};letter-spacing:2px;margin-bottom:6px;">${escapeHtml(b.wordmark)}</div>
+      <h1 style="font-size:22px;color:#1a1a1a;margin:0 0 14px;">הוזמנת להצטרף כיועץ</h1>
+      <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 12px;">
+        מנהל המשרד של "${escapeHtml(b.nameHe)}" הזמין אותך להצטרף לצוות היועצים במערכת.
+      </p>
+      <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
+        נכנסים בקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
+        (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${escapeHtml(email)}</span>), והמערכת תזהה אותך אוטומטית כיועץ.
+      </p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${APP_URL}/auth?${b.practiceId ? `b=${encodeURIComponent(b.practiceId)}&` : ""}utm_source=email&utm_medium=email&utm_campaign=advisor-invite" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
+          כניסה למערכת
+        </a>
+      </div>
+      <p style="font-size:12px;color:#8a8178;line-height:1.6;margin:0;">
+        אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
+      </p>
+    </div>
+    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת ${escapeHtml(b.nameHe)} · ${APP_URL.replace("https://", "")}</p>
+  </div>
+</body></html>`;
+}
+
+/** Best-effort advisor-invite send via Resend (logged like every send). */
+async function sendAdvisorInviteEmail(toEmail, b) {
+  const key = RESEND_API_KEY.value();
+  if (!key) return false;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: b.from,
+        to: [toEmail],
+        subject: `הוזמנת להצטרף כיועץ ל${b.nameHe}`,
+        html: advisorInviteEmailHtml(toEmail, b),
+      }),
+    });
+    const bodyText = await res.text().catch(() => "");
+    let resendId = null;
+    try { resendId = JSON.parse(bodyText).id ?? null; } catch { /* non-JSON */ }
+    await logEmail({
+      type: "advisor-invite", to: toEmail, practiceId: b.practiceId || null, resendId,
+      status: res.ok ? "accepted" : "rejected", httpStatus: res.status,
+      ...(res.ok ? {} : { error: bodyText.slice(0, 300) }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn("advisorInvite: send failed", e?.message || e);
+    return false;
+  }
+}
+
+/** Grant the advisor role: role doc + firm membership + consume the pending invite. */
+async function grantAdvisorRole(uid, email, practiceId) {
+  const batch = db.batch();
+  batch.set(db.collection("advisors").doc(uid),
+    { email, practiceId, role: "member", createdAt: FieldValue.serverTimestamp() },
+    { merge: true });
+  batch.set(db.collection("practices").doc(practiceId),
+    { advisorUids: FieldValue.arrayUnion(uid) }, { merge: true });
+  batch.set(db.collection("pendingAdvisors").doc(email),
+    { status: "consumed", claimedUid: uid, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true });
+  await batch.commit();
+}
+
+/**
+ * inviteAdvisor — the practice OWNER adds an advisor to their firm.
+ * Allowlists the email + records a pending advisor invite; the role is granted
+ * immediately when the account already exists, otherwise by claimAdvisorRole on
+ * first sign-in. Server-only writes — clients can't forge roles.
+ */
+exports.inviteAdvisor = onCall({ secrets: [RESEND_API_KEY] }, async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+  const advisorSnap = await db.collection("advisors").doc(callerUid).get();
+  const practiceId = advisorSnap.exists ? advisorSnap.data().practiceId : null;
+  if (!practiceId) throw new HttpsError("permission-denied", "רק יועץ יכול להזמין יועצים.");
+  const practiceSnap = await db.collection("practices").doc(practiceId).get();
+  if (!practiceSnap.exists || practiceSnap.data().ownerUid !== callerUid) {
+    throw new HttpsError("permission-denied", "רק מנהל המשרד יכול להזמין יועצים.");
+  }
+
+  const email = String(request.data?.email ?? "").toLowerCase().trim();
+  if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
+
+  let existingUid = null;
+  try {
+    existingUid = (await getAuth().getUserByEmail(email)).uid;
+  } catch (e) {
+    if (e.code !== "auth/user-not-found") throw e;
+  }
+  if (existingUid) {
+    const existingRole = await db.collection("advisors").doc(existingUid).get();
+    if (existingRole.exists) {
+      throw new HttpsError("already-exists", existingRole.data().practiceId === practiceId
+        ? "היועץ כבר חבר במשרד." : "המייל כבר משמש יועץ במשרד אחר.");
+    }
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection("allowlist").doc(email),
+    { email, addedAt: FieldValue.serverTimestamp(), source: "inviteAdvisor" }, { merge: true });
+  batch.set(db.collection("pendingAdvisors").doc(email), {
+    email, practiceId, invitedByUid: callerUid, status: "pending",
+    createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await batch.commit();
+
+  if (existingUid) {
+    await grantAdvisorRole(existingUid, email, practiceId);
+    return { ok: true, status: "granted", email, emailSent: false };
+  }
+
+  const b = await mailBrandForPractice(practiceId);
+  const emailSent = await sendAdvisorInviteEmail(email, b);
+  return { ok: true, status: "pending", email, emailSent };
+});
+
+/**
+ * claimAdvisorRole — an invited advisor's first sign-in turns the pending
+ * invite into a real role. Safe to call for anyone: no pending invite → no-op.
+ */
+exports.claimAdvisorRole = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  const email = request.auth?.token?.email?.toLowerCase().trim();
+  if (!uid || !email) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+  const existing = await db.collection("advisors").doc(uid).get();
+  if (existing.exists) return { ok: true, claimed: false };
+
+  const pending = await db.collection("pendingAdvisors").doc(email).get();
+  if (!pending.exists || pending.data().status !== "pending") return { ok: true, claimed: false };
+
+  await grantAdvisorRole(uid, email, pending.data().practiceId);
+  return { ok: true, claimed: true };
+});
+
 /**
  * setClientSharing — the client sets whether they share with their advisor.
  *

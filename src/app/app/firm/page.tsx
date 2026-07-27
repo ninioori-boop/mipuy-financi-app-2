@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -31,6 +32,30 @@ export default function FirmPage() {
   const { user } = useAuthStore()
   const [data, setData]   = useState<FirmOverview | null>(null)
   const [booted, setBooted] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviting, setInviting] = useState(false)
+
+  // Owner-only by construction: this page only renders after getFirmOverview
+  // authorized the caller as the practice owner.
+  async function inviteAdvisor(e: React.FormEvent) {
+    e.preventDefault()
+    const email = inviteEmail.trim()
+    if (!email || inviting) return
+    setInviting(true)
+    try {
+      const res = await callable<{ email: string }, { status: string; emailSent: boolean }>('inviteAdvisor')({ email })
+      if (res.data.status === 'granted') toast.success('היועץ צורף למשרד.')
+      else if (res.data.emailSent) toast.success('נשלחה הזמנה למייל. התפקיד יוענק בכניסה הראשונה שלו.')
+      else toast.warning('ההזמנה נרשמה, אבל שליחת המייל נכשלה. מסרו לו להיכנס עם המייל הזה והתפקיד יוענק.')
+      setInviteEmail('')
+      const fresh = await callable<Record<string, never>, FirmOverview>('getFirmOverview')({})
+      setData(fresh.data)
+    } catch (err) {
+      toast.error((err as { message?: string })?.message || 'ההזמנה נכשלה.')
+    } finally {
+      setInviting(false)
+    }
+  }
 
   useEffect(() => {
     if (!user) return
@@ -55,6 +80,22 @@ export default function FirmPage() {
           {data.advisorCount} יועצים · <span className="text-income font-semibold">{totalActive}</span> לקוחות משתפים · {totalClients} סה״כ
         </p>
       </header>
+
+      <form onSubmit={inviteAdvisor} className="rounded-2xl border border-line bg-surface2 p-4 sm:p-5 flex flex-wrap items-center gap-3">
+        <label htmlFor="advisor-email" className="text-sm font-semibold text-txt">הוספת יועץ למשרד:</label>
+        <input
+          id="advisor-email" dir="ltr" type="email" required
+          value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+          placeholder="advisor@example.com"
+          className="flex-1 min-w-[220px] rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60"
+        />
+        <button
+          type="submit" disabled={inviting}
+          className="rounded-lg bg-gold text-primary-foreground text-sm font-semibold px-4 py-2 disabled:opacity-60"
+        >
+          {inviting ? 'שולח…' : 'הזמן יועץ'}
+        </button>
+      </form>
 
       {data.advisors.length === 0 && (
         <div className="rounded-2xl border border-line bg-surface2 p-6 text-center text-muted-txt">

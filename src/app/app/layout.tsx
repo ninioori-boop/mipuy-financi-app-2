@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
-import { auth, db } from '@/lib/firebase'
+import { auth, db, callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
@@ -140,6 +140,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       setHasAdvisorLink(!!linkSnap?.exists())
       setIsAdvisorRole(!!adv)
       setIsOwnerRole(!!ownerSnap?.exists())
+      // First sign-in of an INVITED ADVISOR: no role doc yet — let the server
+      // claim a pending advisor invite (cheap no-op for everyone else).
+      if (!adv) {
+        try {
+          const res = await callable<Record<string, never>, { claimed: boolean }>('claimAdvisorRole')({})
+          if (alive && res.data.claimed) setIsAdvisorRole(true)
+        } catch { /* not signed in far enough / offline — stays a regular user */ }
+      }
       // Firm page is for REAL firms only: the caller owns a practice that has
       // MORE than one advisor. A freelancer (solo practice, still role 'owner')
       // gets no firm page — just their advisor dashboard.
