@@ -1,7 +1,7 @@
-// Service worker for branded Web-Push notifications ("הכלכלן של הבית").
+// Service worker for branded Web-Push notifications.
 // Registered by the EnablePushCard when the user turns notifications on.
 // Payload shape (JSON, sent by src/lib/webPush.ts):
-//   { title, body, url?, tag? }
+//   { title, body, url?, tag?, icon? }   — icon = the firm's logo when set
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -18,12 +18,12 @@ self.addEventListener('push', (event) => {
   } catch {
     /* non-JSON payload — show the fallback text */
   }
-  const title = data.title || 'הכלכלן של הבית'
+  const title = data.title || 'התקבל עדכון'
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || '',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: data.icon || '/icon-192.png',
+      badge: data.icon || '/icon-192.png',
       dir: 'rtl',
       lang: 'he',
       tag: data.tag || undefined,

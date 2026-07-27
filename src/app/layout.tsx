@@ -28,6 +28,8 @@ export const metadata: Metadata = {
   icons: {
     apple: BRAND.logo.appleTouch,
   },
+  // The static manifest.ts became a dynamic route (brand-aware) — link it here.
+  manifest: '/manifest.webmanifest',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

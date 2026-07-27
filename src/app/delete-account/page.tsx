@@ -1,6 +1,7 @@
 // Public account + data deletion page (required by Google Play's data-deletion
 // policy). No auth — must be reachable by anyone.
 import { BRAND } from '@/lib/brand'
+import { BrandContactEmail } from '@/components/layout/BrandProvider'
 
 export const metadata = {
   title: `מחיקת חשבון ונתונים — ${BRAND.nameHe}`,
@@ -20,7 +21,7 @@ export default function DeleteAccountPage() {
           <h2 className="font-semibold text-txt">איך לבקש מחיקה</h2>
           <p className="text-sm text-muted-txt leading-relaxed">
             כדי למחוק את חשבונך ואת כל הנתונים הקשורים אליו, שלח/י אימייל לכתובת{' '}
-            <a href={`mailto:${BRAND.contactEmail}?subject=בקשת מחיקת חשבון`} className="text-gold hover:underline">{BRAND.contactEmail}</a>{' '}
+            <BrandContactEmail subject="בקשת מחיקת חשבון" />{' '}
             עם הנושא „בקשת מחיקת חשבון”, מכתובת האימייל שאיתה נרשמת. הבקשה תטופל תוך 30 יום, ותקבל/י אישור במייל.
           </p>
         </section>
@@ -38,7 +39,7 @@ export default function DeleteAccountPage() {
         </section>
 
         <footer className="text-xs text-muted-txt pt-2">
-          לשאלות: <a href={`mailto:${BRAND.contactEmail}`} className="text-gold hover:underline">{BRAND.contactEmail}</a>
+          לשאלות: <BrandContactEmail />
         </footer>
       </div>
     </div>

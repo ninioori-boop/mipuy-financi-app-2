@@ -45,10 +45,10 @@ export function SaveStatusBar() {
   let label      = 'מוכן'
 
   if (status === 'loading') {
-    dotColor   = 'bg-blue-400 animate-pulse'
-    pillBg     = 'bg-blue-400/10'
-    pillBorder = 'border-blue-400/30'
-    textColor  = 'text-blue-300'
+    dotColor   = 'bg-muted-txt animate-pulse'
+    pillBg     = 'bg-surface3'
+    pillBorder = 'border-line'
+    textColor  = 'text-muted-txt'
     label      = 'טוען נתונים…'
   } else if (status === 'saving') {
     dotColor   = 'bg-gold animate-pulse'

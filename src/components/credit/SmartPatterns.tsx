@@ -243,7 +243,7 @@ export function SmartPatterns({ transactions, showSend = true }: { transactions:
   // Three colored chip styles for the multi-target send picker
   // (used by both "standing orders" and "recurring" sections — the same item
   // can legitimately be a fixed cost, a subscription, or an insurance payment)
-  const fixedBtn = 'border-blue-400/40 bg-blue-400/10 text-blue-300 hover:bg-blue-400/25'
+  const fixedBtn = 'border-line bg-surface3 text-txt hover:border-gold/50'
   const subBtn   = 'border-purple-400/40 bg-purple-400/10 text-purple-300 hover:bg-purple-400/25'
   const insBtn   = 'border-orange-400/40 bg-orange-400/10 text-orange-300 hover:bg-orange-400/25'
 
@@ -301,11 +301,11 @@ export function SmartPatterns({ transactions, showSend = true }: { transactions:
     {
       icon: '📌',
       title: 'הוראות קבע',
-      color: 'bg-blue-500/20 text-blue-300',
+      color: 'bg-surface3 text-txt',
       items: p.standingOrders.map(t => ({
         desc: t.desc, amount: t.amount,
         meta: t.date,
-        tag: 'הו"ק', tagColor: 'border-blue-400/50 text-blue-300',
+        tag: 'הו"ק', tagColor: 'border-line text-muted-txt',
         category: t.category,
         count: 1,                                     // standing orders are typically one charge per month
       })),

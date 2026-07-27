@@ -53,6 +53,8 @@ export interface Brand {
     icon512: string
     appleTouch: string
   }
+  /** Optional firm logo (https URL) — rendered where the default brand shows its mark. */
+  logoUrl?: string
 }
 
 const BRANDS: Record<string, Brand> = {
@@ -134,7 +136,14 @@ export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
   const out: PracticeBrand = {}
   for (const k of PRACTICE_BRAND_STRING_KEYS) {
     const v = src[k]
-    if (typeof v === 'string' && v.trim()) out[k] = v.trim()
+    if (typeof v !== 'string' || !v.trim()) continue
+    // logoUrl feeds <img src> / notification icons — https URLs only.
+    if (k === 'logoUrl') {
+      try {
+        if (new URL(v.trim()).protocol !== 'https:') continue
+      } catch { continue }
+    }
+    out[k] = v.trim()
   }
   if (src.colors && typeof src.colors === 'object') {
     const colors: Partial<Brand['colors']> = {}
@@ -170,6 +179,7 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
       ?? base.wordmarkShort,
     tagline: practice.tagline ?? base.tagline,
     contactEmail: practice.contactEmail ?? base.contactEmail,
+    logoUrl: practice.logoUrl ?? base.logoUrl,
     colors,
   }
 }

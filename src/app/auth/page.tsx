@@ -1,7 +1,7 @@
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { EmailAuthForm } from '@/components/auth/EmailAuthForm'
 import { ShaderAnimation } from '@/components/ui/shader-animation'
-import { BrandNameEn, BrandTagline } from '@/components/layout/BrandProvider'
+import { BrandNameEn, BrandTagline, BrandMark } from '@/components/layout/BrandProvider'
 
 export default function AuthPage() {
   return (
@@ -28,10 +28,10 @@ export default function AuthPage() {
 
           {/* Brand */}
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md mb-4 shadow-lg">
-              <span className="text-2xl">🏠</span>
+            <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md mb-4 shadow-lg overflow-hidden">
+              <BrandMark className="text-2xl max-h-10 w-auto" />
             </div>
-            <h1 className="text-2xl font-bold text-gold drop-shadow-[0_2px_12px_rgba(201,168,108,0.4)]">
+            <h1 className="text-2xl font-bold text-gold drop-shadow-[0_2px_12px_color-mix(in_srgb,var(--gold)_40%,transparent)]">
               <BrandNameEn />
             </h1>
             <p className="text-white/70 text-sm mt-1"><BrandTagline /></p>

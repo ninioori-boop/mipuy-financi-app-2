@@ -49,10 +49,23 @@ export function isPushConfigured(): boolean {
 export async function sendPushToUser(
   db: Firestore,
   uid: string,
-  payload: { title: string; body: string; url?: string; tag?: string },
+  payload: { title: string; body: string; url?: string; tag?: string; icon?: string },
 ): Promise<void> {
   if (!ensureConfigured()) return
   try {
+    // Brand the notification per the user's firm: their logo as the icon when
+    // one is set. Best-effort — a lookup failure keeps the default icon.
+    if (!payload.icon) {
+      try {
+        const link = await db.collection('clientLinks').doc(uid).get()
+        const pid = link.exists && link.data()?.status === 'active' ? link.data()?.practiceId : null
+        if (pid) {
+          const practice = await db.collection('practices').doc(String(pid)).get()
+          const logoUrl = practice.exists ? practice.data()?.brand?.logoUrl : null
+          if (typeof logoUrl === 'string' && logoUrl.startsWith('https://')) payload.icon = logoUrl
+        }
+      } catch { /* default icon */ }
+    }
     const snap = await db.collection('pushSubscriptions').doc(uid).get()
     const subs = snap.exists ? (snap.data()?.subs as Record<string, PushSubscriptionRecord> | undefined) : undefined
     if (!subs || typeof subs !== 'object') return

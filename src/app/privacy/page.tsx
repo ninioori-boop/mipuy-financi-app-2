@@ -1,4 +1,5 @@
 import { BRAND } from '@/lib/brand'
+import { BrandContactEmail } from '@/components/layout/BrandProvider'
 
 export default function PrivacyPage() {
   const updated = '25 ביולי 2026'
@@ -17,7 +18,7 @@ export default function PrivacyPage() {
             <strong className="text-txt">{BRAND.nameEn}</strong> היא אפליקציה לניהול ומיפוי פיננסי אישי.
             האפליקציה מופעלת על ידי יחיד/ים ומיועדת לשימוש אישי ומקצועי בישראל.
           </p>
-          <p>לפניות: <a href={`mailto:${BRAND.contactEmail}`} className="text-gold hover:underline">{BRAND.contactEmail}</a></p>
+          <p>לפניות: <BrandContactEmail /></p>
         </Section>
 
         <Section title="2. איזה מידע נאסף">
@@ -60,7 +61,7 @@ export default function PrivacyPage() {
           </ul>
           <p>
             למימוש זכויות אלה, שלח בקשה ל:
-            <a href={`mailto:${BRAND.contactEmail}`} className="text-gold hover:underline mr-1">{BRAND.contactEmail}</a>
+            <BrandContactEmail className="text-gold hover:underline mr-1" />
             — תגובה תינתן תוך 30 ימים.
           </p>
         </Section>
@@ -93,7 +94,7 @@ export default function PrivacyPage() {
           <p>
             בהתאם לחוק הגנת הפרטיות, מאגרי מידע מסוימים חייבים ברישום אצל רשם מאגרי המידע.
             אנו בוחנים את חובת הרישום ונפעל בהתאם לדרישות החוק. לפרטים נוספים פנו אלינו בכתובת{' '}
-            <a href={`mailto:${BRAND.contactEmail}`} className="text-gold hover:underline">{BRAND.contactEmail}</a>.
+            <BrandContactEmail />.
           </p>
         </Section>
 

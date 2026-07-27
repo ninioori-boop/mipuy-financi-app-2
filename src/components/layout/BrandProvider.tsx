@@ -43,7 +43,42 @@ export function BrandNameEn() { return <>{useBrand().nameEn}</> }
 export function BrandWordmarkShort() { return <>{useBrand().wordmarkShort}</> }
 export function BrandTagline() { return <>{useBrand().tagline}</> }
 
+/** The firm's contact address as a mailto link (legal pages). */
+export function BrandContactEmail({ subject, className }: { subject?: string; className?: string }) {
+  const email = useBrand().contactEmail
+  const href = subject ? `mailto:${email}?subject=${encodeURIComponent(subject)}` : `mailto:${email}`
+  return <a href={href} className={className ?? 'text-gold hover:underline'}>{email}</a>
+}
+
+/** The brand mark: the firm's logo when set, else the default 🏠. */
+export function BrandMark({ className }: { className?: string }) {
+  const brand = useBrand()
+  if (brand.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- runtime remote URL
+    return <img src={brand.logoUrl} alt={brand.nameHe} className={className ?? 'max-h-12 w-auto inline-block'} />
+  }
+  return <span className={className}>🏠</span>
+}
+
 const CACHE_PREFIX = 'brandCache:'
+
+// Cache entries hold { p: practiceId, brand } (v2); older entries were the
+// bare brand object — parse both, sanitize always.
+function parseCache(raw: string | null): { p: string | null; brand: PracticeBrand | null } {
+  if (!raw) return { p: null, brand: null }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (parsed && typeof parsed === 'object' && 'brand' in parsed) {
+      return {
+        p: typeof parsed.p === 'string' ? parsed.p : null,
+        brand: sanitizePracticeBrand(parsed.brand),
+      }
+    }
+    return { p: null, brand: sanitizePracticeBrand(parsed) }
+  } catch {
+    return { p: null, brand: null }
+  }
+}
 // Device-level "last seen brand" — keeps the LOGIN page in the firm's brand:
 // set when an invite link (?b=practiceId) or a practice member's login resolves
 // a brand, cleared when a default-brand user signs in.
@@ -76,7 +111,7 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false
 
-    const apply = (practice: PracticeBrand | null) => {
+    const apply = (practice: PracticeBrand | null, practiceId: string | null = null) => {
       if (cancelled) return
       const merged = mergeBrand(BRAND, practice)
       // Only inject CSS overrides when the practice actually recolors —
@@ -84,6 +119,15 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
       applyCssVars(merged, !!practice?.colors)
       setBrand(merged)
       setActiveBrand(merged)
+      // Browser chrome follows the brand: tab title + the PWA manifest link
+      // (so "add to home screen" installs the FIRM's app).
+      document.title = practice ? merged.nameEn : BRAND.nameEn
+      const link = document.querySelector('link[rel="manifest"]')
+      if (link) {
+        link.setAttribute('href', practice && practiceId
+          ? `/manifest.webmanifest?b=${encodeURIComponent(practiceId)}`
+          : '/manifest.webmanifest')
+      }
     }
 
     if (!user) {
@@ -100,16 +144,14 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
             if (cancelled) return
             const practice = sanitizePracticeBrand(data.brand)
             if (practice) {
-              try { localStorage.setItem(LAST_KEY, JSON.stringify(practice)) } catch { /* ignore */ }
+              try { localStorage.setItem(LAST_KEY, JSON.stringify({ p: pid, brand: practice })) } catch { /* ignore */ }
             }
-            apply(practice)
+            apply(practice, pid)
           } catch { /* offline — default stays */ }
         })()
       } else {
-        try {
-          const last = localStorage.getItem(LAST_KEY)
-          apply(last ? sanitizePracticeBrand(JSON.parse(last)) : null)
-        } catch { apply(null) }
+        const last = parseCache((() => { try { return localStorage.getItem(LAST_KEY) } catch { return null } })())
+        apply(last.brand, last.p)
       }
       return () => { cancelled = true }
     }
@@ -120,10 +162,10 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Cached brand first — no flash for returning users; an ABSENT cache
     // must reset to the default so a previous user's brand can't carry over.
-    try {
-      const cached = localStorage.getItem(CACHE_PREFIX + uid)
-      apply(cached ? sanitizePracticeBrand(JSON.parse(cached)) : null)
-    } catch { apply(null) }
+    {
+      const cached = parseCache((() => { try { return localStorage.getItem(CACHE_PREFIX + uid) } catch { return null } })())
+      apply(cached.brand, cached.p)
+    }
 
     // 2. Fresh lookup — also re-run via refreshBrand() after consent changes.
     const fetchAuthedBrand = async () => {
@@ -138,19 +180,21 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
           if (res.status === 401 || res.status === 503) apply(null)
           return
         }
-        const data = (await res.json()) as { brand?: unknown }
+        const data = (await res.json()) as { brand?: unknown; practiceId?: unknown }
         if (cancelled) return
         const practice = sanitizePracticeBrand(data.brand)
+        const pid = typeof data.practiceId === 'string' ? data.practiceId : null
         try {
           if (practice) {
-            localStorage.setItem(CACHE_PREFIX + uid, JSON.stringify(practice))
-            localStorage.setItem(LAST_KEY, JSON.stringify(practice))
+            const entry = JSON.stringify({ p: pid, brand: practice })
+            localStorage.setItem(CACHE_PREFIX + uid, entry)
+            localStorage.setItem(LAST_KEY, entry)
           } else {
             localStorage.removeItem(CACHE_PREFIX + uid)
             localStorage.removeItem(LAST_KEY)
           }
         } catch { /* storage full — branding still applies this session */ }
-        apply(practice)
+        apply(practice, pid)
       } catch { /* offline — cached/default brand stays */ }
     }
     refreshRef = fetchAuthedBrand
