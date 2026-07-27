@@ -26,6 +26,11 @@ const CLIENT_TABS = [
   { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
 ]
 const BUSINESS_TAB = { href: '/app/business', emoji: '🏢', label: 'עסק' }
+// WhatsApp connect in the client (phone) menu. Pilot-gated (lab only) until the
+// real WhatsApp number is live — on the Meta test number the bot can't message
+// clients outside the ~5 verified recipients, so a general link would silently
+// fail. At go-live, drop the isAdvisor guard below so every client sees it.
+const WHATSAPP_TAB = { href: '/app/whatsapp', emoji: '💬', label: 'חיבור וואטסאפ' }
 
 type TabItem  = { href: string; emoji: string; label: string; advisorOnly?: boolean }
 type TabGroup = { title: string; items: TabItem[] }
@@ -267,7 +272,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )
     }
 
-    const clientTabs = hasBusiness ? [...CLIENT_TABS, BUSINESS_TAB] : CLIENT_TABS
+    const clientTabs = [
+      ...CLIENT_TABS,
+      ...(hasBusiness ? [BUSINESS_TAB] : []),
+      ...(isAdvisor ? [WHATSAPP_TAB] : []),   // pilot-gated; remove isAdvisor at go-live
+    ]
     return (
       <div className="flex flex-col min-h-screen">
         {/* Slim header with the ☰ menu — same idea as the system */}

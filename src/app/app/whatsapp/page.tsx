@@ -45,10 +45,28 @@ export default function WhatsAppLinkPage() {
 
   return (
     <main className="mx-auto w-full max-w-md px-5 py-8 text-txt">
-      <h1 className="text-2xl font-bold text-gold mb-1">וואטסאפ</h1>
-      <p className="text-muted-txt text-sm mb-8">
-        חברו את הוואטסאפ שלכם כדי לתעד הוצאות ולשאול שאלות ישירות בצ'אט, בלי לפתוח את האפליקציה.
+      <h1 className="text-2xl font-bold text-gold mb-1">עוזר פיננסי בוואטסאפ</h1>
+      <p className="text-muted-txt text-sm mb-6">
+        חברו את הוואטסאפ פעם אחת, ותנהלו את הכסף ישירות מהצ'אט, בלי לפתוח את האפליקציה.
       </p>
+
+      {/* How the bot helps */}
+      <ul className="mb-8 space-y-2.5">
+        {[
+          { icon: '🧾', title: 'תיעוד במשפט', body: `כתבו "קניתי ב-50 בסופר" והבוט רושם אוטומטית בקטגוריה הנכונה, ישר לתיעוד ההוצאות, עם התראה אם חרגתם מהתקציב.` },
+          { icon: '💬', title: 'שאלות על הכסף', body: `שאלו "כמה נשאר לי לאוכל החודש?" וקבלו תשובה מיידית.` },
+          { icon: '⚡', title: 'בלי לפתוח את האפליקציה', body: `הכול קורה בצ'אט שאתם ממילא נמצאים בו כל היום.` },
+          { icon: '🔒', title: 'פרטי ומאובטח', body: `מקושר רק לחשבון שלכם, אחרי חיבור חד-פעמי.` },
+        ].map(f => (
+          <li key={f.title} className="flex gap-3 rounded-xl border border-line bg-surface2 p-3">
+            <span className="text-xl leading-none shrink-0">{f.icon}</span>
+            <div>
+              <p className="text-sm font-semibold text-txt">{f.title}</p>
+              <p className="text-xs text-muted-txt leading-relaxed mt-0.5">{f.body}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
 
       <div className="rounded-2xl border border-line bg-surface2 p-5">
         {phase === 'ready' ? (
