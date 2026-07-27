@@ -5,7 +5,7 @@ const PROJECT_ID = 'finance-machine-a36e9'
 let keysCache: Record<string, string> | null = null
 let keysCacheAt = 0
 
-export async function verifyFirebaseToken(idToken: string): Promise<{ uid: string }> {
+export async function verifyFirebaseToken(idToken: string): Promise<{ uid: string; email?: string }> {
   const now = Date.now()
 
   if (!keysCache || now - keysCacheAt > 3_600_000) {
@@ -22,7 +22,7 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
   const [h64, p64, s64] = parts
   const header  = JSON.parse(Buffer.from(h64, 'base64url').toString()) as { kid: string }
   const payload = JSON.parse(Buffer.from(p64, 'base64url').toString()) as {
-    uid?: string; sub?: string; exp: number; aud: string; iss: string
+    uid?: string; sub?: string; exp: number; aud: string; iss: string; email?: string
   }
 
   const pubKey = keysCache[header.kid]
@@ -37,5 +37,5 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
   if (payload.aud !== PROJECT_ID) throw new Error('Wrong audience')
   if (payload.iss !== `https://securetoken.google.com/${PROJECT_ID}`) throw new Error('Wrong issuer')
 
-  return { uid: (payload.uid ?? payload.sub)! }
+  return { uid: (payload.uid ?? payload.sub)!, email: payload.email }
 }

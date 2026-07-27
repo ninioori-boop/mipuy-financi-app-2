@@ -41,15 +41,19 @@ export async function GET(req: NextRequest) {
   }
 
   let uid: string
+  let email: string | undefined
   try {
     const v = await verifyFirebaseToken(token)
     uid = v.uid
+    email = v.email?.toLowerCase()
   } catch {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
   try {
-    // Advisor first (their own practice), then client (inviter's practice).
+    // Advisor first (their own practice), then client (inviter's practice),
+    // then a PENDING invite (pre-consent — so the consent screen itself is
+    // already in the inviting firm's brand).
     let practiceId: string | null = null
     const advisorSnap = await db.collection('advisors').doc(uid).get()
     if (advisorSnap.exists) {
@@ -59,6 +63,13 @@ export async function GET(req: NextRequest) {
       if (linkSnap.exists) {
         const link = linkSnap.data() as { practiceId?: string; status?: string }
         if (link.status === 'active') practiceId = link.practiceId || null
+      }
+      if (!practiceId && email) {
+        const pendingSnap = await db.collection('clientLinks').doc(`pending_${email}`).get()
+        if (pendingSnap.exists) {
+          const p = pendingSnap.data() as { practiceId?: string; status?: string }
+          if (p.status === 'pending') practiceId = p.practiceId || null
+        }
       }
     }
 

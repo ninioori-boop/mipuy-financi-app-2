@@ -28,6 +28,14 @@ export function useBrand(): Brand {
   return useContext(BrandContext)
 }
 
+// Imperative refresh hook-point: consent acceptance changes the caller's
+// practice mid-session, so the consent flow calls refreshBrand() right after
+// resolving instead of waiting for the next full page load.
+let refreshRef: (() => void) | null = null
+export function refreshBrand() {
+  refreshRef?.()
+}
+
 /** Convenience elements so any component (client or server) can render brand names. */
 export function BrandNameHe() { return <>{useBrand().nameHe}</> }
 export function BrandNameEn() { return <>{useBrand().nameEn}</> }
@@ -101,8 +109,8 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
       if (cached) apply(sanitizePracticeBrand(JSON.parse(cached)))
     } catch { /* corrupt cache — ignore */ }
 
-    // 2. Fresh lookup.
-    ;(async () => {
+    // 2. Fresh lookup — also re-run via refreshBrand() after consent changes.
+    const fetchAuthedBrand = async () => {
       try {
         const res = await fetch('/api/brand', {
           headers: { Authorization: await getAuthHeader() },
@@ -121,9 +129,11 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
         } catch { /* storage full — branding still applies this session */ }
         apply(practice)
       } catch { /* offline — cached/default brand stays */ }
-    })()
+    }
+    refreshRef = fetchAuthedBrand
+    fetchAuthedBrand()
 
-    return () => { cancelled = true }
+    return () => { cancelled = true; refreshRef = null }
   }, [user])
 
   return <BrandContext.Provider value={brand}>{children}</BrandContext.Provider>

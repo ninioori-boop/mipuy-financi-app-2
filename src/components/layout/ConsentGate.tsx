@@ -6,6 +6,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { ConsentScreen, type PendingInvite } from '@/components/auth/ConsentScreen'
+import { refreshBrand } from '@/components/layout/BrandProvider'
 
 // Sits between AuthProvider and DataSync. For a signed-in user it does ONE read
 // of clientLinks/pending_{email}: if a pending invite exists, it shows the
@@ -70,7 +71,7 @@ export function ConsentGate({ children }: { children: ReactNode }) {
     return <div className="min-h-[100dvh] grid place-items-center text-muted-txt">טוען…</div>
   }
   if (status === 'pending' && invite) {
-    return <ConsentScreen invite={invite} variant={variant} onResolved={() => setStatus('clear')} />
+    return <ConsentScreen invite={invite} variant={variant} onResolved={() => { setStatus('clear'); refreshBrand() }} />
   }
   return <>{children}</>
 }
