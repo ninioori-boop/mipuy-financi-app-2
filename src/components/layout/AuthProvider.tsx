@@ -32,6 +32,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (user && pathname.startsWith('/auth')) {
         let dest = '/welcome'
         try {
+          // A branded-firm device skips the welcome page (it is the DEFAULT
+          // brand's hardcoded-dark marketing screen) — straight into the app.
+          if (localStorage.getItem('brandCache:last')) dest = '/app/home'
+        } catch {}
+        try {
           const saved = sessionStorage.getItem('postLoginPath')
           // Only honor safe, in-app absolute paths (never external URLs).
           if (saved && saved.startsWith('/') && !saved.startsWith('//')) dest = saved
