@@ -95,10 +95,12 @@ export default function AdvisorPage() {
       const snap = await getDoc(doc(db, 'users', c.id))
       const raw  = snap.exists() ? snap.data() : null
       const data = raw?.data ?? null
-      if (!data) { toast.error('אין נתונים לעריכה עבור הלקוח הזה.'); return }
       const updatedAt = typeof raw?.updatedAt?.toMillis === 'function' ? raw.updatedAt.toMillis() : 0
       resetAllStores()
-      applySnapshot(data)
+      // A brand-new client has no snapshot yet — the advisor starts from a
+      // clean slate and the first save creates the client's file.
+      if (data) applySnapshot(data)
+      else toast.info('לקוח חדש: פותחים תיק ריק, השמירה הראשונה שלך תיצור אותו.')
       useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email }, 'edit', updatedAt)
       router.push('/app/home')
     } catch {
