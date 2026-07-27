@@ -10,6 +10,7 @@ import { CookieBanner } from '@/components/layout/CookieBanner'
 import { GoogleAnalytics } from '@/components/layout/GoogleAnalytics'
 import { Toaster } from '@/components/ui/sonner'
 import { BRAND } from '@/lib/brand'
+import { BRAND_BOOT_SCRIPT } from '@/lib/brandBoot'
 
 const rubik = Rubik({
   subsets: ['latin', 'hebrew'],
@@ -36,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="he" dir="rtl" className={`${rubik.variable} dark`}>
       <body className="min-h-screen bg-surface text-txt antialiased font-sans">
+        {/* Paint-blocking: re-applies the device's last brand BEFORE first
+            paint — no default-theme flash on reload for branded firms. */}
+        <script dangerouslySetInnerHTML={{ __html: BRAND_BOOT_SCRIPT }} />
         <AuthProvider>
           <BrandProvider>
             <ConsentGate>
