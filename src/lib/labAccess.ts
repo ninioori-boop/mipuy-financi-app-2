@@ -4,6 +4,10 @@
 export const LAB_EMAILS = [
   'ninioori@gmail.com',
   'eden00076@gmail.com',
+  'rotemgovrin@gmail.com',
+  'omri2ninio@gmail.com',
+  'talattia1@gmail.com',
+  'ronininio09@gmail.com',
 ]
 
 export function hasLabAccess(email?: string | null): boolean {
