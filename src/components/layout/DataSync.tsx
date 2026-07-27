@@ -61,10 +61,14 @@ const FOCUS_PROBE_MIN_MS    = 30_000
 // write over nagging users whose clock drifts.
 const CONFLICT_SKEW_MS = 15_000
 
-const SELF_CONFLICT_MSG =
-  'נמצאה בענן גרסה חדשה יותר של הנתונים, כנראה ממכשיר אחר. טעינת הגרסה החדשה תמחק שינויים שעשית כאן ולא נשמרו.'
-const ADVISOR_CONFLICT_MSG =
-  'הלקוח עדכן נתונים במקביל. טעינת הגרסה של הלקוח תמחק שינויים שעשית כאן ולא נשמרו.'
+const SELF_CONFLICT_MSG = {
+  title: 'נמצאה גרסה חדשה יותר בענן',
+  description: 'כנראה ממכשיר אחר. טעינת הגרסה החדשה תמחק שינויים שלא נשמרו כאן.',
+}
+const ADVISOR_CONFLICT_MSG = {
+  title: 'הלקוח עדכן נתונים במקביל',
+  description: 'טעינת הגרסה של הלקוח תמחק שינויים שלא נשמרו כאן.',
+}
 
 // localStorage key for the per-user snapshot backup. Kept per-uid so
 // switching accounts on the same device doesn't cross the streams.
@@ -144,7 +148,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const probeBeforeWrite = async (opts: {
     targetUid: string
     baseline: React.MutableRefObject<number>
-    message: string
+    message: { title: string; description: string }
     revalidate: () => boolean
     skipOnce?: boolean
   }): Promise<'proceed' | 'blocked'> => {
@@ -173,7 +177,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       return 'proceed'
     }
 
-    const id = toast.warning(opts.message, {
+    const id = toast.warning(opts.message.title, {
+      description: opts.message.description,
+      // Two Hebrew action buttons squeeze the default toast — widen it so the
+      // text stays readable (mobile-safe via the vw cap).
+      style: { width: 'min(92vw, 480px)' },
       duration: Infinity,
       closeButton: true,
       onDismiss: () => {
