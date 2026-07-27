@@ -116,12 +116,14 @@ export interface PracticeBrand {
   logoUrl?: string
   contactEmail?: string
   wordmarkColor?: string
+  /** Short link slug (/go/{slug} → the firm's branded login). Lowercase a-z0-9-. */
+  slug?: string
   colors?: Partial<Brand['colors']>
 }
 
 /** Keys a PracticeBrand may carry — used to sanitize DB data before use. */
 export const PRACTICE_BRAND_STRING_KEYS = [
-  'nameHe', 'nameEn', 'wordmarkShort', 'tagline', 'logoUrl', 'contactEmail', 'wordmarkColor',
+  'nameHe', 'nameEn', 'wordmarkShort', 'tagline', 'logoUrl', 'contactEmail', 'wordmarkColor', 'slug',
 ] as const
 
 export const PRACTICE_BRAND_COLOR_KEYS = [
@@ -149,6 +151,8 @@ export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
     }
     // wordmarkColor feeds a CSS var — hex only, like the palette.
     if (k === 'wordmarkColor' && !HEX_RE.test(v.trim())) continue
+    // slug feeds a URL path segment — strict shape.
+    if (k === 'slug' && !/^[a-z0-9-]{2,32}$/.test(v.trim())) continue
     out[k] = v.trim()
   }
   if (src.colors && typeof src.colors === 'object') {
