@@ -96,6 +96,15 @@ async function mailBrandForPractice(practiceId) {
   }
 }
 
+/** Best-effort send audit into emailLog — a log failure never breaks a send. */
+async function logEmail(entry) {
+  try {
+    await db.collection("emailLog").add({ ...entry, createdAt: FieldValue.serverTimestamp() });
+  } catch (e) {
+    console.warn("emailLog write failed", e && e.message ? e.message : e);
+  }
+}
+
 /** Simple RTL Hebrew invitation email. Inline styles only (email-client safe). */
 function inviteEmailHtml(email, b) {
   return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
@@ -111,7 +120,7 @@ function inviteEmailHtml(email, b) {
         (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${escapeHtml(email)}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
-        <a href="${b.practiceId ? `${APP_URL}/auth?b=${encodeURIComponent(b.practiceId)}` : APP_URL}" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
+        <a href="${APP_URL}/auth?${b.practiceId ? `b=${encodeURIComponent(b.practiceId)}&` : ""}utm_source=email&utm_medium=email&utm_campaign=invite" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
           להרשמה למערכת
         </a>
       </div>
@@ -143,13 +152,22 @@ async function sendInviteEmail(toEmail, b) {
         html: inviteEmailHtml(toEmail, b),
       }),
     });
+    const bodyText = await res.text().catch(() => "");
+    let resendId = null;
+    try { resendId = JSON.parse(bodyText).id ?? null; } catch { /* non-JSON body */ }
+    await logEmail({
+      type: "invite", to: toEmail, practiceId: b.practiceId || null, resendId,
+      status: res.ok ? "accepted" : "rejected", httpStatus: res.status,
+      ...(res.ok ? {} : { error: bodyText.slice(0, 300) }),
+    });
     if (!res.ok) {
-      console.warn("inviteEmail: resend rejected", res.status, await res.text().catch(() => ""));
+      console.warn("inviteEmail: resend rejected", res.status, bodyText);
       return false;
     }
     return true;
   } catch (e) {
     console.warn("inviteEmail: send failed", e?.message || e);
+    await logEmail({ type: "invite", to: toEmail, practiceId: b.practiceId || null, resendId: null, status: "error", httpStatus: 0, error: String(e?.message || e).slice(0, 300) });
     return false;
   }
 }

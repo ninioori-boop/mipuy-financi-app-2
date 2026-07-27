@@ -34,10 +34,9 @@ import { useRecurringStore } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
-import { doc, getDoc } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
+import { registerSaveBaselineBump } from '@/lib/saveBaseline'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
 
@@ -51,6 +50,21 @@ const RESTORE_SKEW_MS   = 5_000
 // written at most this often. Keeps history granular enough to rewind
 // a bad edit without inflating storage costs.
 const VERSION_INTERVAL_MS = 5 * 60 * 1000
+// Anti-clobber probe floors: at most one freshness read per save burst, and one
+// refetch per tab-focus window. Stamped ONLY on clean probes/successful saves —
+// a dismissed conflict must not ride the throttle into a silent overwrite.
+const PROBE_MIN_INTERVAL_MS = 10_000
+const FOCUS_PROBE_MIN_MS    = 30_000
+// Conflict-detection skew tolerance. Wider than RESTORE_SKEW_MS on purpose:
+// baselines mix client clocks with server timestamps, and a false conflict is
+// a hard block here (not just a prompt) — favor missing a sub-15s foreign
+// write over nagging users whose clock drifts.
+const CONFLICT_SKEW_MS = 15_000
+
+const SELF_CONFLICT_MSG =
+  'נמצאה בענן גרסה חדשה יותר של הנתונים, כנראה ממכשיר אחר. טעינת הגרסה החדשה תמחק שינויים שעשית כאן ולא נשמרו.'
+const ADVISOR_CONFLICT_MSG =
+  'הלקוח עדכן נתונים במקביל. טעינת הגרסה של הלקוח תמחק שינויים שעשית כאן ולא נשמרו.'
 
 // localStorage key for the per-user snapshot backup. Kept per-uid so
 // switching accounts on the same device doesn't cross the streams.
@@ -104,6 +118,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   // Concurrent-edit detection baseline: the client doc's updatedAt (epoch ms)
   // as of the last time WE loaded/wrote it, during advisor edit mode.
   const clientDocBaseline = useRef<number>(0)
+  // Anti-clobber state (see probeBeforeWrite / refetchOnFocus):
+  const selfDocBaseline  = useRef<number>(0)   // users/{uid}.updatedAt (ms) at our last load/write — self path
+  const lastProbeAt      = useRef<number>(0)   // last CLEAN probe or successful save (throttle)
+  const lastFocusProbeAt = useRef<number>(0)
+  const skipProbeOnce    = useRef<boolean>(false)          // set by "שמור בכל זאת"
+  const conflictToastId  = useRef<string | number | null>(null)
+  const requestSaveRef   = useRef<() => void>(() => {})    // effect 2 exposes triggerSave here
   const [retryCount, setRetryCount] = useState(0)
 
   // Advisor edit-mode helper: are we saving to a CLIENT's uid, and which uid.
@@ -113,6 +134,140 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const editMode = !!imp.client && imp.mode === 'edit'
     const uid = editMode ? imp.client!.uid : useAuthStore.getState().user?.uid ?? ''
     return { editMode, uid, imp }
+  }
+
+  // ── Anti-clobber: pre-write freshness probe ──
+  // Before any full-snapshot write, check whether the target doc changed since
+  // OUR last load/write. If it did, block the write and let the user choose:
+  // load the newer version (dropping local unsaved edits) or overwrite anyway.
+  // Fail-open on probe errors — a transient read failure must never block saving.
+  const probeBeforeWrite = async (opts: {
+    targetUid: string
+    baseline: React.MutableRefObject<number>
+    message: string
+    revalidate: () => boolean
+    skipOnce?: boolean
+  }): Promise<'proceed' | 'blocked'> => {
+    // "שמור בכל זאת" consent — consumed by the CALLER at fire time so an
+    // aborted save (offline etc.) burns it instead of leaking it forward.
+    if (opts.skipOnce) return 'proceed'
+    // An unresolved conflict prompt gates all writes — no re-probe, no stacking.
+    if (conflictToastId.current != null) return 'blocked'
+    if (Date.now() - lastProbeAt.current < PROBE_MIN_INTERVAL_MS) return 'proceed'
+
+    let remoteTs = 0
+    try {
+      const remote = await loadUserData(opts.targetUid)
+      remoteTs = remote?.updatedAt ?? 0
+    } catch {
+      return 'proceed'
+    }
+    if (!opts.revalidate()) return 'blocked'
+    // A prompt may have opened while we awaited — never stack a second one.
+    if (conflictToastId.current != null) return 'blocked'
+    if (remoteTs <= opts.baseline.current + CONFLICT_SKEW_MS) {
+      // Creep-correct the baseline toward SERVER truth — heals clock skew in
+      // both directions over time.
+      opts.baseline.current = Math.max(opts.baseline.current, remoteTs)
+      lastProbeAt.current = Date.now()
+      return 'proceed'
+    }
+
+    const id = toast.warning(opts.message, {
+      duration: Infinity,
+      closeButton: true,
+      onDismiss: () => {
+        // Closed without choosing: re-arm the save so the conflict re-surfaces
+        // instead of silently stalling the session's saves.
+        conflictToastId.current = null
+        requestSaveRef.current()
+      },
+      action: {
+        label: 'טען את הגרסה החדשה',
+        onClick: async () => {
+          conflictToastId.current = null
+          try {
+            // Fresh read — more writes may have landed while the prompt sat open.
+            const fresh = await loadUserData(opts.targetUid)
+            if (!opts.revalidate() || !fresh?.data) { toast.error('הטעינה נכשלה, נסה שוב.'); return }
+            resetAllStores()
+            applySnapshot(fresh.data)
+            const json = JSON.stringify(collectSnapshot())
+            lastSavedJson.current  = json
+            lastBackupJson.current = json
+            opts.baseline.current  = fresh.updatedAt
+            useSyncStore.getState().setDirty(false)
+            toast.success('הגרסה החדשה נטענה.')
+          } catch {
+            toast.error('הטעינה נכשלה, נסה שוב.')
+          }
+        },
+      },
+      cancel: {
+        label: 'שמור בכל זאת',
+        onClick: () => {
+          conflictToastId.current = null
+          skipProbeOnce.current = true
+          requestSaveRef.current()   // re-arm the normal debounce; every guard re-runs
+        },
+      },
+    })
+    conflictToastId.current = id
+    return 'blocked'
+  }
+
+  // ── Anti-clobber: refetch on tab focus ──
+  // Coming back to a backgrounded tab: if we're clean, pull the newer version
+  // (another device may have saved); if we're dirty AND the cloud moved, show
+  // the same choice prompt instead of silently keeping divergent state.
+  const refetchOnFocus = async () => {
+    if (!useSyncStore.getState().hydrated) return
+    if (Date.now() - lastFocusProbeAt.current < FOCUS_PROBE_MIN_MS) return
+    lastFocusProbeAt.current = Date.now()
+
+    const imp = useImpersonationStore.getState()
+    if (imp.client && imp.mode !== 'edit') return   // view mode: never touch the shown client data
+    const editMode  = !!imp.client && imp.mode === 'edit'
+    const targetUid = editMode ? imp.client!.uid : useAuthStore.getState().user?.uid
+    if (!targetUid) return
+    const baseline = editMode ? clientDocBaseline : selfDocBaseline
+    const message  = editMode ? ADVISOR_CONFLICT_MSG : SELF_CONFLICT_MSG
+    const stillValid = () => {
+      const now = useImpersonationStore.getState()
+      const sameMode = (!!now.client && now.mode === 'edit') === editMode
+      const sameUid = editMode
+        ? now.client?.uid === targetUid
+        : useAuthStore.getState().user?.uid === targetUid
+      return sameMode && sameUid
+    }
+
+    // NOT the sticky isDirty flag — the beacon flush clears lastSavedJson but
+    // leaves isDirty on, and that flow must still refetch.
+    const dirtyNow = JSON.stringify(collectSnapshot()) !== lastSavedJson.current
+    if (dirtyNow) {
+      await probeBeforeWrite({ targetUid, baseline, message, revalidate: stillValid })
+      return
+    }
+
+    try {
+      const remote = await loadUserData(targetUid)
+      if (!remote?.data) return
+      // Re-check everything after the await — the user may have typed, logged
+      // out or switched modes while the fetch was in flight.
+      if (!stillValid()) return
+      const preJson = JSON.stringify(collectSnapshot())
+      if (preJson !== lastSavedJson.current) return
+      if (remote.updatedAt <= baseline.current + CONFLICT_SKEW_MS) return
+      resetAllStores()
+      applySnapshot(remote.data)
+      const json = JSON.stringify(collectSnapshot())
+      lastSavedJson.current  = json
+      lastBackupJson.current = json
+      baseline.current = remote.updatedAt
+      useSyncStore.getState().setDirty(false)
+      // A remote write can be OUR OWN beacon echo — only announce real change.
+      if (json !== preJson) toast.info('הנתונים עודכנו ממכשיר אחר.', { duration: 4000 })
+    } catch { /* offline — ignore */ }
   }
 
   // Drain server-pushed transactions (Apple Pay / Google Pay) into the expense
@@ -140,11 +295,30 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       setHydrated(false)
       setStatus('idle')
       lastSavedJson.current = ''
+      // Anti-clobber state must not leak into the next session/user:
+      selfDocBaseline.current  = 0
+      lastProbeAt.current      = 0
+      lastFocusProbeAt.current = 0
+      skipProbeOnce.current    = false
+      if (conflictToastId.current != null) {
+        toast.dismiss(conflictToastId.current)
+        conflictToastId.current = null
+      }
       return
     }
 
     let cancelled = false
     setStatus('loading')
+
+    // Fresh identity ⇒ fresh anti-clobber state (covers direct userA→userB
+    // switches that never pass through the null branch above).
+    skipProbeOnce.current    = false
+    lastProbeAt.current      = 0
+    lastFocusProbeAt.current = 0
+    if (conflictToastId.current != null) {
+      toast.dismiss(conflictToastId.current)
+      conflictToastId.current = null
+    }
 
     // Shared cross-account category-learning pool — loaded silently, never blocks
     // the main load. Lives outside the per-user snapshot, so it never triggers a save.
@@ -161,6 +335,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // Seed the localStorage-backup baseline too so a fresh load doesn't
         // immediately trigger a redundant mirror write.
         lastBackupJson.current = lastSavedJson.current
+        // Anti-clobber baseline: the server updatedAt we just loaded IS our
+        // last-known truth for the self path.
+        selfDocBaseline.current = result?.updatedAt ?? 0
         setHydrated(true)
         setStatus('idle')
 
@@ -253,6 +430,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       // ── Firestore debounced save (unchanged from before) ──
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
+        // Consume a one-time "שמור בכל זאת" consent at FIRE time — an aborted
+        // save burns it rather than leaking it to a later, different conflict.
+        const skipProbe = skipProbeOnce.current
+        skipProbeOnce.current = false
+
         // ── ADVISOR EDIT-MODE WRITE PATH ──────────────────────────────────
         // Resolve the target at FIRE time. In edit mode we REDIRECT the write
         // to the CLIENT's doc (authorized by the Firestore write rule: active
@@ -277,23 +459,27 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           }
           if (!navigator.onLine) { setStatus('offline'); return }
 
+          // Anti-clobber: BLOCK (not just warn) when the client saved since our
+          // baseline — the user chooses between loading their version and
+          // overwriting. Runs BEFORE setStatus('saving') so nothing gets stuck.
+          const verdict = await probeBeforeWrite({
+            targetUid: clientUid,
+            baseline: clientDocBaseline,
+            message: ADVISOR_CONFLICT_MSG,
+            skipOnce: skipProbe,
+            revalidate: () => {
+              const t = saveTarget()
+              return t.editMode && t.uid === clientUid && !!useAuthStore.getState().user
+            },
+          })
+          if (verdict === 'blocked') return
+
           setStatus('saving')
           try {
-            // Concurrent-edit detection (BEST-EFFORT, not a lock): if the client
-            // touched their own doc since our baseline, warn — last-save-wins,
-            // we still overwrite. Skew buffer avoids false positives.
-            try {
-              const cur      = await getDoc(doc(db, 'users', clientUid))
-              const remoteTs = typeof cur.data()?.updatedAt?.toMillis === 'function'
-                ? cur.data()!.updatedAt.toMillis() : 0
-              if (remoteTs > clientDocBaseline.current + RESTORE_SKEW_MS) {
-                toast.warning('⚠️ הלקוח עדכן נתונים במקביל — השמירה שלך תדרוס אותם.', { duration: 6000 })
-              }
-            } catch { /* probe failed — proceed with the save anyway */ }
-
             await saveClientDataAsAdvisor(clientUid, snap, advisorUid)
             lastSavedJson.current      = json
             clientDocBaseline.current  = Date.now()
+            lastProbeAt.current        = Date.now()
             markSaved()
             const nowJson = JSON.stringify(collectSnapshot())
             if (nowJson === json) useSyncStore.getState().setDirty(false)
@@ -344,10 +530,25 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           return
         }
 
+        // Anti-clobber: block the write when a newer version exists in the
+        // cloud (another device). Runs BEFORE setStatus('saving').
+        const verdict = await probeBeforeWrite({
+          targetUid: user.uid,
+          baseline: selfDocBaseline,
+          message: SELF_CONFLICT_MSG,
+          skipOnce: skipProbe,
+          revalidate: () =>
+            useAuthStore.getState().user?.uid === user.uid
+            && !useImpersonationStore.getState().client,
+        })
+        if (verdict === 'blocked') return
+
         setStatus('saving')
         try {
           await saveUserData(user.uid, snap)
           lastSavedJson.current = json
+          selfDocBaseline.current = Date.now()
+          lastProbeAt.current     = Date.now()
           markSaved()
           // Only clear the dirty flag if nothing else changed WHILE the save
           // was in flight. If it did, isDirty stays true — the next debounce
@@ -372,6 +573,18 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       }, DEBOUNCE_MS)
     }
 
+    // Expose the trigger so a "שמור בכל זאת" can re-arm the normal debounce.
+    requestSaveRef.current = triggerSave
+    // Out-of-band snapshot writers (transaction-inbox drain) report their save
+    // here so the probe doesn't read it back as a foreign conflict.
+    registerSaveBaselineBump(() => {
+      const json = JSON.stringify(collectSnapshot())
+      lastSavedJson.current   = json
+      lastBackupJson.current  = json
+      selfDocBaseline.current = Date.now()
+      lastProbeAt.current     = Date.now()
+    })
+
     const unsubs = [
       useMonthlyStore.subscribe(triggerSave),
       useAnnualStore.subscribe(triggerSave),
@@ -393,6 +606,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       unsubs.forEach(unsub => unsub())
       if (saveTimer.current)   clearTimeout(saveTimer.current)
       if (backupTimer.current) clearTimeout(backupTimer.current)
+      requestSaveRef.current = () => {}
+      registerSaveBaselineBump(null)
     }
   }, [user, hydrated, setStatus, markSaved])
 
@@ -416,6 +631,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       clientDocBaseline.current = state.clientUpdatedAt || 0
       lastVersionAt.current     = 0        // allow the first real edit to version
       viewEditWarned.current    = false
+      // A pending self-conflict prompt must never act on CLIENT data, and the
+      // advisor's FIRST client save must not ride a recent self-probe's throttle:
+      skipProbeOnce.current     = false
+      lastProbeAt.current       = 0
+      if (conflictToastId.current != null) {
+        toast.dismiss(conflictToastId.current)
+        conflictToastId.current = null
+      }
     })
     return () => unsub()
   }, [])
@@ -528,7 +751,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       if (size > MAX_BYTES) return                   // same guard as the debounced save
 
       try {
-        const payload = JSON.stringify({ token, snapshot: snap })
+        // baseline lets the server refuse a STALE flush (409) instead of
+        // clobbering a newer version another device saved meanwhile.
+        const payload = JSON.stringify({ token, snapshot: snap, baseline: selfDocBaseline.current })
         const blob = new Blob([payload], { type: 'application/json' })
         // sendBeacon returns false if the browser refused to queue it (rare —
         // usually only if the payload is above browser's beacon size limit).
@@ -544,6 +769,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         }
         // Optimistic update — assume it went through, so a subsequent hide
         // event in the same session doesn't re-send an identical payload.
+        // The baseline is deliberately NOT advanced: a failed/409 beacon with
+        // an advanced baseline would mask the other device's newer data. Our
+        // own successful beacon merely shows up as a harmless self-echo on the
+        // next focus refetch (applied silently, no toast).
         lastSavedJson.current = json
       } catch { /* worst case, the debounced save on next re-open still fires */ }
     }
@@ -551,6 +780,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     function onPageHide() { flushIfDirty() }
     function onVisibility() {
       if (document.visibilityState === 'hidden') flushIfDirty()
+      else if (document.visibilityState === 'visible') void refetchOnFocus()
     }
 
     window.addEventListener('pagehide',            onPageHide)

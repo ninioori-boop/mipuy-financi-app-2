@@ -7,6 +7,7 @@ import { setActiveBrand } from '@/lib/activeBrand'
 import {
   BRAND,
   BRAND_CSS_VARS,
+  hexLuminance,
   mergeBrand,
   sanitizePracticeBrand,
   type Brand,
@@ -56,6 +57,15 @@ function applyCssVars(brand: Brand, hasOverrides: boolean) {
       if (hasOverrides) root.style.setProperty(v, value)
       else root.style.removeProperty(v)
     }
+  }
+  // Text ON the accent (buttons/badges): dark on a light accent, light on a
+  // dark one — the stylesheet default assumes the gold accent.
+  const fgVars = ['--primary-foreground', '--accent-foreground']
+  if (hasOverrides) {
+    const fg = hexLuminance(brand.colors.gold) > 0.5 ? '#0F0F0F' : '#FFFFFF'
+    for (const v of fgVars) root.style.setProperty(v, fg)
+  } else {
+    for (const v of fgVars) root.style.removeProperty(v)
   }
 }
 

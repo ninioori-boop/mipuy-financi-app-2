@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { callable } from '@/lib/firebase'
+import { useBrand } from '@/components/layout/BrandProvider'
 
 export interface PendingInvite {
   consentVersion: string
@@ -31,10 +32,13 @@ interface Copy {
   decline: string
 }
 
-const COPY: Record<Variant, Copy> = {
+// The copy names the inviting FIRM (resolved via the brand: the pending invite
+// carries the practice, /api/brand serves its name pre-consent) — the client
+// must see exactly who is asking for access.
+const makeCopy = (firmName: string): Record<Variant, Copy> => ({
   view: {
     title: 'שיתוף הנתונים שלך עם היועץ',
-    intro: 'היועץ שהזמין אותך למערכת מבקש גישה לצפייה בתמונת המצב הפיננסית שלך: הכנסות, הוצאות, חובות, חסכונות ויעדים.',
+    intro: `היועץ שהזמין אותך למערכת מטעם "${firmName}" מבקש גישה לצפייה בתמונת המצב הפיננסית שלך: הכנסות, הוצאות, חובות, חסכונות ויעדים.`,
     bullets: [
       'הגישה היא לצפייה בלבד. היועץ לא יכול לערוך את הנתונים שלך בשלב זה.',
       'אתה/את הבעלים של החשבון. אפשר לבטל את השיתוף בכל עת.',
@@ -46,7 +50,7 @@ const COPY: Record<Variant, Copy> = {
   },
   edit: {
     title: 'אישור עריכה של היועץ',
-    intro: 'היועץ שלך מבקש הרשאה לערוך את הנתונים שלך יחד איתך: עדכון מיפוי, תקציב, יעדים וסיכומי פגישות.',
+    intro: `היועץ שלך מטעם "${firmName}" מבקש הרשאה לערוך את הנתונים שלך יחד איתך: עדכון מיפוי, תקציב, יעדים וסיכומי פגישות.`,
     bullets: [
       'כל עריכה שהיועץ עושה נשמרת בהיסטוריית הגרסאות שלך, ואפשר לשחזר בכל עת.',
       'אתה/את הבעלים של החשבון. אפשר להפסיק את הרשאת העריכה בכל רגע.',
@@ -58,7 +62,7 @@ const COPY: Record<Variant, Copy> = {
   },
   'view-edit': {
     title: 'שיתוף הנתונים שלך עם היועץ',
-    intro: 'היועץ שהזמין אותך למערכת מבקש גישה לצפות בתמונת המצב הפיננסית שלך ולערוך אותה יחד איתך: מיפוי, תקציב, יעדים וסיכומי פגישות.',
+    intro: `היועץ שהזמין אותך למערכת מטעם "${firmName}" מבקש גישה לצפות בתמונת המצב הפיננסית שלך ולערוך אותה יחד איתך: מיפוי, תקציב, יעדים וסיכומי פגישות.`,
     bullets: [
       'הגישה כוללת צפייה ועריכה משותפת. אתה/את הבעלים של החשבון.',
       'כל עריכה שהיועץ עושה נשמרת בהיסטוריית הגרסאות שלך, ואפשר לשחזר בכל עת.',
@@ -69,7 +73,7 @@ const COPY: Record<Variant, Copy> = {
     accept: 'אישור צפייה ועריכה',
     decline: 'לא עכשיו, בלי שיתוף',
   },
-}
+})
 
 // Shown once to an invited client at first sign-in. The default 'view-edit'
 // variant captures BOTH viewing and editing consent in a single screen (accept →
@@ -80,7 +84,8 @@ const COPY: Record<Variant, Copy> = {
 export function ConsentScreen({ invite, variant = 'view', onResolved }: Props) {
   const [agreed, setAgreed] = useState(false)
   const [busy, setBusy]     = useState(false)
-  const copy = COPY[variant]
+  const firmName = useBrand().nameHe
+  const copy = makeCopy(firmName)[variant]
 
   // accept: view → active (v1); edit / view-edit → active + access:write (v2).
   // decline: view / view-edit → declined (not sharing); edit → active +
@@ -114,7 +119,7 @@ export function ConsentScreen({ invite, variant = 'view', onResolved }: Props) {
     <div className="min-h-[100dvh] grid place-items-center p-4 bg-surface">
       <div className="w-full max-w-md rounded-2xl border border-line bg-surface2 p-5 sm:p-6 space-y-4">
         <div className="space-y-1.5">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-gold/80">שיתוף עם היועץ</div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-gold/80">שיתוף עם היועץ · {firmName}</div>
           <h1 className="text-xl font-bold text-txt">{copy.title}</h1>
         </div>
 

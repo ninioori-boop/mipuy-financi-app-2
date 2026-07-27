@@ -20,6 +20,9 @@ export const runtime = 'nodejs'
 // Hard cap on payload — same as DataSync's debounced-save guard —
 // so a runaway snapshot can't get sneaked past the client's size check.
 const MAX_BYTES = 900_000
+// Anti-clobber skew buffer — matches the client's CONFLICT_SKEW_MS (the
+// baseline mixes client clocks with server timestamps).
+const SKEW_MS = 15_000
 
 export async function POST(req: NextRequest) {
   const db = getAdminDb()
@@ -33,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'bad body' }, { status: 400 })
   }
-  const { token, snapshot } = body as Record<string, unknown>
+  const { token, snapshot, baseline } = body as Record<string, unknown>
   if (typeof token !== 'string' || !token) {
     return NextResponse.json({ error: 'missing token' }, { status: 401 })
   }
@@ -56,10 +59,31 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await db.collection('users').doc(uid).set(
-      { data: snapshot, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    )
+    const ref = db.collection('users').doc(uid)
+    if (typeof baseline === 'number' && baseline > 0) {
+      // Anti-clobber: refuse a STALE tab-close flush when the doc is
+      // meaningfully newer than what the sending tab last saw. A rejected
+      // flush is recoverable from the device's localStorage mirror; a clobber
+      // of newer data is silent and permanent. Transaction = read+write atomic.
+      const stale = await db.runTransaction(async (tx) => {
+        const cur = await tx.get(ref)
+        const ts = cur.data()?.updatedAt as { toMillis?: () => number } | undefined
+        const curTs = typeof ts?.toMillis === 'function' ? ts.toMillis() : 0
+        if (curTs > baseline + SKEW_MS) return true
+        tx.set(ref, { data: snapshot, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+        return false
+      })
+      if (stale) {
+        console.log(`[save-snapshot] uid=${uid} stale flush rejected`)
+        return NextResponse.json({ error: 'stale' }, { status: 409 })
+      }
+    } else {
+      // No baseline (older cached bundle) — original unconditional behavior.
+      await ref.set(
+        { data: snapshot, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      )
+    }
   } catch (err) {
     console.error(`[save-snapshot] uid=${uid}`, err)
     return NextResponse.json({ error: 'save failed' }, { status: 500 })

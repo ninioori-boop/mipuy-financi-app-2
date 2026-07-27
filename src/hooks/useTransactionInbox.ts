@@ -137,6 +137,9 @@ export function useTransactionInbox() {
         if (dropAfterSave.length) {
           try {
             await saveUserData(user.uid, collectSnapshot())
+            // Record this as OUR save — otherwise DataSync's anti-clobber probe
+            // reads it back as a "foreign" write and blocks all further saving.
+            bumpSaveBaseline()
           } catch {
             return  // leave the items in the inbox; they'll be retried next session
           }

@@ -150,6 +150,14 @@ export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
 /** The default brand with a practice's overrides layered on top. */
 export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefined): Brand {
   if (!practice) return base
+  const colors = { ...base.colors, ...practice.colors }
+  // Readability derive: on a LIGHT practice surface the dark-theme
+  // income/expense defaults (#4ADE80/#F87171) are unreadable — swap in the
+  // print-tuned dark variants unless the practice chose its own.
+  if (practice.colors?.surface && hexLuminance(practice.colors.surface) > 0.45) {
+    if (!practice.colors.income)  colors.income  = '#138E4F'
+    if (!practice.colors.expense) colors.expense = '#B53C3C'
+  }
   return {
     ...base,
     nameHe: practice.nameHe ?? base.nameHe,
@@ -162,7 +170,7 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
       ?? base.wordmarkShort,
     tagline: practice.tagline ?? base.tagline,
     contactEmail: practice.contactEmail ?? base.contactEmail,
-    colors: { ...base.colors, ...practice.colors },
+    colors,
   }
 }
 
