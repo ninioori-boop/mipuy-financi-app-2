@@ -25,7 +25,7 @@ import { resolve } from "node:path";
 const KEY_PATH = resolve(process.cwd(), "service-account-key.json");
 
 // Keep in sync with src/lib/brand.ts (scripts stay self-contained by repo convention).
-const STRING_KEYS = ["nameHe", "nameEn", "wordmarkShort", "tagline", "logoUrl", "contactEmail"];
+const STRING_KEYS = ["nameHe", "nameEn", "wordmarkShort", "tagline", "logoUrl", "contactEmail", "wordmarkColor"];
 const COLOR_KEYS = ["gold", "goldLight", "goldDark", "surface", "surface2", "surface3", "line", "txt", "mutedTxt", "income", "expense"];
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 
