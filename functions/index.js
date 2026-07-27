@@ -29,6 +29,17 @@ const MAIL_FROM = BRAND.mailFrom;
 
 const MAIL_HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 
+/** HTML-escape untrusted text before interpolating into email markup. */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** Strip header-breaking characters from a mail display name; cap length. */
+function cleanMailName(s) {
+  return String(s).replace(/[<>"\r\n,]/g, "").trim().slice(0, 60);
+}
+
 /** Rough relative luminance (0..1) of a #hex color. */
 function hexLum(hex) {
   const h = hex.replace("#", "");
@@ -69,11 +80,11 @@ async function mailBrandForPractice(practiceId) {
     const snap = await db.collection("practices").doc(practiceId).get();
     const b = snap.exists ? snap.data().brand : null;
     if (!b || typeof b !== "object") return base;
-    const nameHe = typeof b.nameHe === "string" && b.nameHe.trim() ? b.nameHe.trim() : base.nameHe;
+    const nameHe = typeof b.nameHe === "string" && cleanMailName(b.nameHe) ? cleanMailName(b.nameHe) : base.nameHe;
     const accent = pickEmailAccent(b.colors);
     return {
       nameHe,
-      wordmark: typeof b.nameEn === "string" && b.nameEn.trim() ? b.nameEn.trim() : nameHe,
+      wordmark: typeof b.nameEn === "string" && cleanMailName(b.nameEn) ? cleanMailName(b.nameEn) : nameHe,
       accent,
       buttonText: hexLum(accent) > 0.5 ? "#1a1a1a" : "#ffffff",
       from: `${nameHe} <invite@orimipuy.com>`,
@@ -89,10 +100,10 @@ function inviteEmailHtml(email, b) {
   return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
     <div style="background:#ffffff;border:1px solid #e5e0d8;border-radius:12px;padding:28px;">
-      <div style="font-size:13px;color:${b.accent};letter-spacing:2px;margin-bottom:6px;">${b.wordmark}</div>
+      <div style="font-size:13px;color:${b.accent};letter-spacing:2px;margin-bottom:6px;">${escapeHtml(b.wordmark)}</div>
       <h1 style="font-size:22px;color:#1a1a1a;margin:0 0 14px;">הוזמנת למערכת ליווי פיננסי</h1>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 12px;">
-        היועץ הפיננסי שלך הזמין אותך למערכת "${b.nameHe}": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
+        היועץ הפיננסי שלך הזמין אותך למערכת "${escapeHtml(b.nameHe)}": מקום אחד לראות בו את התמונה הפיננסית שלך, לעקוב אחרי תקציב, ולהתקדם ליעדים.
       </p>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
         פשוט נכנסים לקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
@@ -107,7 +118,7 @@ function inviteEmailHtml(email, b) {
         חשוב: יש להתחבר עם כתובת המייל שאליה נשלחה ההזמנה. אם לא ציפית להזמנה הזאת, אפשר להתעלם מהמייל.
       </p>
     </div>
-    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת ${b.nameHe} · ${APP_URL.replace("https://", "")}</p>
+    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:16px 0 0;">נשלח דרך מערכת ${escapeHtml(b.nameHe)} · ${APP_URL.replace("https://", "")}</p>
   </div>
 </body></html>`;
 }
