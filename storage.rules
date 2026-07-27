@@ -2,18 +2,21 @@ rules_version = '2';
 
 // Client document intake. Clients upload files for the advisor to review and
 // build a mapping from. A client writes/reads/deletes only their own folder;
-// any provisioned advisor (advisors/{uid} in Firestore, admin-managed) may
-// read everyone's. Additive — no other storage path is affected.
+// the client's OWN advisor (the ACTIVE clientLink names them) may read it.
+// Link-scoped on purpose — an advisor role alone must never grant
+// cross-practice reads. Additive — no other storage path is affected.
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function isAdvisor() {
+    function ownsClient(userId) {
       return request.auth != null
-        && firestore.exists(/databases/(default)/documents/advisors/$(request.auth.uid));
+        && firestore.exists(/databases/(default)/documents/clientLinks/$(userId))
+        && firestore.get(/databases/(default)/documents/clientLinks/$(userId)).data.status == 'active'
+        && firestore.get(/databases/(default)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid;
     }
 
     match /intake/{userId}/{fileName=**} {
-      allow read:   if request.auth != null && (request.auth.uid == userId || isAdvisor());
+      allow read:   if request.auth != null && (request.auth.uid == userId || ownsClient(userId));
       allow write:  if request.auth != null
                     && request.auth.uid == userId
                     && request.resource.size < 25 * 1024 * 1024
