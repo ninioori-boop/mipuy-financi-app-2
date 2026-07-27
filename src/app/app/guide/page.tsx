@@ -1,3 +1,5 @@
+import { BrandNameEn } from '@/components/layout/BrandProvider'
+
 export default function GuidePage() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -5,7 +7,7 @@ export default function GuidePage() {
       {/* Hero */}
       <div className="rounded-xl border border-gold/30 bg-gold/5 p-8 text-center space-y-3">
         <div className="text-5xl">🏠</div>
-        <h1 className="text-3xl font-black text-gold">The Home Economist</h1>
+        <h1 className="text-3xl font-black text-gold"><BrandNameEn /></h1>
         <p className="text-muted-txt text-lg max-w-xl mx-auto">
           מפת הדרכים שלך לניהול פיננסי חכם — מאפיון ראשוני ועד תכנון לטווח ארוך
         </p>
@@ -194,7 +196,7 @@ export default function GuidePage() {
 
       {/* Footer */}
       <div className="rounded-xl border border-line bg-surface2 p-5 text-center text-sm text-muted-txt">
-        <span className="text-gold font-semibold">The Home Economist</span> — כלי לניהול פיננסי אישי ועבודה עם יועצים פיננסיים
+        <span className="text-gold font-semibold"><BrandNameEn /></span> — כלי לניהול פיננסי אישי ועבודה עם יועצים פיננסיים
       </div>
 
     </div>

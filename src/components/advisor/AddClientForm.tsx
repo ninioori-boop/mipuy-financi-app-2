@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { BRAND_DOMAIN } from '@/lib/brand'
 
 // Inline add-client form (not a modal — matches the app's inline-create habit).
 // onAdd invites the client for real (inviteClient callable) and may reject
@@ -71,7 +72,7 @@ export function AddClientForm({ onAdd, onCancel }: Props) {
           ביטול
         </button>
       </div>
-      <p className="text-xs text-muted-txt">המערכת תנסה לשלוח ללקוח מייל הזמנה. חשוב: הלקוח חייב להירשם עם אותו מייל בדיוק (app.orimipuy.com).</p>
+      <p className="text-xs text-muted-txt">המערכת תנסה לשלוח ללקוח מייל הזמנה. חשוב: הלקוח חייב להירשם עם אותו מייל בדיוק ({BRAND_DOMAIN}).</p>
     </form>
   )
 }

@@ -8,6 +8,7 @@ import {
   FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES,
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
+import { BRAND } from '@/lib/brand'
 
 // Optional per-row meta. confidence quantifies the AI's certainty;
 // source is a short free-text label of where the row came from
@@ -62,7 +63,7 @@ export interface GeneratedMapping {
 const list = (s: Set<string>) => [...s].join(', ')
 
 // ── "כללי המיפוי של הכלכלן של הבית" (v1) — server-owned, tuned over time ──
-export const AUTOMAP_SYSTEM_PROMPT = `אתה "הכלכלן של הבית" — יועץ פיננסי מומחה לשוק הישראלי. תפקידך: לקבל את כל נתוני הלקוח (עסקאות אשראי, תנועות עו"ש, הלוואות, תשלומים, נכסים, חיסכון, וטקסט חופשי) ולבנות **מיפוי חודשי שלם** — חלוקה מסודרת של ההכנסות וההוצאות לסעיפים.
+export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פיננסי מומחה לשוק הישראלי. תפקידך: לקבל את כל נתוני הלקוח (עסקאות אשראי, תנועות עו"ש, הלוואות, תשלומים, נכסים, חיסכון, וטקסט חופשי) ולבנות **מיפוי חודשי שלם** — חלוקה מסודרת של ההכנסות וההוצאות לסעיפים.
 
 ## הסעיפים והסיווג
 שייך כל הוצאה לסעיף לפי הקטגוריה:

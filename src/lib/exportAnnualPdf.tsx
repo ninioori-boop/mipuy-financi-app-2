@@ -4,6 +4,8 @@ import { Document, Page, Text, View, StyleSheet, Font, pdf } from '@react-pdf/re
 import type { AnnualRow, AnnualDebtRow } from '@/stores/annualStore'
 import type { MonthData } from '@/stores/monthlyStore'
 import { MONTH_IDS } from '@/lib/constants'
+import { pickPrintAccent } from '@/lib/brand'
+import { getActiveBrand } from '@/lib/activeBrand'
 
 Font.register({
   family: 'Heebo',
@@ -33,19 +35,22 @@ function fmt(n: number) {
   return '₪' + Math.round(n || 0).toLocaleString('he-IL')
 }
 
-const C = {
-  gold:   '#A88844',
-  dark:   '#1A1A1A',
-  line:   '#D8CFB7',
-  txt:    '#1A1A1A',
-  muted:  '#6B6357',
-  income: '#138E4F',
-  exp:    '#B53C3C',
-  bg:     '#FFFFFF',
-  bgAlt:  '#F8F3E7',
+function buildPalette() {
+  return {
+    gold:   pickPrintAccent(getActiveBrand().colors),
+    dark:   '#1A1A1A',
+    line:   '#D8CFB7',
+    txt:    '#1A1A1A',
+    muted:  '#6B6357',
+    income: '#138E4F',
+    exp:    '#B53C3C',
+    bg:     '#FFFFFF',
+    bgAlt:  '#F8F3E7',
+  }
 }
+let C = buildPalette()
 
-const s = StyleSheet.create({
+const buildStyles = () => StyleSheet.create({
   page: {
     flexDirection: 'column',
     backgroundColor: C.bg,
@@ -104,6 +109,13 @@ const s = StyleSheet.create({
     paddingTop: 4,
   },
 })
+let s = buildStyles()
+
+/** Re-resolve palette + styles from the active brand — called per export. */
+function refreshStyles() {
+  C = buildPalette()
+  s = buildStyles()
+}
 
 function SectionTable({ title, rows, valueLabel = 'שנתי' }: {
   title: string
@@ -182,6 +194,7 @@ function DebtTable({ rows }: { rows: AnnualDebtRow[] }) {
 }
 
 function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
+  const brandName = getActiveBrand().nameEn
   const pIncome   = input.income.reduce((s, r) => s + (r.annual || 0), 0)
   const pFixed    = input.fixed.reduce((s, r) => s + (r.annual || 0), 0)
   const pVariable = input.variable.reduce((s, r) => s + (r.annual || 0), 0)
@@ -218,13 +231,13 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
   return (
     <Document
       title={`תכנון שנתי ${input.year}`}
-      author="The Home Economist"
+      author={brandName}
     >
       {/* Page 1: Cover + sections */}
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>The Home Economist</Text>
+            <Text style={s.brand}>{brandName}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <Text style={s.title}>תכנון שנתי {input.year}</Text>
@@ -286,7 +299,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         </View>
 
         <View style={s.footer} fixed>
-          <Text>The Home Economist · תכנון שנתי {input.year}</Text>
+          <Text>{brandName} · תכנון שנתי {input.year}</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>
@@ -295,7 +308,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
       <Page size="A4" orientation="landscape" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>The Home Economist</Text>
+            <Text style={s.brand}>{brandName}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <Text style={s.title}>פירוט חודשי {input.year}</Text>
@@ -365,7 +378,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
         </View>
 
         <View style={s.footer} fixed>
-          <Text>The Home Economist · תכנון שנתי {input.year}</Text>
+          <Text>{brandName} · תכנון שנתי {input.year}</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>
@@ -374,6 +387,7 @@ function AnnualPdfDocument({ input }: { input: AnnualPdfInput }) {
 }
 
 export async function exportAnnualPdf(input: AnnualPdfInput) {
+  refreshStyles()
   const blob = await pdf(<AnnualPdfDocument input={input} />).toBlob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

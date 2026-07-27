@@ -5,6 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer,
 } from 'recharts'
+import { useBrand } from '@/components/layout/BrandProvider'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -108,6 +109,7 @@ const TOOLTIP_STYLE = {
 type Tab = 'compound' | 'fees'
 
 export default function CompoundPage() {
+  const brand = useBrand()
   const [tab, setTab]             = useState<Tab>('compound')
   const [principal, setPrincipal] = useState<number | null>(null)
   const [monthly, setMonthly]     = useState<number | null>(null)
@@ -226,8 +228,8 @@ export default function CompoundPage() {
               <AreaChart data={chartCompound} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#C9A86C" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#C9A86C" stopOpacity={0.02} />
+                    <stop offset="5%"  stopColor={brand.colors.gold} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={brand.colors.gold} stopOpacity={0.02} />
                   </linearGradient>
                   <linearGradient id="gGreen" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#4ade80" stopOpacity={0.2} />
@@ -239,7 +241,7 @@ export default function CompoundPage() {
                 <YAxis tick={{ fill: '#8A8178', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtX} width={60} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tipFmt} />
                 <Legend wrapperStyle={{ color: '#8A8178', fontSize: 12, paddingTop: 8 }} />
-                <Area type="monotone" dataKey="יתרה"   stroke="#C9A86C" strokeWidth={2}   fill="url(#gGold)"  dot={false} />
+                <Area type="monotone" dataKey="יתרה"   stroke={brand.colors.gold} strokeWidth={2}   fill="url(#gGold)"  dot={false} />
                 <Area type="monotone" dataKey="הפקדות" stroke="#4ade80" strokeWidth={1.5} fill="url(#gGreen)" dot={false} strokeDasharray="4 2" />
               </AreaChart>
             </ResponsiveContainer>
@@ -262,7 +264,7 @@ export default function CompoundPage() {
                     return (
                       <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#111' : '#161616' }}>
                         <td style={{ padding: '6px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#8A8178', fontWeight: 600 }}>{i + 1}</td>
-                        <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#C9A86C', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(row.balance)}</td>
+                        <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: brand.colors.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(row.balance)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>{fmt(m * 12)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>{fmt(row.gain - prev.gain)}</td>
                         <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>{fmt(row.deposits)}</td>
@@ -304,7 +306,7 @@ export default function CompoundPage() {
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={chartFees} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                 <defs>
-                  {[['gF1','#C9A86C'], ['gF2','#facc15'], ['gF3','#fb923c'], ['gF4','#f87171']].map(([id, c]) => (
+                  {[['gF1', brand.colors.gold], ['gF2','#facc15'], ['gF3','#fb923c'], ['gF4','#f87171']].map(([id, c]) => (
                     <linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={c} stopOpacity={0.2} />
                       <stop offset="95%" stopColor={c} stopOpacity={0.01} />
@@ -316,7 +318,7 @@ export default function CompoundPage() {
                 <YAxis tick={{ fill: '#8A8178', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtX} width={60} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tipFmt} />
                 <Legend wrapperStyle={{ color: '#8A8178', fontSize: 12, paddingTop: 8 }} />
-                <Area type="monotone" dataKey="ללא דמי ניהול"           stroke="#C9A86C" strokeWidth={2}   fill="url(#gF1)" dot={false} />
+                <Area type="monotone" dataKey="ללא דמי ניהול"           stroke={brand.colors.gold} strokeWidth={2}   fill="url(#gF1)" dot={false} />
                 <Area type="monotone" dataKey="דמי ניהול מהצבירה בלבד" stroke="#facc15" strokeWidth={1.5} fill="url(#gF2)" dot={false} />
                 <Area type="monotone" dataKey="דמי ניהול מההפקדה בלבד" stroke="#fb923c" strokeWidth={1.5} fill="url(#gF3)" dot={false} />
                 <Area type="monotone" dataKey="שניהם"                   stroke="#f87171" strokeWidth={2}   fill="url(#gF4)" dot={false} />
@@ -343,7 +345,7 @@ export default function CompoundPage() {
                     return (
                       <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#111' : '#161616' }}>
                         <td style={{ padding: '6px 12px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#8A8178', fontWeight: 600 }}>{i + 1}</td>
-                        <td style={{ padding: '6px 12px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#C9A86C', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(rN.balance)}</td>
+                        <td style={{ padding: '6px 12px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: brand.colors.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(rN.balance)}</td>
                         <td style={{ padding: '6px 12px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#facc15', fontVariantNumeric: 'tabular-nums' }}>{fmt(rB?.balance ?? 0)}</td>
                         <td style={{ padding: '6px 12px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#fb923c', fontVariantNumeric: 'tabular-nums' }}>{fmt(rD?.balance ?? 0)}</td>
                         <td style={{ padding: '6px 12px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#f87171', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(rBo?.balance ?? 0)}</td>
