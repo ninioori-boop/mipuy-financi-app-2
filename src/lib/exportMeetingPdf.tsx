@@ -3,7 +3,8 @@
 import { Document, Page, Text, View, StyleSheet, Font, pdf } from '@react-pdf/renderer'
 import type { Meeting } from '@/stores/meetingsStore'
 import { MEETING_LABELS } from '@/stores/meetingsStore'
-import { BRAND } from '@/lib/brand'
+import { pickPrintAccent } from '@/lib/brand'
+import { getActiveBrand } from '@/lib/activeBrand'
 
 Font.register({
   family: 'Heebo',
@@ -13,15 +14,18 @@ Font.register({
   ],
 })
 
-const C = {
-  gold:  BRAND.colors.goldDark,
-  txt:   '#1A1A1A',
-  muted: '#6B6357',
-  line:  '#D8CFB7',
-  bgAlt: '#F8F3E7',
+function buildPalette() {
+  return {
+    gold:  pickPrintAccent(getActiveBrand().colors),
+    txt:   '#1A1A1A',
+    muted: '#6B6357',
+    line:  '#D8CFB7',
+    bgAlt: '#F8F3E7',
+  }
 }
+let C = buildPalette()
 
-const s = StyleSheet.create({
+const buildStyles = () => StyleSheet.create({
   page: {
     padding: 32,
     fontFamily: 'Heebo',
@@ -73,6 +77,13 @@ const s = StyleSheet.create({
     paddingTop: 4,
   },
 })
+let s = buildStyles()
+
+/** Re-resolve palette + styles from the active brand — called per export. */
+function refreshStyles() {
+  C = buildPalette()
+  s = buildStyles()
+}
 
 function formatDate(iso: string) {
   const [y, m, d] = iso.split('-')
@@ -81,13 +92,14 @@ function formatDate(iso: string) {
 }
 
 function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
+  const brandName = getActiveBrand().nameEn
   const today = new Date().toLocaleDateString('he-IL')
   return (
-    <Document title={meeting.title} author={BRAND.nameEn}>
+    <Document title={meeting.title} author={brandName}>
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <View style={s.headerRow}>
-            <Text style={s.brand}>{BRAND.nameEn}</Text>
+            <Text style={s.brand}>{brandName}</Text>
             <Text style={s.date}>הופק: {today}</Text>
           </View>
           <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginTop: 6 }}>
@@ -130,7 +142,7 @@ function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
         )}
 
         <View style={s.footer} fixed>
-          <Text>{BRAND.nameEn} · סיכום פגישה</Text>
+          <Text>{brandName} · סיכום פגישה</Text>
           <Text render={({ pageNumber, totalPages }) => `עמוד ${pageNumber} מתוך ${totalPages}`} />
         </View>
       </Page>
@@ -139,6 +151,7 @@ function MeetingPdfDocument({ meeting }: { meeting: Meeting }) {
 }
 
 export async function exportMeetingPdf(meeting: Meeting) {
+  refreshStyles()
   const blob = await pdf(<MeetingPdfDocument meeting={meeting} />).toBlob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
