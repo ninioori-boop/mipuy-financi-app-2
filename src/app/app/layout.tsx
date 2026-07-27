@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
+import { toast } from 'sonner'
 import { auth, db, callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
@@ -144,8 +145,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       // claim a pending advisor invite (cheap no-op for everyone else).
       if (!adv) {
         try {
-          const res = await callable<Record<string, never>, { claimed: boolean }>('claimAdvisorRole')({})
+          const res = await callable<Record<string, never>, { claimed: boolean; needVerify?: boolean }>('claimAdvisorRole')({})
           if (alive && res.data.claimed) setIsAdvisorRole(true)
+          else if (alive && res.data.needVerify) {
+            toast.info('הוזמנת כיועץ. כדי לקבל את התפקיד יש לאמת קודם את כתובת המייל (נשלח אליך קישור אימות בהרשמה) ולהיכנס מחדש.', { duration: 10000 })
+          }
         } catch { /* not signed in far enough / offline — stays a regular user */ }
       }
       // Firm page is for REAL firms only: the caller owns a practice that has

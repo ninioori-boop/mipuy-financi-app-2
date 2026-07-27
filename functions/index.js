@@ -410,8 +410,11 @@ exports.inviteAdvisor = onCall({ secrets: [RESEND_API_KEY] }, async (request) =>
   if (!EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
 
   let existingUid = null;
+  let existingVerified = false;
   try {
-    existingUid = (await getAuth().getUserByEmail(email)).uid;
+    const rec = await getAuth().getUserByEmail(email);
+    existingUid = rec.uid;
+    existingVerified = !!rec.emailVerified;
   } catch (e) {
     if (e.code !== "auth/user-not-found") throw e;
   }
@@ -432,7 +435,10 @@ exports.inviteAdvisor = onCall({ secrets: [RESEND_API_KEY] }, async (request) =>
   }, { merge: true });
   await batch.commit();
 
-  if (existingUid) {
+  // Immediate grant ONLY for a VERIFIED account — an unverified password
+  // account could be a squatter on the invitee's address; it must verify the
+  // email first and will be claimed on the next sign-in.
+  if (existingUid && existingVerified) {
     await grantAdvisorRole(existingUid, email, practiceId);
     return { ok: true, status: "granted", email, emailSent: false };
   }
@@ -456,6 +462,13 @@ exports.claimAdvisorRole = onCall(async (request) => {
 
   const pending = await db.collection("pendingAdvisors").doc(email).get();
   if (!pending.exists || pending.data().status !== "pending") return { ok: true, claimed: false };
+
+  // The ADVISOR role is a privilege — only a VERIFIED email may claim it
+  // (blocks squatting on the invitee's address with an unverified password
+  // account). Google sign-in is verified by definition.
+  if (request.auth?.token?.email_verified !== true) {
+    return { ok: true, claimed: false, needVerify: true };
+  }
 
   await grantAdvisorRole(uid, email, pending.data().practiceId);
   return { ok: true, claimed: true };
