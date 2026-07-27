@@ -102,6 +102,12 @@ function applyCssVars(brand: Brand, hasOverrides: boolean) {
   } else {
     for (const v of fgVars) root.style.removeProperty(v)
   }
+  // The wordmark (firm name in headers) — its own color when the firm sets one.
+  if (hasOverrides || brand.wordmarkColor) {
+    root.style.setProperty('--wordmark', brand.wordmarkColor ?? brand.colors.gold)
+  } else {
+    root.style.removeProperty('--wordmark')
+  }
 }
 
 export function BrandProvider({ children }: { children: React.ReactNode }) {

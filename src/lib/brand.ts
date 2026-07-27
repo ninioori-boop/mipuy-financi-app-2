@@ -55,6 +55,9 @@ export interface Brand {
   }
   /** Optional firm logo (https URL) — rendered where the default brand shows its mark. */
   logoUrl?: string
+  /** Optional wordmark color — how the firm's NAME is painted in headers
+   *  (defaults to the accent). Lets a logo-like lettering differ from buttons. */
+  wordmarkColor?: string
 }
 
 const BRANDS: Record<string, Brand> = {
@@ -112,12 +115,13 @@ export interface PracticeBrand {
   tagline?: string
   logoUrl?: string
   contactEmail?: string
+  wordmarkColor?: string
   colors?: Partial<Brand['colors']>
 }
 
 /** Keys a PracticeBrand may carry — used to sanitize DB data before use. */
 export const PRACTICE_BRAND_STRING_KEYS = [
-  'nameHe', 'nameEn', 'wordmarkShort', 'tagline', 'logoUrl', 'contactEmail',
+  'nameHe', 'nameEn', 'wordmarkShort', 'tagline', 'logoUrl', 'contactEmail', 'wordmarkColor',
 ] as const
 
 export const PRACTICE_BRAND_COLOR_KEYS = [
@@ -143,6 +147,8 @@ export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
         if (new URL(v.trim()).protocol !== 'https:') continue
       } catch { continue }
     }
+    // wordmarkColor feeds a CSS var — hex only, like the palette.
+    if (k === 'wordmarkColor' && !HEX_RE.test(v.trim())) continue
     out[k] = v.trim()
   }
   if (src.colors && typeof src.colors === 'object') {
@@ -180,6 +186,7 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
     tagline: practice.tagline ?? base.tagline,
     contactEmail: practice.contactEmail ?? base.contactEmail,
     logoUrl: practice.logoUrl ?? base.logoUrl,
+    wordmarkColor: practice.wordmarkColor ?? base.wordmarkColor,
     colors,
   }
 }
