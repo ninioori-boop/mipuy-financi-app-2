@@ -12,6 +12,7 @@ import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { saveUserData } from '@/lib/firestoreService'
 import { collectSnapshot } from '@/lib/dataSync'
+import { bumpSaveBaseline } from '@/lib/saveBaseline'
 import { computeBudgetStatus } from '@/lib/budgetStatus'
 
 function today() {
