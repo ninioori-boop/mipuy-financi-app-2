@@ -43,7 +43,7 @@ function cleanMailName(s) {
 /** Rough relative luminance (0..1) of a #hex color. */
 function hexLum(hex) {
   const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
+  const full = h.length <= 4 ? h.slice(0, 3).split("").map((c) => c + c).join("") : h.slice(0, 6);
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
@@ -54,8 +54,9 @@ function hexLum(hex) {
  * palette until something dark enough for white, else the default gold.
  */
 function pickEmailAccent(colors) {
-  for (const c of [colors?.gold, colors?.goldDark, colors?.surface, BRAND.gold]) {
-    if (typeof c === "string" && MAIL_HEX_RE.test(c) && hexLum(c) < 0.72) return c;
+  for (const raw of [colors?.gold, colors?.goldDark, colors?.surface, BRAND.gold]) {
+    const c = typeof raw === "string" ? raw.trim() : "";
+    if (c && MAIL_HEX_RE.test(c) && hexLum(c) < 0.72) return c;
   }
   return BRAND.gold;
 }
@@ -107,7 +108,7 @@ function inviteEmailHtml(email, b) {
       </p>
       <p style="font-size:15px;color:#333;line-height:1.7;margin:0 0 20px;">
         פשוט נכנסים לקישור ומתחברים (או נרשמים) עם כתובת המייל הזאת בדיוק
-        (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${email}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
+        (<span dir="ltr" style="color:#1a1a1a;font-weight:bold;">${escapeHtml(email)}</span>), ובוחרים אם לשתף את הנתונים עם היועץ.
       </p>
       <div style="text-align:center;margin:24px 0;">
         <a href="${b.practiceId ? `${APP_URL}/auth?b=${encodeURIComponent(b.practiceId)}` : APP_URL}" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:16px;font-weight:bold;padding:12px 32px;border-radius:999px;display:inline-block;">
@@ -214,6 +215,9 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     throw new HttpsError("permission-denied", "רק יועץ יכול להזמין לקוחות.");
   }
   const practiceId = advisorSnap.data().practiceId;
+  if (!practiceId) {
+    throw new HttpsError("failed-precondition", "חשבון היועץ לא משויך למשרד.");
+  }
 
   // 2) Validate email.
   const email = String(request.data?.email ?? "").toLowerCase().trim();
@@ -221,17 +225,17 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
     throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
   }
 
-  // 3) Existing accounts may be invited ONLY if Ori explicitly listed them
-  //    below (family/testing). Any other email that already has an account is
-  //    rejected — the system stays "new clients only" for everyone else.
-  //    An allowed existing user sees the one-time consent prompt on next
-  //    sign-in; declining changes nothing for them.
-  const EXISTING_INVITE_ALLOWED = [
-    // lowercased emails Ori approves for linking an EXISTING account:
-    "rotemgovrin@gmail.com",
-    "rotemgovrin1@gmail.com",
-    "ninioori@gmail.com",
-  ];
+  // 3) Existing accounts may be invited ONLY if the INVITING PRACTICE lists
+  //    them explicitly (practices/{id}.existingInviteAllowed, seeded by the
+  //    platform owner). Practice-scoped on purpose — a global list would let
+  //    any firm re-bind another firm's known users. Everyone else stays
+  //    "new clients only". An allowed existing user sees the one-time consent
+  //    prompt on next sign-in; declining changes nothing for them.
+  const invitingPractice = await db.collection("practices").doc(practiceId).get();
+  const EXISTING_INVITE_ALLOWED =
+    invitingPractice.exists && Array.isArray(invitingPractice.data().existingInviteAllowed)
+      ? invitingPractice.data().existingInviteAllowed.map((e) => String(e).toLowerCase())
+      : [];
   let existingUid = null;
   try {
     existingUid = (await getAuth().getUserByEmail(email)).uid;
@@ -321,9 +325,11 @@ exports.setClientSharing = onCall(async (request) => {
   return await db.runTransaction(async (tx) => {
     const [pendingSnap, linkSnap] = await Promise.all([tx.get(pendingRef), tx.get(linkRef)]);
 
-    // Source of the link facts: an existing uid-keyed link, else the pending invite.
-    const source = linkSnap.exists ? linkSnap.data()
-      : pendingSnap.exists ? pendingSnap.data()
+    // Source of the link facts: a FRESH pending invite wins over a stale
+    // uid-keyed link — otherwise a client moving firms (revoke → new invite)
+    // would see firm B's consent screen but re-bind to firm A's old link.
+    const source = (pendingSnap.exists && pendingSnap.data().status === "pending") ? pendingSnap.data()
+      : linkSnap.exists ? linkSnap.data()
       : null;
     if (!source) {
       throw new HttpsError("failed-precondition", "לא נמצאה הזמנה פעילה.");
@@ -456,8 +462,9 @@ exports.setClientStage = onCall(async (request) => {
 
   const linkRef = db.collection("clientLinks").doc(clientUid);
   const linkSnap = await linkRef.get();
-  if (!linkSnap.exists || linkSnap.data().invitedByUid !== callerUid) {
-    throw new HttpsError("failed-precondition", "אין קשר ללקוח הזה.");
+  if (!linkSnap.exists || linkSnap.data().status !== "active"
+      || linkSnap.data().invitedByUid !== callerUid) {
+    throw new HttpsError("failed-precondition", "אין קשר פעיל ללקוח הזה.");
   }
 
   const patch = { stage, updatedAt: FieldValue.serverTimestamp() };

@@ -123,7 +123,9 @@ export const PRACTICE_BRAND_COLOR_KEYS = [
   'line', 'txt', 'mutedTxt', 'income', 'expense',
 ] as const
 
-const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+// Only CSS-valid hex lengths (3/4/6/8) — a 5- or 7-digit value would be
+// rejected by the CSSOM and silently leave a previous brand's var in place.
+const HEX_RE = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
 /** Drop unknown keys / non-string values / non-hex colors from raw DB data. */
 export function sanitizePracticeBrand(raw: unknown): PracticeBrand | null {
@@ -151,8 +153,13 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
   return {
     ...base,
     nameHe: practice.nameHe ?? base.nameHe,
-    nameEn: practice.nameEn ?? base.nameEn,
-    wordmarkShort: practice.wordmarkShort ?? practice.nameEn ?? base.wordmarkShort,
+    // A Hebrew-only practice must NEVER fall back to the vendor's Latin name —
+    // its own Hebrew name is the wordmark everywhere.
+    nameEn: practice.nameEn ?? practice.nameHe ?? base.nameEn,
+    wordmarkShort:
+      practice.wordmarkShort
+      ?? (practice.nameEn ?? practice.nameHe)?.slice(0, 12)
+      ?? base.wordmarkShort,
     tagline: practice.tagline ?? base.tagline,
     contactEmail: practice.contactEmail ?? base.contactEmail,
     colors: { ...base.colors, ...practice.colors },
@@ -164,10 +171,12 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
  * Inline styles on <html> override both theme blocks, so applying these
  * re-skins every screen that uses the Tailwind tokens — i.e. all of them.
  */
-/** Rough relative luminance (0..1) of a #hex color. */
+/** Rough relative luminance (0..1) of a #hex color (3/4/6/8-digit forms). */
 export function hexLuminance(hex: string): number {
   const h = hex.replace('#', '')
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6)
+  const full = h.length <= 4
+    ? h.slice(0, 3).split('').map((c) => c + c).join('')
+    : h.slice(0, 6)
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255)
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
@@ -178,7 +187,9 @@ export function hexLuminance(hex: string): number {
  * first color dark enough to read on white.
  */
 export function pickPrintAccent(colors: Brand['colors']): string {
-  for (const c of [colors.goldDark, colors.gold, colors.surface]) {
+  // gold first — it is the color the firm actually chose; goldDark is usually
+  // just the inherited default. Order matches the email's pickEmailAccent.
+  for (const c of [colors.gold, colors.goldDark, colors.surface]) {
     if (hexLuminance(c) < 0.72) return c
   }
   return BRANDS.orimipuy.colors.goldDark

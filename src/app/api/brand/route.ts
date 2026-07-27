@@ -26,10 +26,19 @@ export async function GET(req: NextRequest) {
   // by nature — it is shown to anyone the firm invites.
   const pid = req.nextUrl.searchParams.get('practiceId')
   if (!token && pid) {
+    // Strict id shape: blocks path tricks (practices/a/b/c), log injection,
+    // and junk traffic before it costs a Firestore read.
+    if (!/^p_[A-Za-z0-9_-]{1,64}$/.test(pid)) {
+      return NextResponse.json({ error: 'bad id' }, { status: 400 })
+    }
     try {
       const snap = await db.collection('practices').doc(pid).get()
       const brand = sanitizePracticeBrand(snap.exists ? snap.data()?.brand : null)
-      return NextResponse.json({ practiceId: pid, brand })
+      // Public data — let the CDN absorb repeat traffic (the authed branch
+      // below stays per-user and uncached).
+      return NextResponse.json({ practiceId: pid, brand }, {
+        headers: { 'Cache-Control': 'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800' },
+      })
     } catch (err) {
       console.error(`[brand] public pid=${pid}`, err)
       return NextResponse.json({ error: 'lookup failed' }, { status: 500 })

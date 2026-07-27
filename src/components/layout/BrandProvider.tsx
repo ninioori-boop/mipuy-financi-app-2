@@ -85,8 +85,9 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
         ;(async () => {
           try {
             const res = await fetch(`/api/brand?practiceId=${encodeURIComponent(pid)}`)
-            if (!res.ok) return
+            if (!res.ok || cancelled) return
             const data = (await res.json()) as { brand?: unknown }
+            if (cancelled) return
             const practice = sanitizePracticeBrand(data.brand)
             if (practice) {
               try { localStorage.setItem(LAST_KEY, JSON.stringify(practice)) } catch { /* ignore */ }
@@ -103,11 +104,16 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
       return () => { cancelled = true }
     }
 
-    // 1. Cached brand first — no flash for returning users.
+    // The uid is captured NOW — the awaits below may resolve after a user
+    // switch, and cache writes must never land under another user's key.
+    const uid = user.uid
+
+    // 1. Cached brand first — no flash for returning users; an ABSENT cache
+    // must reset to the default so a previous user's brand can't carry over.
     try {
-      const cached = localStorage.getItem(CACHE_PREFIX + user.uid)
-      if (cached) apply(sanitizePracticeBrand(JSON.parse(cached)))
-    } catch { /* corrupt cache — ignore */ }
+      const cached = localStorage.getItem(CACHE_PREFIX + uid)
+      apply(cached ? sanitizePracticeBrand(JSON.parse(cached)) : null)
+    } catch { apply(null) }
 
     // 2. Fresh lookup — also re-run via refreshBrand() after consent changes.
     const fetchAuthedBrand = async () => {
@@ -115,15 +121,22 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/brand', {
           headers: { Authorization: await getAuthHeader() },
         })
-        if (!res.ok) return
+        if (cancelled) return
+        if (!res.ok) {
+          // Definitive "no brand for you" answers reset; transient errors keep
+          // whatever is already applied (cache or default).
+          if (res.status === 401 || res.status === 503) apply(null)
+          return
+        }
         const data = (await res.json()) as { brand?: unknown }
+        if (cancelled) return
         const practice = sanitizePracticeBrand(data.brand)
         try {
           if (practice) {
-            localStorage.setItem(CACHE_PREFIX + user.uid, JSON.stringify(practice))
+            localStorage.setItem(CACHE_PREFIX + uid, JSON.stringify(practice))
             localStorage.setItem(LAST_KEY, JSON.stringify(practice))
           } else {
-            localStorage.removeItem(CACHE_PREFIX + user.uid)
+            localStorage.removeItem(CACHE_PREFIX + uid)
             localStorage.removeItem(LAST_KEY)
           }
         } catch { /* storage full — branding still applies this session */ }

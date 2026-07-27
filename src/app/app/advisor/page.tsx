@@ -91,6 +91,9 @@ export default function AdvisorPage() {
    *  DataSync; the advisor's own account is never touched. Exit = full reload. */
   async function editFullAccount(c: MockClient) {
     if (c.access !== 'write') { toast.error('אין הרשאת עריכה מהלקוח.'); return }
+    // Defensive: never target a non-uid id (a pending invite's doc id is
+    // pending_{email}) — writing users/pending_* would corrupt the namespace.
+    if (!c.id || c.id.startsWith('pending_')) { toast.error('הלקוח עדיין לא נרשם למערכת.'); return }
     try {
       const snap = await getDoc(doc(db, 'users', c.id))
       const raw  = snap.exists() ? snap.data() : null
