@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(manifest, {
     headers: {
       'Content-Type': 'application/manifest+json',
-      'Cache-Control': 'public, max-age=300, s-maxage=3600',
+      'Cache-Control': 'public, max-age=60, s-maxage=300',
     },
   })
 }

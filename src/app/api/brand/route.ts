@@ -34,10 +34,10 @@ export async function GET(req: NextRequest) {
     try {
       const snap = await db.collection('practices').doc(pid).get()
       const brand = sanitizePracticeBrand(snap.exists ? snap.data()?.brand : null)
-      // Public data — let the CDN absorb repeat traffic (the authed branch
-      // below stays per-user and uncached).
+      // Public data — cached, but only briefly: brand edits must show up
+      // within a minute, not a day (a long TTL made live tweaks look broken).
       return NextResponse.json({ practiceId: pid, brand }, {
-        headers: { 'Cache-Control': 'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800' },
+        headers: { 'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300' },
       })
     } catch (err) {
       console.error(`[brand] public pid=${pid}`, err)
