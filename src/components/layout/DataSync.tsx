@@ -37,6 +37,10 @@ import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
+import { registerLiveRefresh } from '@/lib/liveRefresh'
+import { stableStringify, deriveByAdvisor, tsToMillis } from '@/lib/liveSync'
+import { onSnapshot, doc as fsDoc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { useTransactionInbox } from '@/hooks/useTransactionInbox'
 import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
 
@@ -60,6 +64,25 @@ const FOCUS_PROBE_MIN_MS    = 30_000
 // a hard block here (not just a prompt) — favor missing a sub-15s foreign
 // write over nagging users whose clock drifts.
 const CONFLICT_SKEW_MS = 15_000
+// ── Live sync (effect 2c) ──
+// Coalesce remote bursts before touching the stores. Sized against the peer's
+// own 2s save debounce so a continuous co-editing session collapses into one
+// apply per pause rather than one per keystroke burst.
+const LIVE_APPLY_DEBOUNCE_MS = 2000
+// A held event (tab hidden, an input focused, a save in flight) is retried,
+// but abandoned after this — the focus refetch and the pre-write probe still
+// guarantee correctness, and a forever-timer would be worse.
+const LIVE_HOLD_MAX_MS = 60_000
+// A held evaluation waits for an in-flight save, but never forever: an
+// interrupted setDoc's promise can stay pending indefinitely (no offline
+// persistence), so `finally` may never run. After this the hold expires.
+const SYNC_BUSY_MAX_MS = 10_000
+const LIVE_HOLD_RETRY_MS = 300
+// The other side may save every couple of seconds. Announce the first few
+// applies of a session so the user understands their screen is being updated,
+// then fall back to one per minute (the status pill carries the rest).
+const LIVE_TOAST_MIN_GAP_MS = 60_000
+const LIVE_TOAST_BURST = 3
 
 const SELF_CONFLICT_MSG = {
   title: 'נמצאה גרסה חדשה יותר בענן',
@@ -129,7 +152,30 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const skipProbeOnce    = useRef<boolean>(false)          // set by "שמור בכל זאת"
   const conflictToastId  = useRef<string | number | null>(null)
   const requestSaveRef   = useRef<() => void>(() => {})    // effect 2 exposes triggerSave here
+  // ── Live-sync state (effect 2c) ──
+  const syncBusyAt       = useRef<number>(0)   // epoch ms a write/apply started; 0 = idle
+  const pendingRemote    = useRef<null | {
+    data: unknown; updatedAt: number; byAdvisor: boolean; heldSince: number
+  }>(null)
+  const liveEvalTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastRemoteApplied = useRef<number>(0)  // SERVER ts of the newest event we consumed
+  const knownAdvisorEditAt = useRef<number>(0) // advisor-marker high-water mark
+  const viewNotifyTs     = useRef<number>(0)   // advisor VIEW mode: last acknowledged server ts
+  const liveToastAt      = useRef<number>(0)
+  const liveToastCount   = useRef<number>(0)
+  const stableCacheSrc   = useRef<string>('')  // lazy canonical form of lastSavedJson
+  const stableCacheOut   = useRef<string>('')
   const [retryCount, setRetryCount] = useState(0)
+
+  // A write (or an async apply) is in flight. Counted, not a boolean: a save
+  // and a conflict-prompt load can overlap, and the first one to finish must
+  // not declare the coast clear. Also expires on its own, so a stalled network
+  // call can never freeze the live listener for the whole session.
+  const syncDepth = useRef(0)
+  const syncBusy = () =>
+    syncDepth.current > 0 && Date.now() - syncBusyAt.current < SYNC_BUSY_MAX_MS
+  const beginSync = () => { if (syncDepth.current === 0) syncBusyAt.current = Date.now(); syncDepth.current += 1 }
+  const endSync   = () => { syncDepth.current = Math.max(0, syncDepth.current - 1) }
 
   // Advisor edit-mode helper: are we saving to a CLIENT's uid, and which uid.
   // In edit mode saves target the client; otherwise the signed-in (advisor) uid.
@@ -177,6 +223,20 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       return 'proceed'
     }
 
+    openConflictChoice(opts)
+    return 'blocked'
+  }
+
+  // The conflict prompt itself — shared by the pre-write probe above and the
+  // live listener (effect 2c), so there is exactly one implementation and one
+  // single-instance gate (conflictToastId).
+  const openConflictChoice = (opts: {
+    targetUid: string
+    baseline: React.MutableRefObject<number>
+    message: { title: string; description: string }
+    revalidate: () => boolean
+  }) => {
+    if (conflictToastId.current != null) return
     const id = toast.warning(opts.message.title, {
       description: opts.message.description,
       // Two Hebrew action buttons squeeze the default toast — widen it so the
@@ -186,28 +246,34 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       closeButton: true,
       onDismiss: () => {
         // Closed without choosing: re-arm the save so the conflict re-surfaces
-        // instead of silently stalling the session's saves.
+        // instead of silently stalling the session's saves. Force the next save
+        // to actually re-probe (the listener never stamps lastProbeAt, so the
+        // 10s floor could otherwise wave the overwrite straight through), and
+        // re-evaluate any live event that arrived while the prompt was open.
         conflictToastId.current = null
+        lastProbeAt.current = 0
         requestSaveRef.current()
+        scheduleLiveEval(LIVE_HOLD_RETRY_MS)
       },
       action: {
         label: 'טען את הגרסה החדשה',
         onClick: async () => {
-          conflictToastId.current = null
+          // The gate stays UP until the load settles: dropping it first lets an
+          // armed save slip through and a second prompt stack on top.
+          beginSync()
           try {
             // Fresh read — more writes may have landed while the prompt sat open.
             const fresh = await loadUserData(opts.targetUid)
             if (!opts.revalidate() || !fresh?.data) { toast.error('הטעינה נכשלה, נסה שוב.'); return }
-            resetAllStores()
-            applySnapshot(fresh.data)
-            const json = JSON.stringify(collectSnapshot())
-            lastSavedJson.current  = json
-            lastBackupJson.current = json
-            opts.baseline.current  = fresh.updatedAt
-            useSyncStore.getState().setDirty(false)
-            toast.success('הגרסה החדשה נטענה.')
+            if (applyRemote(fresh.data, fresh.updatedAt, opts.baseline) !== null) {
+              toast.success('הגרסה החדשה נטענה.')
+            }
           } catch {
             toast.error('הטעינה נכשלה, נסה שוב.')
+          } finally {
+            conflictToastId.current = null
+            endSync()
+            scheduleLiveEval(LIVE_HOLD_RETRY_MS)
           }
         },
       },
@@ -216,13 +282,67 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         onClick: () => {
           conflictToastId.current = null
           skipProbeOnce.current = true
+          // Consent given: the imminent write resolves this conflict, so a live
+          // event arriving in the 2s debounce must not re-open the prompt.
+          pendingRemote.current = null
           requestSaveRef.current()   // re-arm the normal debounce; every guard re-runs
         },
       },
     })
     conflictToastId.current = id
-    return 'blocked'
   }
+
+  // Apply a remote document to the stores and re-seed every marker in the SAME
+  // tick. Skipping any of these makes the 14 store subscriptions echo the
+  // remote state back as a save, and makes the next probe read it as a
+  // conflict. Used by the conflict prompt, the focus refetch and the listener.
+  const applyRemote = (
+    data: unknown,
+    remoteTs: number,
+    baseline: React.MutableRefObject<number>,
+  ): string | null => {
+    // Never move backwards: a slow read (the conflict prompt's fetch) can
+    // resolve AFTER a newer version was already applied, and overwriting the
+    // newer state while the markers say it is saved would lose that write.
+    if (remoteTs > 0 && remoteTs < lastRemoteApplied.current) return null
+
+    // sharedLearnedDB (and the credit-import flags) are NOT part of the
+    // snapshot, and resetAllStores clears them — it is loaded once per session,
+    // so without this every apply would silently degrade auto-categorization.
+    const shared = useCreditStore.getState().sharedLearnedDB
+    const prevJson = lastSavedJson.current
+    try {
+      resetAllStores()
+      applySnapshot(data)
+    } catch (err) {
+      // A malformed remote document must never leave the stores wiped: the
+      // 500ms local-backup timer would then mirror an EMPTY portfolio over the
+      // user's safety net, and the debounced save could push it to the cloud.
+      console.error('[DataSync] remote apply failed, rolling back:', err)
+      try {
+        resetAllStores()
+        if (prevJson) applySnapshot(JSON.parse(prevJson))
+      } catch { /* nothing better to try */ }
+      setStatus('error', 'טעינת עדכון מרוחק נכשלה')
+      return null
+    }
+    if (shared && Object.keys(shared).length) useCreditStore.setState({ sharedLearnedDB: shared })
+    const json = JSON.stringify(collectSnapshot())
+    lastSavedJson.current  = json
+    lastBackupJson.current = json
+    baseline.current       = Math.max(baseline.current, remoteTs)
+    lastRemoteApplied.current = Math.max(lastRemoteApplied.current, remoteTs)
+    stableCacheSrc.current = ''      // force the canonical cache to rebuild
+    useSyncStore.getState().setDirty(false)
+    return json
+  }
+
+  const scheduleLiveEval = (delay: number) => {
+    if (liveEvalTimer.current) clearTimeout(liveEvalTimer.current)
+    liveEvalTimer.current = setTimeout(() => liveEvalRef.current(), delay)
+  }
+  // Effect 2c installs the real evaluator here (it needs the effect's target).
+  const liveEvalRef = useRef<() => void>(() => {})
 
   // ── Anti-clobber: refetch on tab focus ──
   // Coming back to a backgrounded tab: if we're clean, pull the newer version
@@ -266,15 +386,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       const preJson = JSON.stringify(collectSnapshot())
       if (preJson !== lastSavedJson.current) return
       if (remote.updatedAt <= baseline.current + CONFLICT_SKEW_MS) return
-      resetAllStores()
-      applySnapshot(remote.data)
-      const json = JSON.stringify(collectSnapshot())
-      lastSavedJson.current  = json
-      lastBackupJson.current = json
-      baseline.current = remote.updatedAt
-      useSyncStore.getState().setDirty(false)
+      const json = applyRemote(remote.data, remote.updatedAt, baseline)
+      // This read superseded whatever the listener was holding.
+      pendingRemote.current = null
       // A remote write can be OUR OWN beacon echo — only announce real change.
-      if (json !== preJson) toast.info('הנתונים עודכנו ממכשיר אחר.', { duration: 4000 })
+      // Shared toast id with the listener so the two paths can never stack.
+      if (json !== null && json !== preJson) {
+        toast.info('הנתונים עודכנו ממכשיר אחר.', { id: 'remote-applied', duration: 4000 })
+      }
     } catch { /* offline — ignore */ }
   }
 
@@ -308,6 +427,18 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       lastProbeAt.current      = 0
       lastFocusProbeAt.current = 0
       skipProbeOnce.current    = false
+      // Live-sync state too — a held event or a stale high-water mark must
+      // never carry into the next session/user.
+      pendingRemote.current      = null
+      lastRemoteApplied.current  = 0
+      knownAdvisorEditAt.current = 0
+      viewNotifyTs.current       = 0
+      liveToastAt.current        = 0
+      liveToastCount.current     = 0
+      stableCacheSrc.current     = ''
+      syncBusyAt.current         = 0
+      syncDepth.current          = 0
+      useSyncStore.getState().setRemoteActivity(null)
       if (conflictToastId.current != null) {
         toast.dismiss(conflictToastId.current)
         conflictToastId.current = null
@@ -323,6 +454,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     skipProbeOnce.current    = false
     lastProbeAt.current      = 0
     lastFocusProbeAt.current = 0
+    pendingRemote.current      = null
+    lastRemoteApplied.current  = 0
+    knownAdvisorEditAt.current = 0
+    liveToastAt.current        = 0
+    liveToastCount.current     = 0
+    stableCacheSrc.current     = ''
     if (conflictToastId.current != null) {
       toast.dismiss(conflictToastId.current)
       conflictToastId.current = null
@@ -346,6 +483,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // Anti-clobber baseline: the server updatedAt we just loaded IS our
         // last-known truth for the self path.
         selfDocBaseline.current = result?.updatedAt ?? 0
+        // The listener's attach event replays this same state — mark it as
+        // already consumed so it can never be treated as a foreign change.
+        lastRemoteApplied.current = result?.updatedAt ?? 0
         setHydrated(true)
         setStatus('idle')
 
@@ -409,8 +549,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // settled (the entry's own reset+applySnapshot fire this too).
         if (!viewEditWarned.current && Date.now() - imp.startedAt > 2000) {
           viewEditWarned.current = true
-          toast.warning('👁️ אתה במצב צפייה בלבד — שינויים שתעשה כאן לא נשמרים.', { duration: 6000 })
+          toast.warning('👁️ אתה במצב צפייה בלבד. שינויים שתעשה כאן לא נשמרים.', { duration: 6000 })
         }
+        // No write will follow in view mode, so a pending "save anyway" consent
+        // would stay latched forever and silently mute the live listener.
+        skipProbeOnce.current = false
         return
       }
 
@@ -483,11 +626,16 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           if (verdict === 'blocked') return
 
           setStatus('saving')
+          beginSync()
           try {
             await saveClientDataAsAdvisor(clientUid, snap, advisorUid)
             lastSavedJson.current      = json
             clientDocBaseline.current  = Date.now()
             lastProbeAt.current        = Date.now()
+            // Our write supersedes anything the listener was holding: replaying
+            // an older event now would revert what we just persisted, and the
+            // next save would push that revert to the server.
+            pendingRemote.current = null
             markSaved()
             const nowJson = JSON.stringify(collectSnapshot())
             if (nowJson === json) useSyncStore.getState().setDirty(false)
@@ -503,6 +651,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
             }
           } catch (err) {
             setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
+          } finally {
+            endSync()
           }
           return
         }
@@ -552,11 +702,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         if (verdict === 'blocked') return
 
         setStatus('saving')
+        beginSync()
         try {
           await saveUserData(user.uid, snap)
           lastSavedJson.current = json
           selfDocBaseline.current = Date.now()
           lastProbeAt.current     = Date.now()
+          pendingRemote.current   = null   // see the advisor path above
           markSaved()
           // Only clear the dirty flag if nothing else changed WHILE the save
           // was in flight. If it did, isDirty stays true — the next debounce
@@ -577,6 +729,8 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           }
         } catch (err) {
           setStatus('error', (err as Error)?.message ?? 'שגיאת שמירה')
+        } finally {
+          endSync()
         }
       }, DEBOUNCE_MS)
     }
@@ -585,12 +739,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     requestSaveRef.current = triggerSave
     // Out-of-band snapshot writers (transaction-inbox drain) report their save
     // here so the probe doesn't read it back as a foreign conflict.
-    registerSaveBaselineBump(() => {
-      const json = JSON.stringify(collectSnapshot())
-      lastSavedJson.current   = json
-      lastBackupJson.current  = json
+    registerSaveBaselineBump((writtenJson: string) => {
+      lastSavedJson.current   = writtenJson
+      lastBackupJson.current  = writtenJson
       selfDocBaseline.current = Date.now()
       lastProbeAt.current     = Date.now()
+      stableCacheSrc.current  = ''     // canonical cache must rebuild
+      pendingRemote.current   = null   // this write supersedes any held event
     })
 
     const unsubs = [
@@ -639,6 +794,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       clientDocBaseline.current = state.clientUpdatedAt || 0
       lastVersionAt.current     = 0        // allow the first real edit to version
       viewEditWarned.current    = false
+      // Live-sync state is per-document: switching to the client's doc must not
+      // inherit the advisor's own high-water marks or a held event.
+      pendingRemote.current      = null
+      lastRemoteApplied.current  = state.clientUpdatedAt || 0
+      knownAdvisorEditAt.current = 0
+      liveToastAt.current        = 0
+      liveToastCount.current     = 0
+      stableCacheSrc.current     = ''
       // A pending self-conflict prompt must never act on CLIENT data, and the
       // advisor's FIRST client save must not ride a recent self-probe's throttle:
       skipProbeOnce.current     = false
@@ -650,6 +813,246 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     })
     return () => unsub()
   }, [])
+
+  // ── 2c. Live listener on the active document ──
+  // Streams the other side's saves (advisor↔client, or a second device) into
+  // this session within a couple of seconds. Design notes:
+  //  • Echo detection is by CONTENT, never by timestamp: in the scenario this
+  //    exists for, both sides save every few seconds, so any time window would
+  //    classify real changes as our own echo and silently clobber them.
+  //  • Local unsaved edits are never replaced — the shared conflict prompt
+  //    offers the choice (same one the pre-write probe uses).
+  //  • Advisor VIEW mode is notify-only: it never touches the shown data.
+  const impUid  = useImpersonationStore(s => s.client?.uid)
+  const impMode = useImpersonationStore(s => s.mode)
+
+  useEffect(() => {
+    if (!user || !hydrated) return
+    const targetUid = impUid ?? user.uid
+    const listenerMode: 'self' | 'edit' | 'view' =
+      impUid ? (impMode === 'edit' ? 'edit' : 'view') : 'self'
+    if (listenerMode === 'view') {
+      viewNotifyTs.current = useImpersonationStore.getState().clientUpdatedAt || 0
+      // The high-water mark belongs to the previous document (the advisor's
+      // own), and this one is only read for notifications.
+      lastRemoteApplied.current  = 0
+      knownAdvisorEditAt.current = 0
+      pendingRemote.current      = null
+    }
+
+    // Canonical form of our last write, rebuilt only when it changes.
+    const canonLastSaved = (): string | null => {
+      // '' means "a restore is pending a forced push" — nothing to compare to.
+      if (!lastSavedJson.current) return null
+      if (stableCacheSrc.current !== lastSavedJson.current) {
+        try { stableCacheOut.current = stableStringify(JSON.parse(lastSavedJson.current)) }
+        catch { return null }
+        stableCacheSrc.current = lastSavedJson.current
+      }
+      return stableCacheOut.current
+    }
+
+    // Re-checked at EVENT time: the user may have logged out or switched
+    // modes while an event sat in the debounce.
+    const stillValid = () => {
+      const now = useImpersonationStore.getState()
+      const nowMode: 'self' | 'edit' | 'view' =
+        now.client ? (now.mode === 'edit' ? 'edit' : 'view') : 'self'
+      return useAuthStore.getState().user?.uid === user.uid
+        && nowMode === listenerMode
+        && (now.client?.uid ?? user.uid) === targetUid
+    }
+
+    // Hold an event without dropping it, but never forever: a stalled network
+    // call or an input that keeps focus must not spin a timer for the session.
+    const holdOrDrop = (ev: NonNullable<typeof pendingRemote.current>, delay: number) => {
+      if (Date.now() - ev.heldSince > LIVE_HOLD_MAX_MS) {
+        // Give up on this specific event. Correctness still holds: the focus
+        // refetch and the pre-write probe cover anything we skipped.
+        pendingRemote.current = null
+        return
+      }
+      pendingRemote.current = ev
+      scheduleLiveEval(delay)
+    }
+
+    const evaluate = () => {
+      const ev = pendingRemote.current
+      if (!ev) return
+      if (!useSyncStore.getState().hydrated || !stillValid()) { pendingRemote.current = null; return }
+
+      // ── Cheap gates first: everything below this block costs full-document
+      // serializations, and a held event re-runs them on every retry. ──
+
+      // Don't yank the ground out from under an open editor, and don't mutate
+      // a hidden tab (the focus refetch announces properly on return).
+      const active = document.activeElement as HTMLElement | null
+      const editing = !!active && (
+        active.tagName === 'INPUT' || active.tagName === 'TEXTAREA'
+        || active.tagName === 'SELECT' || active.isContentEditable
+      )
+      if (listenerMode !== 'view' && (document.visibilityState !== 'visible' || editing)) {
+        holdOrDrop(ev, 1500); return
+      }
+      // A write (or an async apply) is in flight — hold, never drop.
+      if (syncBusy()) { holdOrDrop(ev, LIVE_HOLD_RETRY_MS); return }
+      // A restore is waiting to be pushed: its own save resolves this.
+      if (!lastSavedJson.current) { holdOrDrop(ev, LIVE_HOLD_RETRY_MS); return }
+      // Consent to overwrite was just given; the imminent write settles it.
+      if (skipProbeOnce.current) { pendingRemote.current = null; return }
+      // Stale event (older than what we already consumed) must never be applied.
+      if (ev.updatedAt > 0 && ev.updatedAt <= lastRemoteApplied.current) { pendingRemote.current = null; return }
+
+      pendingRemote.current = null
+      const byAdvisor = ev.byAdvisor
+
+      // VIEW mode: chip only. Never applies, never writes, never re-seeds.
+      if (listenerMode === 'view') {
+        if (ev.updatedAt > viewNotifyTs.current) {
+          viewNotifyTs.current = ev.updatedAt
+          useSyncStore.getState().setRemoteActivity({ at: ev.updatedAt, seenAt: Date.now(), byAdvisor })
+        }
+        return
+      }
+
+      const baseline = listenerMode === 'edit' ? clientDocBaseline : selfDocBaseline
+
+      // OUR OWN write coming back (online save, tab-close beacon, inbox drain,
+      // or the attach event): absorb it and heal the baseline toward server truth.
+      // Cheap exact compare first — Firestore usually preserves key order, so
+      // this hits most echoes without the canonical (sort-everything) pass.
+      const isEcho = JSON.stringify(ev.data) === lastSavedJson.current
+        || (() => {
+          const canon = canonLastSaved()
+          return canon !== null && stableStringify(ev.data) === canon
+        })()
+      if (isEcho) {
+        baseline.current = Math.max(baseline.current, ev.updatedAt)
+        lastRemoteApplied.current = Math.max(lastRemoteApplied.current, ev.updatedAt)
+        return
+      }
+
+      // A real change by someone else.
+      useSyncStore.getState().setRemoteActivity({ at: ev.updatedAt, seenAt: Date.now(), byAdvisor })
+      if (conflictToastId.current != null) return   // an unresolved prompt gates everything
+
+      // Dirty test is content-based AND flag-based: after a tab-close beacon
+      // lastSavedJson holds an optimistically-marked snapshot that may never
+      // have reached the server, so content alone would call us "clean" and
+      // throw those edits away.
+      const dirtyNow = useSyncStore.getState().isDirty
+        || JSON.stringify(collectSnapshot()) !== lastSavedJson.current
+      if (dirtyNow) {
+        openConflictChoice({
+          targetUid,
+          baseline,
+          message: listenerMode === 'edit' ? ADVISOR_CONFLICT_MSG : SELF_CONFLICT_MSG,
+          revalidate: stillValid,
+        })
+        return
+      }
+
+      // Clean by definition here (the dirty test above passed), so the
+      // pre-apply state IS lastSavedJson — no extra serialization needed.
+      const preJson = lastSavedJson.current
+      const json = applyRemote(ev.data, ev.updatedAt, baseline)
+      const announce = liveToastCount.current < LIVE_TOAST_BURST
+        || Date.now() - liveToastAt.current > LIVE_TOAST_MIN_GAP_MS
+      if (json !== null && json !== preJson && announce) {
+        liveToastAt.current = Date.now()
+        liveToastCount.current += 1
+        toast.info(
+          listenerMode === 'edit' ? 'הנתונים עודכנו מהחשבון של הלקוח.'
+            : byAdvisor ? 'היועץ עדכן את הנתונים.' : 'הנתונים עודכנו ממכשיר אחר.',
+          { id: 'remote-applied', duration: 4000 },
+        )
+      }
+    }
+    liveEvalRef.current = evaluate
+
+    const unsub = onSnapshot(fsDoc(db, 'users', targetUid),
+      snap => {
+        if (snap.metadata.hasPendingWrites) return   // our own not-yet-acked write
+        if (snap.metadata.fromCache) return          // cache replay; server truth follows
+        const raw = snap.exists() ? (snap.data() as Record<string, unknown>) : null
+        if (!raw?.data) return                       // fresh account, nothing saved yet
+        const lastAdvisorEditAt = tsToMillis(raw.lastAdvisorEditAt)
+        // Attribution is decided HERE, once per event, and the high-water mark
+        // advances even for events we later drop: the advisor markers live on
+        // the document forever, so a mark that is never seeded would make the
+        // first foreign write of the session look like an advisor edit. Doing
+        // it at ingestion also keeps a held event's attribution stable.
+        const byAdvisor = deriveByAdvisor({
+          lastAdvisorEditAt,
+          lastAdvisorEditByUid: typeof raw.lastAdvisorEditByUid === 'string' ? raw.lastAdvisorEditByUid : '',
+          knownAdvisorEditAt: knownAdvisorEditAt.current,
+          myUid: useAuthStore.getState().user?.uid ?? '',
+        })
+        knownAdvisorEditAt.current = Math.max(knownAdvisorEditAt.current, lastAdvisorEditAt)
+        pendingRemote.current = {
+          data: raw.data,
+          updatedAt: tsToMillis(raw.updatedAt),
+          byAdvisor,
+          heldSince: Date.now(),
+        }
+        scheduleLiveEval(LIVE_APPLY_DEBOUNCE_MS)
+      },
+      () => {
+        // Terminal for this listener (a revoked link must not retry-loop).
+        // Correctness still holds: the focus refetch and the pre-write probe
+        // are untouched. Only impersonation gets a notice — the advisor is the
+        // one who can act on it.
+        if (useImpersonationStore.getState().client) {
+          toast.info('העדכון החי מהחשבון של הלקוח הופסק. צא וחזור ללקוח כדי לחדש אותו.', {
+            id: 'live-dead',
+            duration: 10000,
+            closeButton: true,
+            action: {
+              label: 'חזרה לחשבון שלי',
+              onClick: () => window.location.assign('/app/advisor'),
+            },
+          })
+        }
+      })
+
+    // VIEW mode only: the banner's "load the latest version" button.
+    registerLiveRefresh(listenerMode !== 'view' ? null : () => {
+      const imp = useImpersonationStore.getState()
+      if (!imp.client || imp.mode !== 'view' || imp.client.uid !== targetUid) return
+      beginSync()
+      loadUserData(targetUid).then(fresh => {
+        const now = useImpersonationStore.getState()
+        if (!fresh?.data || now.client?.uid !== targetUid || now.mode !== 'view') return
+        // start() FIRST: it resets startedAt, which is what suppresses the
+        // "view only, nothing is saved" warning that the store writes below
+        // (and the 500ms mapping mirror) would otherwise pop right after the
+        // advisor clicked refresh. Same ordering rule as entering view mode.
+        useImpersonationStore.getState().start(now.client, 'view', fresh.updatedAt)
+        viewEditWarned.current = false
+        try {
+          resetAllStores()
+          applySnapshot(fresh.data)
+        } catch (err) {
+          console.error('[DataSync] view refresh failed:', err)
+          toast.error('הטעינה נכשלה, נסה שוב.')
+          return
+        }
+        viewNotifyTs.current = fresh.updatedAt
+        useSyncStore.getState().setRemoteActivity(null)
+        toast.success('הגרסה החדשה נטענה.', { id: 'live-refreshed' })
+      }).catch(() => toast.error('הטעינה נכשלה, נסה שוב.'))
+        .finally(() => endSync())
+    })
+
+    return () => {
+      unsub()
+      registerLiveRefresh(null)
+      if (liveEvalTimer.current) clearTimeout(liveEvalTimer.current)
+      pendingRemote.current = null
+      liveEvalRef.current = () => {}
+      useSyncStore.getState().setRemoteActivity(null)
+    }
+  }, [user, hydrated, impUid, impMode])
 
   // ── 3. Mirror mapping installments/debts/savings into all monthly tabs ──
   // Subscribe to any mapping change; on user pause (500ms debounce) call

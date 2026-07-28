@@ -137,10 +137,15 @@ export function useTransactionInbox() {
         // next session — a charge can no longer be lost between add and save.
         if (dropAfterSave.length) {
           try {
-            await saveUserData(user.uid, collectSnapshot())
+            // Serialize ONCE and report exactly what was written: anything the
+            // user types during the round-trip must stay dirty (so the next
+            // debounce saves it) instead of being marked as already saved.
+            const snap = collectSnapshot()
+            const writtenJson = JSON.stringify(snap)
+            await saveUserData(user.uid, snap)
             // Record this as OUR save — otherwise DataSync's anti-clobber probe
             // reads it back as a "foreign" write and blocks all further saving.
-            bumpSaveBaseline()
+            bumpSaveBaseline(writtenJson)
           } catch {
             return  // leave the items in the inbox; they'll be retried next session
           }

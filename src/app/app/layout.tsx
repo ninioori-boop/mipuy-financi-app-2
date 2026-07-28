@@ -301,6 +301,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ☰
           </button>
           <span suppressHydrationWarning data-brand="nameHe" className="font-bold text-[color:var(--wordmark,var(--gold))] tracking-wide"><BrandNameHe /></span>
+          {/* Phone clients had no sync indicator at all: no save state, no
+              offline warning, and (since live sync) no sign that the advisor
+              is updating their numbers right now. */}
+          <span className="ms-auto min-w-0"><SaveStatusBar /></span>
         </header>
 
         {/* Side drawer — RTL, opens from the right (like the system) */}

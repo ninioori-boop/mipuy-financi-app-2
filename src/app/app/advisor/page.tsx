@@ -67,11 +67,16 @@ export default function AdvisorPage() {
   async function viewFullAccount(c: MockClient) {
     try {
       const snap = await getDoc(doc(db, 'users', c.id))
-      const data = snap.exists() ? snap.data().data : null
+      const raw  = snap.exists() ? snap.data() : null
+      const data = raw?.data ?? null
       if (!data) { toast.error('אין נתונים לצפייה עבור הלקוח הזה.'); return }
+      // Entry timestamp doubles as the live listener's notify baseline, so a
+      // "the client just saved" chip only appears for writes AFTER we opened
+      // the account (guarded like the edit path — old docs have no updatedAt).
+      const updatedAt = typeof raw?.updatedAt?.toMillis === 'function' ? raw.updatedAt.toMillis() : 0
       // Order matters: raise the guard BEFORE touching the stores, so the
       // store-change subscriptions can never schedule a save of client data.
-      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email }, 'view')
+      useImpersonationStore.getState().start({ uid: c.id, name: c.name, email: c.email }, 'view', updatedAt)
       // Wipe the advisor's own data first — applySnapshot skips sections the
       // client never filled, and without the reset those tabs would keep
       // showing the ADVISOR's numbers instead of the client's empty state.

@@ -3,20 +3,29 @@
 import { useEffect, useState } from 'react'
 import { useSyncStore } from '@/stores/syncStore'
 import { useAuthStore } from '@/stores/authStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
+import { timeAgo, timeAgoCoarse } from '@/lib/timeAgo'
 
-function timeAgo(ms: number): string {
-  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000))
-  if (sec < 5)    return 'הרגע'
-  if (sec < 60)   return `לפני ${sec} שנ׳`
-  if (sec < 3600) return `לפני ${Math.floor(sec / 60)} דק׳`
-  return new Date(ms).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
-}
+// How long a "someone else just saved" signal stays visible. Exported so the
+// impersonation banner's chip expires on the same schedule.
+export const PRESENCE_SHOW_MS = 5 * 60_000
+// Right after a live apply the mapping mirror re-derives monthly rows, which
+// flips isDirty for ~2s. Presence outranks it briefly so the pill doesn't
+// strobe between "עודכן" and "שינויים לא-שמורים" on every foreign save.
+const PRESENCE_PRIORITY_MS = 4_000
+// Both sides of every comparison below are LOCAL clock values (lastSavedAt and
+// remoteActivity.seenAt). Comparing a local clock against the doc's SERVER
+// timestamp would hide the signal completely on a device whose clock runs fast.
 
 export function SaveStatusBar() {
   const status        = useSyncStore(s => s.status)
   const lastSavedAt   = useSyncStore(s => s.lastSavedAt)
   const errorMessage  = useSyncStore(s => s.errorMessage)
   const isDirty       = useSyncStore(s => s.isDirty)
+  const remoteActivity = useSyncStore(s => s.remoteActivity)
+  // During impersonation the banner owns this signal (with the right wording
+  // for who acted), so the header must not contradict it.
+  const impersonating = useImpersonationStore(s => !!s.client)
   const user          = useAuthStore(s => s.user)
   const authLoading   = useAuthStore(s => s.loading)
 
@@ -33,7 +42,7 @@ export function SaveStatusBar() {
     return (
       <span className="inline-flex items-center gap-2 text-sm text-muted-txt px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5">
         <span className="size-2.5 rounded-full bg-yellow-400/80" />
-        מצב מקומי — נתונים לא נשמרים
+        מצב מקומי, נתונים לא נשמרים
       </span>
     )
   }
@@ -43,6 +52,19 @@ export function SaveStatusBar() {
   let pillBorder = 'border-transparent'
   let textColor  = 'text-muted-txt'
   let label      = 'מוכן'
+  // Relative time is split out of the label: it changes on every tick, and a
+  // live region that re-announces "לפני 3 דק׳ → 4 דק׳" every 15 seconds makes
+  // the app unusable with a screen reader. Rendered aria-hidden.
+  let timePart   = ''
+
+  // "Someone else saved" — shown while it is recent AND newer than our own
+  // last save. Suppressed during impersonation (the banner says it better).
+  const showPresence = !impersonating
+    && !!remoteActivity
+    && Date.now() - remoteActivity.seenAt < PRESENCE_SHOW_MS
+    && remoteActivity.seenAt > (lastSavedAt ?? 0)
+  const presenceLabel = remoteActivity?.byAdvisor ? 'היועץ עדכן נתונים' : 'עודכן ממכשיר אחר'
+  const presenceTime  = remoteActivity ? timeAgoCoarse(remoteActivity.seenAt) : ''
 
   if (status === 'loading') {
     dotColor   = 'bg-muted-txt animate-pulse'
@@ -67,7 +89,15 @@ export function SaveStatusBar() {
     pillBg     = 'bg-yellow-400/10'
     pillBorder = 'border-yellow-400/30'
     textColor  = 'text-yellow-300'
-    label      = 'מצב לא מקוון — שמירה מושהית'
+    label      = 'מצב לא מקוון, השמירה מושהית'
+  } else if (showPresence && Date.now() - remoteActivity!.seenAt < PRESENCE_PRIORITY_MS) {
+    // Fresh foreign write outranks the derived dirt an apply leaves behind.
+    dotColor   = 'bg-gold'
+    pillBg     = 'bg-gold/10'
+    pillBorder = 'border-gold/30'
+    textColor  = 'text-gold'
+    label      = presenceLabel
+    timePart   = presenceTime
   } else if (isDirty) {
     // Explicit "there are changes waiting to be saved" signal. Kept between
     // the last keystroke and the debounced save landing (up to 2s), and
@@ -77,27 +107,39 @@ export function SaveStatusBar() {
     pillBorder = 'border-orange-400/30'
     textColor  = 'text-orange-300'
     label      = 'שינויים לא-שמורים…'
+  } else if (showPresence) {
+    dotColor   = 'bg-gold'
+    pillBg     = 'bg-gold/10'
+    pillBorder = 'border-gold/30'
+    textColor  = 'text-gold'
+    label      = presenceLabel
+    timePart   = presenceTime
   } else if (status === 'saved') {
     dotColor   = 'bg-green-400'
     pillBg     = 'bg-green-400/10'
     pillBorder = 'border-green-400/30'
     textColor  = 'text-green-400'
-    label      = lastSavedAt ? `נשמר ${timeAgo(lastSavedAt)}` : 'נשמר'
+    label      = 'נשמר'
+    timePart   = lastSavedAt ? timeAgo(lastSavedAt) : ''
   } else if (lastSavedAt) {
     dotColor   = 'bg-green-400/70'
     pillBg     = 'bg-green-400/5'
     pillBorder = 'border-green-400/20'
     textColor  = 'text-green-400/80'
-    label      = `נשמר ${timeAgo(lastSavedAt)}`
+    label      = 'נשמר'
+    timePart   = timeAgo(lastSavedAt)
   }
 
   return (
     <span
-      className={`inline-flex items-center gap-2 text-sm font-medium px-2.5 py-1 rounded-full border ${pillBorder} ${pillBg} ${textColor}`}
+      role="status"
+      className={`inline-flex items-center gap-2 min-w-0 max-w-[52vw] sm:max-w-none text-sm font-medium px-2.5 py-1 rounded-full border ${pillBorder} ${pillBg} ${textColor}`}
       title={status === 'error' && errorMessage ? errorMessage : undefined}
     >
-      <span className={`size-2.5 rounded-full ${dotColor}`} />
-      {label}
+      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${dotColor}`} />
+      <span className="truncate">
+        {label}{timePart && <span aria-hidden>{' '}{timePart}</span>}
+      </span>
     </span>
   )
 }

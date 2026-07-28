@@ -57,7 +57,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: BRAND_TEXT_SCRIPT }} />
         <CookieBanner />
         <ImpersonationBanner />
-        <Toaster position="bottom-center" />
+        {/* Lifted above the impersonation banner (which sets --imp-banner-h)
+            so a toast never covers the "back to my account" button. */}
+        <Toaster
+          position="bottom-center"
+          offset={{ bottom: 'calc(var(--imp-banner-h, 0px) + 24px)' }}
+          mobileOffset={{ bottom: 'calc(var(--imp-banner-h, 0px) + 16px)' }}
+        />
         <GoogleAnalytics />
       </body>
     </html>
