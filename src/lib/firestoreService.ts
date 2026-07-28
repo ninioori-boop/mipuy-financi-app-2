@@ -6,23 +6,35 @@ import { db } from './firebase'
 
 /* ── User data ──────────────────────────────────────────────────── */
 
+/**
+ * mergeFields (NOT merge:true) is load-bearing: merge:true deep-merges nested
+ * MAPS, so a key the user DELETED locally (a category budget, a dismissed
+ * subscription, a removed recurring rule's posted mark) is never removed from
+ * the doc and resurrects on the next load. mergeFields treats `data` as one
+ * field path — the whole map is replaced — while sibling top-level fields
+ * (meta, lastAdvisorEditAt, …) stay untouched. Matches the v1 app's db.js.
+ */
 export async function saveUserData(uid: string, data: unknown): Promise<void> {
-  await setDoc(doc(db, 'users', uid), { data, updatedAt: serverTimestamp() }, { merge: true })
+  await setDoc(doc(db, 'users', uid), { data, updatedAt: serverTimestamp() },
+    { mergeFields: ['data', 'updatedAt'] })
 }
 
 /**
  * Save a CLIENT's snapshot while an advisor is editing it (view-as-client edit
  * mode). Same shape as saveUserData but also stamps the transparency marker as
  * TOP-LEVEL fields (never inside `data`, so it can't round-trip into the
- * snapshot / version diffs). merge:true preserves the client's own `data` fields
- * we didn't send. The advisor→client WRITE is authorized by the Firestore rule
+ * snapshot / version diffs). mergeFields (see saveUserData) replaces `data`
+ * wholesale so the client's deletions stick, while every top-level field we do
+ * not list stays untouched. The advisor holds the client's FULL snapshot in
+ * memory (reset+applySnapshot on entry), so a whole-map replace is correct.
+ * The advisor→client WRITE is authorized by the Firestore rule
  * (active link + access=='write').
  */
 export async function saveClientDataAsAdvisor(clientUid: string, data: unknown, advisorUid: string): Promise<void> {
   await setDoc(
     doc(db, 'users', clientUid),
     { data, updatedAt: serverTimestamp(), lastAdvisorEditAt: serverTimestamp(), lastAdvisorEditByUid: advisorUid },
-    { merge: true },
+    { mergeFields: ['data', 'updatedAt', 'lastAdvisorEditAt', 'lastAdvisorEditByUid'] },
   )
 }
 

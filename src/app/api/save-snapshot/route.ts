@@ -70,7 +70,10 @@ export async function POST(req: NextRequest) {
         const ts = cur.data()?.updatedAt as { toMillis?: () => number } | undefined
         const curTs = typeof ts?.toMillis === 'function' ? ts.toMillis() : 0
         if (curTs > baseline + SKEW_MS) return true
-        tx.set(ref, { data: snapshot, updatedAt: FieldValue.serverTimestamp() }, { merge: true })
+        // mergeFields, not merge:true — see saveUserData: a deep map merge
+        // resurrects keys the user deleted locally.
+        tx.set(ref, { data: snapshot, updatedAt: FieldValue.serverTimestamp() },
+          { mergeFields: ['data', 'updatedAt'] })
         return false
       })
       if (stale) {
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest) {
       // No baseline (older cached bundle) — original unconditional behavior.
       await ref.set(
         { data: snapshot, updatedAt: FieldValue.serverTimestamp() },
-        { merge: true },
+        { mergeFields: ['data', 'updatedAt'] },
       )
     }
   } catch (err) {
