@@ -300,7 +300,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             ☰
           </button>
-          <span data-brand="nameHe" className="font-bold text-[color:var(--wordmark,var(--gold))] tracking-wide"><BrandNameHe /></span>
+          <span suppressHydrationWarning data-brand="nameHe" className="font-bold text-[color:var(--wordmark,var(--gold))] tracking-wide"><BrandNameHe /></span>
         </header>
 
         {/* Side drawer — RTL, opens from the right (like the system) */}
@@ -370,8 +370,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ☰
           </button>
           <span className="font-bold text-[color:var(--wordmark,var(--gold))] tracking-wide truncate text-base sm:text-xl">
-            <span data-brand="nameEn" className="hidden sm:inline"><BrandNameEn /></span>
-            <span data-brand="wordmarkShort" className="sm:hidden"><BrandWordmarkShort /></span>
+            <span suppressHydrationWarning data-brand="nameEn" className="hidden sm:inline"><BrandNameEn /></span>
+            <span suppressHydrationWarning data-brand="wordmarkShort" className="sm:hidden"><BrandWordmarkShort /></span>
           </span>
           <span className="hidden sm:block"><SaveStatusBar /></span>
         </div>

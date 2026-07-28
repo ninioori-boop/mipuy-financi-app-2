@@ -112,7 +112,15 @@ function applyCssVars(brand: Brand, hasOverrides: boolean) {
 
 export function BrandProvider({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user)
-  const [brand, setBrand] = useState<Brand>(BRAND)
+  // Start from what the boot script already painted (window.__BRAND_BOOT__),
+  // NOT from the deployment default — otherwise hydration would overwrite the
+  // pre-paint brand names with the server-rendered defaults, producing exactly
+  // the flash the boot script exists to prevent.
+  const [brand, setBrand] = useState<Brand>(() => {
+    if (typeof window === 'undefined') return BRAND
+    const boot = (window as unknown as { __BRAND_BOOT__?: unknown }).__BRAND_BOOT__
+    return mergeBrand(BRAND, sanitizePracticeBrand(boot))
+  })
 
   useEffect(() => {
     let cancelled = false
