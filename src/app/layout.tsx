@@ -36,10 +36,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="he" dir="rtl" className={`${rubik.variable} dark`}>
-      <body className="min-h-screen bg-surface text-txt antialiased font-sans">
-        {/* Paint-blocking: re-applies the device's last brand BEFORE first
-            paint — no default-theme flash on reload for branded firms. */}
+      <head>
+        {/* Must sit in <head>: re-applies the device's last brand BEFORE the
+            browser's first paint. Inside <body> it ran a beat too late and the
+            default theme flashed on every reload. Static string, no user data. */}
         <script dangerouslySetInnerHTML={{ __html: BRAND_BOOT_SCRIPT }} />
+      </head>
+      <body className="min-h-screen bg-surface text-txt antialiased font-sans">
         <AuthProvider>
           <BrandProvider>
             <ConsentGate>
