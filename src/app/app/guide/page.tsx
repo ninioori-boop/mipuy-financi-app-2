@@ -7,7 +7,7 @@ export default function GuidePage() {
       {/* Hero */}
       <div className="rounded-xl border border-gold/30 bg-gold/5 p-8 text-center space-y-3">
         <div className="text-5xl"><BrandMark className="text-5xl max-h-16 w-auto inline-block" /></div>
-        <h1 className="text-3xl font-black text-[color:var(--wordmark,var(--gold))]"><BrandNameEn /></h1>
+        <h1 data-brand="nameEn" className="text-3xl font-black text-[color:var(--wordmark,var(--gold))]"><BrandNameEn /></h1>
         <p className="text-muted-txt text-lg max-w-xl mx-auto">
           מפת הדרכים שלך לניהול פיננסי חכם — מאפיון ראשוני ועד תכנון לטווח ארוך
         </p>

@@ -25,4 +25,19 @@ var wm=(typeof b.wordmarkColor==='string'&&HEX.test(b.wordmarkColor))?b.wordmark
 if(wm)r.style.setProperty('--wordmark',wm);
 if(typeof b.nameEn==='string'&&b.nameEn)document.title=b.nameEn;
 else if(typeof b.nameHe==='string'&&b.nameHe)document.title=b.nameHe;
+window.__BRAND_BOOT__=b;
+}catch(e){}})()`
+
+// Second half, injected at the END of <body>: the markup's brand NAMES are
+// server-rendered with the deployment default, so they would flash before React
+// hydrates. This rewrites every [data-brand] element from the cached brand
+// while the document is still parsing — i.e. before first paint.
+export const BRAND_TEXT_SCRIPT = `(function(){try{
+var b=window.__BRAND_BOOT__;if(!b)return;
+var he=(typeof b.nameHe==='string'&&b.nameHe)?b.nameHe:null;
+var en=(typeof b.nameEn==='string'&&b.nameEn)?b.nameEn:he;
+var map={nameHe:he,nameEn:en,tagline:(typeof b.tagline==='string'&&b.tagline)?b.tagline:null,
+wordmarkShort:(typeof b.wordmarkShort==='string'&&b.wordmarkShort)?b.wordmarkShort:(en?en.slice(0,12):null)};
+var els=document.querySelectorAll('[data-brand]');
+for(var i=0;i<els.length;i++){var v=map[els[i].getAttribute('data-brand')];if(v)els[i].textContent=v}
 }catch(e){}})()`

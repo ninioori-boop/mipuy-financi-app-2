@@ -10,7 +10,7 @@ import { CookieBanner } from '@/components/layout/CookieBanner'
 import { GoogleAnalytics } from '@/components/layout/GoogleAnalytics'
 import { Toaster } from '@/components/ui/sonner'
 import { BRAND } from '@/lib/brand'
-import { BRAND_BOOT_SCRIPT } from '@/lib/brandBoot'
+import { BRAND_BOOT_SCRIPT, BRAND_TEXT_SCRIPT } from '@/lib/brandBoot'
 
 const rubik = Rubik({
   subsets: ['latin', 'hebrew'],
@@ -52,6 +52,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </ConsentGate>
           </BrandProvider>
         </AuthProvider>
+        {/* Rewrites [data-brand] text from the cached brand while the document
+            is still parsing — kills the default-name flash on reload. */}
+        <script dangerouslySetInnerHTML={{ __html: BRAND_TEXT_SCRIPT }} />
         <CookieBanner />
         <ImpersonationBanner />
         <Toaster position="bottom-center" />
