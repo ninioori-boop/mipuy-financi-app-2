@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import type { Transaction } from '@/types/transaction'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { saveLearnedEntry } from '@/lib/firestoreService'
+import { shareableLearnedEntry } from '@/lib/learnedSharing'
 
 interface CreditState {
   transactions: Transaction[]
@@ -45,13 +46,17 @@ export const useCreditStore = create<CreditState>((set, get) => ({
 
   setSharedLearnedDB: (db) => set({ sharedLearnedDB: db }),
 
-  // Record a deliberate human correction: remember it locally AND push the single
-  // merchant→category pair to the shared cross-account pool (fire-and-forget).
+  // Record a deliberate human correction: remember it locally, and push to the
+  // shared cross-account pool (fire-and-forget) ONLY when the entry has global
+  // meaning — payment rails (Bit/PayBox/PayPal), personal "untracked" targets
+  // and too-short substring-wildcard keys stay in this account alone.
   learn: (desc, category) => {
     const key = normalizeForLookup(desc)
     if (!key) return
     set({ learnedDB: { ...get().learnedDB, [key]: category } })
-    saveLearnedEntry(key, category).catch(() => {})
+    if (shareableLearnedEntry(key, category)) {
+      saveLearnedEntry(key, category).catch(() => {})
+    }
   },
 
   // Manual correction from the UI — apply to every row with the same merchant,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
+import { shareableLearnedEntry } from '@/lib/learnedSharing'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).
@@ -42,6 +43,16 @@ export async function POST(req: NextRequest) {
   const key = normalizeForLookup(merchant.trim())
   if (!key) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
+  }
+
+  // Payment rails / personal "untracked" targets / short wildcard keys never
+  // enter the shared pool — one person's Bit is another person's rent, and this
+  // pool applies to EVERY account. Answer ok (the tracker app fires-and-forgets;
+  // the correction still applied to that user's own transaction), just don't
+  // let it redefine the merchant for everyone else.
+  if (!shareableLearnedEntry(key, category)) {
+    console.log(`[learn] uid=${uid} cat=${category} — not shareable, skipped`)
+    return NextResponse.json({ ok: true, shared: false })
   }
 
   // Single-field merge — only adds/updates this one key, never replaces the doc.
