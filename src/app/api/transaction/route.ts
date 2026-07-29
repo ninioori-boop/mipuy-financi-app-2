@@ -1,3 +1,4 @@
+import { isAccountDeleted, DELETED_ACCOUNT_RESPONSE } from '@/lib/deletionTombstone'
 import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
@@ -37,6 +38,13 @@ export async function POST(req: NextRequest) {
   const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
   if (!uid) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  // The device token is a stateless HMAC with no expiry, so a deleted account's
+  // phone would keep pushing charges forever — creating inbox documents that no
+  // one can ever read or delete (there is no auth user left to match the rule).
+  if (await isAccountDeleted(uid)) {
+    return NextResponse.json(DELETED_ACCOUNT_RESPONSE.body, { status: DELETED_ACCOUNT_RESPONSE.status })
   }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {

@@ -1,3 +1,4 @@
+import { isAccountDeleted, DELETED_ACCOUNT_RESPONSE } from '@/lib/deletionTombstone'
 import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
@@ -56,6 +57,14 @@ export async function POST(req: NextRequest) {
     uid = v.uid
   } catch {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  // An ID token stays valid for up to an hour, and this route writes with the
+  // admin SDK (rules do not apply). Without this check, closing a tab after
+  // deleting the account re-creates the entire financial document as an
+  // orphan nobody can reach.
+  if (await isAccountDeleted(uid)) {
+    return NextResponse.json(DELETED_ACCOUNT_RESPONSE.body, { status: DELETED_ACCOUNT_RESPONSE.status })
   }
 
   try {

@@ -1,3 +1,4 @@
+import { isAccountDeleted } from '@/lib/deletionTombstone'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { getAdminAuth } from '@/lib/firebaseAdmin'
@@ -37,6 +38,19 @@ export async function POST(req: NextRequest) {
   const uid = verifyDeviceToken(token, secret)
   if (!uid) {
     return NextResponse.json({ error: 'טוקן לא תקין' }, { status: 401 })
+  }
+
+  // Signing in with a custom token RE-CREATES the Auth user when none exists,
+  // and the signup gate (a beforeUserCreated blocking function) does not run on
+  // that path. So a deleted account could resurrect itself from the phone app.
+  // Both guards are needed: the tombstone, and proof the user still exists.
+  if (await isAccountDeleted(uid)) {
+    return NextResponse.json({ error: 'החשבון נמחק' }, { status: 410 })
+  }
+  try {
+    await adminAuth.getUser(uid)
+  } catch {
+    return NextResponse.json({ error: 'החשבון לא קיים' }, { status: 401 })
   }
 
   try {
