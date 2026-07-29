@@ -1,5 +1,6 @@
 import { BUSINESS_DB } from './businessDB'
 import { normalizeForLookup } from './normalizeForLookup'
+import { railDefaultCategory } from './learnedSharing'
 
 // Re-exported for callers that already need categorize() too (no extra bundle
 // cost there). Callers who need ONLY normalizeForLookup should import it from
@@ -38,6 +39,14 @@ export function categorize(
   result = searchDB(builtinEntries, lower)
   if (!result && normalized !== lower) result = searchDB(builtinEntries, normalized)
   if (result) return result
+
+  // 3. Payment-rail fallback: Hebrew rail variants BUSINESS_DB has no key for
+  // ("תשלום בביט", "פייבוקס") must still land on their untracked default —
+  // otherwise they fall to שונות and hit the paid AI on EVERY upload, because
+  // rail results are deliberately never learned. Placed last so specific
+  // matches (e.g. "ביט שומרה" → ביטוח) keep winning.
+  const rail = railDefaultCategory(normalized)
+  if (rail) return rail
 
   return 'שונות'
 }

@@ -14,16 +14,36 @@
  */
 
 /**
- * Payment rails and transfer words, matched as WHOLE WORDS of the normalized
- * key. Whole-word (not substring) so 'ביט' blocks "העברה ב ביט" but not
- * "ביטוח הראל" — insurance merchants are exactly the kind of correction the
- * shared pool SHOULD keep receiving.
+ * TRUE payment rails: the descriptor names the pipe, never the payee. A Bit
+ * transfer can be rent, lunch or a hobby — even within ONE account — so a
+ * category correction on these must be one-time (that row only) and never
+ * learned, not even locally. (Ori's call, 2026-07-29: "גם לאדם עצמו — ביט
+ * לאוכל וביט לתחביב".) PayPal is deliberately NOT here: its descriptors carry
+ * the actual merchant ("paypal *spotify"), so per-descriptor learning is fine.
  */
-const NEVER_SHARE_WORDS = new Set([
+const RAIL_WORDS = new Set([
   'bit', 'ביט',
   'paybox', 'פייבוקס',
+  'מזומן', 'מזומנים', 'cash', 'כספומט', 'atm',
+])
+
+/** Which "untracked" default a rail resolves to when nothing else matched. */
+const RAIL_CATEGORY: Record<string, string> = {
+  bit: 'ביט ללא מעקב', 'ביט': 'ביט ללא מעקב',
+  paybox: 'ביט ללא מעקב', 'פייבוקס': 'ביט ללא מעקב',
+  'מזומן': 'מזומן ללא מעקב', 'מזומנים': 'מזומן ללא מעקב',
+  cash: 'מזומן ללא מעקב', 'כספומט': 'מזומן ללא מעקב', atm: 'מזומן ללא מעקב',
+}
+
+/**
+ * Superset for the SHARED pool: rails plus transfer verbs and PayPal, matched
+ * as WHOLE WORDS of the normalized key. Whole-word (not substring) so 'ביט'
+ * blocks "העברה ב ביט" but not "ביטוח הראל" — insurance merchants are exactly
+ * the kind of correction the shared pool SHOULD keep receiving.
+ */
+const NEVER_SHARE_WORDS = new Set([
+  ...RAIL_WORDS,
   'paypal', 'פייפאל',
-  'מזומן', 'cash',
   'העברה', 'העברת',   // construct form: "העברת כסף בביט"
   'transfer',
   'משיכה', 'משיכת',
@@ -65,6 +85,62 @@ function wordForms(key: string): string[] {
     }
   }
   return out
+}
+
+/**
+ * NARROW word-form extraction for rail detection. Deliberately stricter than
+ * the sharing matcher above, because a false positive here costs real user
+ * behavior (edits stop bulk-applying, learned fixes are ignored), not just a
+ * skipped share:
+ *  - clitic peel is only ב/ל/מ/ו — NOT ש (שביט is a common Israeli surname,
+ *    ש+ביט essentially never appears in merchant text) and NOT ה/כ.
+ *  - a word with a trailing geresh and no opening quote is a Hebrew
+ *    ABBREVIATION (ביט׳ = ביטוח), never the rail; wrapped quotes ("ביט") are
+ *    stripped and the inner word counts.
+ */
+const RAIL_PREFIXES = new Set(['ב', 'ל', 'מ', 'ו'])
+function railWordForms(key: string): string[] {
+  const out: string[] = []
+  for (const raw of key.split(/[^a-z0-9א-ת'"׳״]+/i)) {
+    if (!raw) continue
+    if (/['׳]$/.test(raw) && !/^['"׳״]/.test(raw)) continue // ביט׳ = abbreviation
+    let w = raw.replace(/['"׳״]/g, '')
+    if (!w) continue
+    out.push(w)
+    for (let i = 0; i < 2 && w.length > 2 && RAIL_PREFIXES.has(w[0]); i++) {
+      w = w.slice(1)
+      out.push(w)
+    }
+  }
+  return out
+}
+
+/**
+ * Is this normalized descriptor a payment rail ("BIT", "העברה בביט",
+ * "משיכת מזומן")? Rails get one-time category edits: the change applies to the
+ * single row being edited, nothing is learned (locally or shared), and any
+ * rail entry already sitting in a learned dict is ignored at read time so the
+ * curated ביט/מזומן ללא מעקב defaults always win.
+ */
+export function isPaymentRailKey(key: string): boolean {
+  const k = (key || '').trim().toLowerCase()
+  return railWordForms(k).some(w => RAIL_WORDS.has(w))
+}
+
+/**
+ * The rail's "untracked" default, or null when the key is not a rail. Used by
+ * categorize() as the fallback when NOTHING matched — without it, Hebrew rail
+ * variants missing from BUSINESS_DB ("תשלום בביט", "פייבוקס") would fall to
+ * שונות and get re-sent to the paid AI on every upload, forever, since rail
+ * results are deliberately never remembered.
+ */
+export function railDefaultCategory(key: string): string | null {
+  const k = (key || '').trim().toLowerCase()
+  for (const w of railWordForms(k)) {
+    const cat = RAIL_CATEGORY[w]
+    if (cat) return cat
+  }
+  return null
 }
 
 /**

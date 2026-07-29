@@ -11,6 +11,7 @@ import { useMonthlyStore } from '@/stores/monthlyStore'
 import { parseExcelFile } from '@/lib/parseExcel'
 import { extractTransactions, isStandingOrderDesc, rowsToText } from '@/lib/parsing'
 import { normalizeForLookup, categorize } from '@/lib/categorize'
+import { isPaymentRailKey } from '@/lib/learnedSharing'
 import { fileToBase64, imageToJpegBase64 } from '@/lib/fileEncoding'
 import { ALL_CATEGORIES, MONTHS_LIST } from '@/lib/constants'
 import { FileDropzone } from '@/components/credit/FileDropzone'
@@ -99,11 +100,17 @@ export default function ImportPage() {
 
   // ── local transaction edits ──
   // Manual correction: apply to every row with the same merchant in this batch,
-  // and feed the shared cross-account learning pool (behind the scenes).
+  // and feed the learning pool (behind the scenes; learn() itself decides what
+  // may go beyond this account). Payment rails (Bit/PayBox/cash) are one-time:
+  // the edit touches only this row — the same rail carries different payees.
   const updateCategory = useCallback((idx: number, category: string) => {
     const target = transactions[idx]
     if (!target) return
     const key = normalizeForLookup(target.desc)
+    if (isPaymentRailKey(key)) {
+      setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, category } : t))
+      return
+    }
     setTransactions(prev => prev.map(t => normalizeForLookup(t.desc) === key ? { ...t, category } : t))
     useCreditStore.getState().learn(target.desc, category)
   }, [transactions])

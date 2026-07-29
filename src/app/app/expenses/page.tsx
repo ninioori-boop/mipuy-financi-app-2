@@ -8,6 +8,8 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
 import { CATEGORY_ICONS, MONTHS_LIST, ALL_CATEGORIES } from '@/lib/constants'
+import { isPaymentRailKey } from '@/lib/learnedSharing'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
 import { EditEntrySheet } from '@/components/expenses/EditEntrySheet'
 import { SmartBudgetSuggest } from '@/components/expenses/SmartBudgetSuggest'
@@ -179,7 +181,9 @@ export default function ExpensesPage() {
   function fixCategory(id: string, note: string, fromCat: string, cat: string) {
     update(id, { category: cat })
     const merchant = note.replace(/ #\S+$/, '').trim()
-    const teach = Boolean(merchant) && !NO_LEARN_CATS.has(fromCat)
+    // Mirror learn()'s own rail refusal — the toast must never claim "נלמד"
+    // for a Bit/cash note that learn() will silently drop.
+    const teach = Boolean(merchant) && !NO_LEARN_CATS.has(fromCat) && !isPaymentRailKey(normalizeForLookup(merchant))
     if (teach) learn(merchant, cat)
     toast.success(teach ? `${icon(cat)} קוטלג ל${cat} — ונלמד לפעם הבאה ✓` : `${icon(cat)} קוטלג ל${cat} ✓`)
   }
@@ -659,7 +663,8 @@ export default function ExpensesPage() {
                           onChange={cat => {
                             update(e.id, { category: cat })
                             const merchant = e.note.replace(/ #\S+$/, '').trim()
-                            const teach = Boolean(merchant) && !NO_LEARN_CATS.has(e.category)
+                            // Same honesty rule as fixCategory: no "נלמד" claim for rails.
+                            const teach = Boolean(merchant) && !NO_LEARN_CATS.has(e.category) && !isPaymentRailKey(normalizeForLookup(merchant))
                             if (teach) learn(merchant, cat)
                             toast.success(teach ? 'עודכן ונלמד לעתיד ✓' : 'הקטגוריה עודכנה ✓')
                           }}

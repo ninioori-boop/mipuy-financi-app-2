@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shareableLearnedEntry } from '@/lib/learnedSharing'
+import { shareableLearnedEntry, isPaymentRailKey, railDefaultCategory } from '@/lib/learnedSharing'
 
 // The Bit incident (2026-07-29): payment rails and wildcard-short keys must
 // never reach shared/learnedDB, where they redefine merchants for EVERY account.
@@ -43,5 +43,38 @@ describe('shareableLearnedEntry', () => {
   it('shares ordinary merchant corrections', () => {
     expect(shareableLearnedEntry('שופרסל דיל רמת גן', 'מזון לבית')).toBe(true)
     expect(shareableLearnedEntry('wolt tel aviv', 'אוכל בחוץ ובילויים')).toBe(true)
+  })
+})
+
+// The NARROW matcher behind one-time edits / read-filtering / the categorize
+// fallback. A false positive here costs real user behavior, so the grill's
+// counter-examples are pinned as tests.
+describe('isPaymentRailKey (narrow)', () => {
+  it('recognizes real rail descriptors', () => {
+    expect(isPaymentRailKey('bit')).toBe(true)
+    expect(isPaymentRailKey('העברה ב bit בנה"פ')).toBe(true)
+    expect(isPaymentRailKey('תשלום בביט')).toBe(true)
+    expect(isPaymentRailKey('פייבוקס')).toBe(true)
+    expect(isPaymentRailKey('משיכת מזומנים')).toBe(true)
+    expect(isPaymentRailKey('"ביט" תשלום')).toBe(true)   // wrapped quotes count
+  })
+
+  it('does NOT flag look-alikes (grill counter-examples)', () => {
+    expect(isPaymentRailKey('מוסך שביט')).toBe(false)      // שביט = surname; ש not peeled
+    expect(isPaymentRailKey('דפוס שביט')).toBe(false)
+    expect(isPaymentRailKey("מגדל ביט' רכב")).toBe(false)  // ביט' = ביטוח abbreviation
+    expect(isPaymentRailKey('ביטוח הראל')).toBe(false)
+    expect(isPaymentRailKey('ביטול עסקה')).toBe(false)     // whole-word, not substring
+    expect(isPaymentRailKey('bitwarden premium')).toBe(false)
+  })
+})
+
+describe('railDefaultCategory', () => {
+  it('maps rails to their untracked default', () => {
+    expect(railDefaultCategory('תשלום בביט')).toBe('ביט ללא מעקב')
+    expect(railDefaultCategory('פייבוקס')).toBe('ביט ללא מעקב')
+    expect(railDefaultCategory('הפקדת מזומן')).toBe('מזומן ללא מעקב')
+    expect(railDefaultCategory('דפוס שביט')).toBe(null)
+    expect(railDefaultCategory('שופרסל דיל')).toBe(null)
   })
 })

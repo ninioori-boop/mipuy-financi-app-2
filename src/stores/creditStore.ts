@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import type { Transaction } from '@/types/transaction'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { saveLearnedEntry } from '@/lib/firestoreService'
-import { shareableLearnedEntry } from '@/lib/learnedSharing'
+import { shareableLearnedEntry, isPaymentRailKey } from '@/lib/learnedSharing'
 
 interface CreditState {
   transactions: Transaction[]
@@ -41,18 +41,30 @@ export const useCreditStore = create<CreditState>((set, get) => ({
   setTransactions: (txns, fileNames) =>
     set({ transactions: txns, uploadedFileNames: fileNames }),
 
-  // Lookup order at parse time: account's own corrections override the shared pool.
-  mergedLearnedDB: () => ({ ...get().sharedLearnedDB, ...get().learnedDB }),
+  // Lookup order at parse time: account's own corrections override the shared
+  // pool. Payment-rail keys are dropped from BOTH dicts here — rails must
+  // always resolve to BUSINESS_DB's ביט/מזומן ללא מעקב default, and this read-
+  // side filter also neutralizes rail entries learned before the 2026-07-29
+  // guard existed, without touching anyone's stored data.
+  mergedLearnedDB: () => {
+    const merged: Record<string, string> = { ...get().sharedLearnedDB, ...get().learnedDB }
+    for (const key of Object.keys(merged)) {
+      if (isPaymentRailKey(key)) delete merged[key]
+    }
+    return merged
+  },
 
   setSharedLearnedDB: (db) => set({ sharedLearnedDB: db }),
 
   // Record a deliberate human correction: remember it locally, and push to the
   // shared cross-account pool (fire-and-forget) ONLY when the entry has global
-  // meaning — payment rails (Bit/PayBox/PayPal), personal "untracked" targets
-  // and too-short substring-wildcard keys stay in this account alone.
+  // meaning — personal "untracked" targets and too-short substring-wildcard
+  // keys stay in this account alone. Payment rails (Bit/PayBox/cash) are not
+  // remembered AT ALL, local included: the same rail carries different payees
+  // even within one account, so there is nothing true to remember.
   learn: (desc, category) => {
     const key = normalizeForLookup(desc)
-    if (!key) return
+    if (!key || isPaymentRailKey(key)) return
     set({ learnedDB: { ...get().learnedDB, [key]: category } })
     if (shareableLearnedEntry(key, category)) {
       saveLearnedEntry(key, category).catch(() => {})
@@ -60,12 +72,19 @@ export const useCreditStore = create<CreditState>((set, get) => ({
   },
 
   // Manual correction from the UI — apply to every row with the same merchant,
-  // then learn it (which writes to the shared pool).
+  // then learn it (which writes to the shared pool). EXCEPT payment rails
+  // (Bit/PayBox/cash): one Bit pays rent and the next buys lunch, so a rail
+  // edit is one-time — this row only, nothing learned, and the rest of the
+  // rows keep the ביט/מזומן ללא מעקב default.
   updateCategory: (idx, category) => {
     const txns = get().transactions
     const target = txns[idx]
     if (!target) return
     const key = normalizeForLookup(target.desc)
+    if (isPaymentRailKey(key)) {
+      set({ transactions: txns.map((t, i) => i === idx ? { ...t, category } : t) })
+      return
+    }
     set({
       transactions: txns.map(t => normalizeForLookup(t.desc) === key ? { ...t, category } : t),
     })
@@ -83,6 +102,11 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     const target = txns.find(t => t.id === id)
     if (!target) return
     const key = normalizeForLookup(target.desc)
+    // Rails: apply to the row, but never remember — same reason as learn().
+    if (isPaymentRailKey(key)) {
+      set({ transactions: txns.map(t => t.id === id ? { ...t, category } : t) })
+      return
+    }
     set({
       transactions: txns.map(t => t.id === id ? { ...t, category } : t),
       learnedDB: { ...get().learnedDB, [key]: category },
