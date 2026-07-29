@@ -211,6 +211,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       items: [{ href: '/app/sharing', emoji: '🔒', label: 'שיתוף עם היועץ' }],
     })
   }
+  // Everyone gets an account screen: it is where a copy of the data is
+  // downloaded and where the account is deleted, so it is never conditional.
+  visibleGroups.push({
+    title: 'חשבון',
+    items: [{ href: '/app/settings', emoji: '⚙️', label: 'החשבון שלי' }],
+  })
 
   const navList = (
     <nav className="flex flex-col gap-0.5 p-3">
@@ -339,13 +345,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     </Link>
                   )
                 })}
-                {/* Settings — bridges to the native app's settings screen */}
-                <a
-                  href="mipuytracker://settings"
-                  className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-line pt-4 rounded-lg text-sm text-muted-txt hover:bg-surface3 hover:text-txt transition-colors"
+                {/* Account (export + deletion). This branch is the ONLY nav a
+                    phone client ever sees, so the account screen must live here
+                    or the feature does not exist for them. */}
+                <Link
+                  href="/app/settings"
+                  className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-line pt-4 rounded-lg text-sm text-txt/80 hover:bg-surface3 hover:text-txt transition-colors"
                 >
                   <span className="text-base leading-none">⚙️</span>
-                  <span>הגדרות</span>
+                  <span>החשבון שלי</span>
+                </Link>
+                {/* Bridges to the native app's own settings screen (a different
+                    thing entirely — hence the explicit label). */}
+                <a
+                  href="mipuytracker://settings"
+                  className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-muted-txt hover:bg-surface3 hover:text-txt transition-colors"
+                >
+                  <span className="text-base leading-none">📱</span>
+                  <span>הגדרות האפליקציה בטלפון</span>
                 </a>
               </nav>
             </aside>
@@ -382,7 +399,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <span className="sm:hidden"><SaveStatusBar /></span>
           {user && (
-            <span className="text-xs text-muted-txt hidden md:block truncate max-w-[160px]">{user.email}</span>
+            <Link
+              href="/app/settings"
+              title="החשבון שלי"
+              className="text-xs text-muted-txt hidden md:block truncate max-w-[160px] hover:text-txt transition-colors"
+            >
+              {user.email}
+            </Link>
           )}
           <button
             onClick={handleSignOut}

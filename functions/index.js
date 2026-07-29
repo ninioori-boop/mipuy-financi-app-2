@@ -4,6 +4,7 @@ const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
+const { getStorage } = require("firebase-admin/storage");
 const { BRAND } = require("./brand");
 
 initializeApp();
@@ -650,3 +651,385 @@ exports.setClientStage = onCall(async (request) => {
 
   return { ok: true, stage, access: patch.access ?? (linkSnap.data().access || "read") };
 });
+
+/* ── Full account deletion ─────────────────────────────────────────────
+ * Self-service, immediate and irreversible. Everything runs here (admin SDK)
+ * because almost every collection involved is client-write-blocked by rules.
+ *
+ * ORDER IS LOAD-BEARING. Three server routes authenticate with proofs that
+ * outlive an account and write with the admin SDK, so the very first thing we
+ * do is publish a tombstone; then we cut the two rule-level write paths
+ * (the user's own, then the advisor's) BEFORE deleting any data. Deleting the
+ * allowlist entry last (the intuitive order) would leave a window where the
+ * user's own tab re-creates everything we just deleted.
+ * Every prefix of the sequence is safe to stop at and safe to re-run.
+ */
+const DELETED_MAIL_PLACEHOLDER = "deleted@removed.local";
+const MAX_NOTIFY_CLIENTS = 50;
+
+/** Delete a query's documents in pages — unbounded collections must not OOM. */
+async function deleteByQuery(query, pageSize = 300) {
+  let removed = 0;
+  for (;;) {
+    const snap = await query.limit(pageSize).get();
+    if (snap.empty) return removed;
+    const batch = db.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    removed += snap.size;
+    if (snap.size < pageSize) return removed;
+  }
+}
+
+/** Record progress so a partial deletion can be finished by hand, never silently. */
+async function auditStep(uid, step, ok, detail) {
+  try {
+    await db.collection("deletionAudit").doc(uid).set({
+      steps: { [step]: { ok, ...(detail !== undefined ? { detail } : {}), at: Date.now() } },
+    }, { merge: true });
+  } catch (e) {
+    console.warn(`[deleteMyAccount] audit ${step} failed`, e && e.message);
+  }
+}
+
+/** Run one step, never let it abort the rest, and remember what happened. */
+async function step(uid, name, fn) {
+  try {
+    const detail = await fn();
+    await auditStep(uid, name, true, detail);
+    return { ok: true };
+  } catch (e) {
+    const msg = String(e && e.message ? e.message : e).slice(0, 200);
+    console.error(`[deleteMyAccount] step ${name} failed:`, msg);
+    await auditStep(uid, name, false, msg);
+    return { ok: false };
+  }
+}
+
+function deletionConfirmHtml(b) {
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
+    <div style="font-size:20px;font-weight:bold;color:${b.accent};margin-bottom:16px;">${escapeHtml(b.nameHe)}</div>
+    <div style="background:#ffffff;border-radius:12px;padding:24px;">
+      <h1 style="font-size:18px;margin:0 0 12px;">החשבון שלך נמחק</h1>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">החשבון שלך נמחק לפי בקשתך. הנתונים הפיננסיים, המסמכים שהעלית והיסטוריית הגרסאות נמחקו לצמיתות ואינם ניתנים לשחזור, גם לא על ידינו.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">אם התקנת בטלפון את אפליקציית מעקב ההוצאות, יש להסיר אותה מהמכשיר.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0;">אם לא ביקשת את המחיקה, פנה אלינו מיד.</p>
+    </div>
+  </div></body></html>`;
+}
+
+function advisorClientLeftHtml(clientEmail, b) {
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
+    <div style="font-size:20px;font-weight:bold;color:${b.accent};margin-bottom:16px;">${escapeHtml(b.nameHe)}</div>
+    <div style="background:#ffffff;border-radius:12px;padding:24px;">
+      <h1 style="font-size:18px;margin:0 0 12px;">לקוח הסיר את חשבונו</h1>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">הלקוח בכתובת <b>${escapeHtml(clientEmail)}</b> מחק את חשבונו מהמערכת ביוזמתו.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">הקישור בינך לבין החשבון הוסר, הגישה שלך לנתונים הופסקה, והלקוח אינו מופיע יותר ברשימת הלקוחות שלך.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">הנתונים הפיננסיים נמחקו לצמיתות ואינם ניתנים לשחזור, גם לא על ידינו. לא נשמר עותק שאפשר להעביר אליך.</p>
+      <p style="font-size:13px;color:#666;line-height:1.7;margin:0;">ההודעה נשלחת אוטומטית ואינה דורשת פעולה.</p>
+    </div>
+  </div></body></html>`;
+}
+
+function advisorGoneHtml(b) {
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 16px;direction:rtl;text-align:right;">
+    <div style="font-size:20px;font-weight:bold;color:${b.accent};margin-bottom:16px;">${escapeHtml(b.nameHe)}</div>
+    <div style="background:#ffffff;border-radius:12px;padding:24px;">
+      <h1 style="font-size:18px;margin:0 0 12px;">היועץ שלך אינו פעיל יותר במערכת</h1>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">הגישה של היועץ לנתונים שלך הופסקה.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">החשבון והנתונים שלך נשארים שלך ולא השתנו. אפשר להמשיך להשתמש במערכת כרגיל.</p>
+      <p style="font-size:15px;line-height:1.7;margin:0;">אם תרצה להתחבר ליועץ אחר, פנה אלינו.</p>
+    </div>
+  </div></body></html>`;
+}
+
+
+/** Self-contained mail send for the deletion flow: the two function trees have
+ *  diverged and only one of them defines a shared sendMail. */
+async function deletionSendMail(toEmail, subject, html, from, meta) {
+  const key = RESEND_API_KEY.value();
+  if (!key || !toEmail) return false;
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: from || MAIL_FROM, to: [toEmail], subject, html }),
+    });
+    let resendId = null;
+    try { resendId = JSON.parse(await res.text()).id ?? null; } catch { /* non-JSON */ }
+    await logEmail({
+      type: (meta && meta.type) || 'generic', to: toEmail,
+      practiceId: (meta && meta.practiceId) || null, resendId,
+      status: res.ok ? 'accepted' : 'rejected', httpStatus: res.status,
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('deletionSendMail failed', e && e.message);
+    return false;
+  }
+}
+
+exports.deleteMyAccount = onCall(
+  { secrets: [RESEND_API_KEY], timeoutSeconds: 540, memory: "512MiB" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+    // Lowercased + trimmed EVERYWHERE: every write site normalizes, so a
+    // mixed-case token email would silently skip half the deletion and leave
+    // the allowlist entry alive (anyone knowing the address could re-register).
+    const email = String(request.auth?.token?.email ?? "").toLowerCase().trim();
+    if (!email || !EMAIL_RE.test(email)) {
+      throw new HttpsError("failed-precondition", "לא נמצאה כתובת מייל לחשבון. פנה אלינו ונטפל בבקשה ידנית.");
+    }
+    if (String(request.data?.confirmEmail ?? "").toLowerCase().trim() !== email) {
+      throw new HttpsError("invalid-argument", "כתובת המייל שהוקלדה אינה תואמת לחשבון.");
+    }
+    // Recent sign-in required: this is irreversible and an unattended session
+    // must not be able to trigger it.
+    const authTimeMs = Number(request.auth?.token?.auth_time ?? 0) * 1000;
+    if (!authTimeMs || Date.now() - authTimeMs > 5 * 60 * 1000) {
+      throw new HttpsError("failed-precondition", "מטעמי אבטחה יש להתחבר מחדש ואז לנסות שוב.");
+    }
+
+    // ── Blocks (checked BEFORE anything is touched) ──
+    if ((await db.collection("platformOwners").doc(uid).get()).exists) {
+      throw new HttpsError("failed-precondition", "החשבון הזה מנהל את הפלטפורמה ואי אפשר למחוק אותו מהמערכת.");
+    }
+    const ownedPractices = await db.collection("practices").where("ownerUid", "==", uid).get();
+    for (const p of ownedPractices.docs) {
+      const advisorUids = Array.isArray(p.data().advisorUids) ? p.data().advisorUids : [];
+      const otherAdvisors = advisorUids.filter((u) => u !== uid);
+      const activeSnap = await db.collection("clientLinks")
+        .where("practiceId", "==", p.id).where("status", "==", "active").limit(25).get();
+      // The deleter's own client link must not block them forever — only OTHER
+      // people count. A one-person practice with no clients harms nobody.
+      const activeOthers = activeSnap.docs.filter((d) => d.data().clientUid !== uid);
+      if (otherAdvisors.length > 0 || activeOthers.length > 0) {
+        throw new HttpsError(
+          "failed-precondition",
+          "החשבון שלך מוגדר כבעל משרד, ומחיקה עצמית תנתק את היועצים והלקוחות המשויכים אליו. כדי להעביר את הבעלות או לסגור את המשרד, פנה אלינו ונלווה אותך בתהליך.",
+        );
+      }
+    }
+
+    // ── Facts we need BEFORE the data is gone ──
+    const myLink = await db.collection("clientLinks").doc(uid).get();
+    const myAdvisorUid = myLink.exists ? myLink.data().invitedByUid : null;
+    const myPracticeId = myLink.exists ? myLink.data().practiceId : null;
+    const myAdvisorDoc = await db.collection("advisors").doc(uid).get();
+    const myAdvisorPracticeId = myAdvisorDoc.exists ? myAdvisorDoc.data().practiceId : null;
+    // Brands are resolved NOW: a solo practice is deleted mid-flow, and a mail
+    // built after that would silently fall back to the platform brand.
+    const myBrand = await mailBrandForPractice(myPracticeId || myAdvisorPracticeId);
+    const advisorGoneBrand = await mailBrandForPractice(myAdvisorPracticeId);
+
+    // 1. Tombstones FIRST — they are what stops /api/transaction,
+    //    /api/save-snapshot and /api/app-session from re-creating data (and the
+    //    Auth user) with proofs that outlive this account.
+    await db.collection("deletionAudit").doc(uid).set(
+      { deletedAt: FieldValue.serverTimestamp(), steps: {} }, { merge: true },
+    );
+    await step(uid, "deviceTokenTombstone", async () => {
+      // NOT a delete: deviceTokens is fail-open, so removing the doc would
+      // RESTORE the phone's access instead of revoking it.
+      await db.collection("deviceTokens").doc(uid).set(
+        { minVersion: 2147483647, tombstone: true, at: FieldValue.serverTimestamp() }, { merge: true },
+      );
+    });
+
+    // 2. Close the door: the allowlist entry gates every users/** rule, so this
+    //    stops the user's own client SDK; it also stops silent re-registration.
+    const doorClosed = await step(uid, "emailKeys", async () => {
+      const batch = db.batch();
+      batch.delete(db.collection("allowlist").doc(email));
+      batch.delete(db.collection("pendingAdvisors").doc(email));
+      batch.delete(db.collection("clientLinks").doc(pendingId(email)));
+      await batch.commit();
+      // Case-insensitive: the array may hold mixed-case entries (the read path
+      // lowercases defensively), and array-contains matches exact bytes only.
+      const all = await db.collection("practices").get();
+      let cleaned = 0;
+      for (const p of all.docs) {
+        const arr = p.data().existingInviteAllowed;
+        if (!Array.isArray(arr)) continue;
+        const kept = arr.filter((e) => String(e).toLowerCase().trim() !== email);
+        if (kept.length !== arr.length) { await p.ref.update({ existingInviteAllowed: kept }); cleaned += 1; }
+      }
+      return { practicesCleaned: cleaned };
+    });
+    if (!doorClosed.ok) {
+      // ABORT — deleting data while the door is open lets the user's own open
+      // tab write it all back. Nothing user-visible was deleted yet, so roll
+      // the tombstones back too: leaving them would strand a LIVE account
+      // behind 410 responses.
+      try { await db.collection("deletionAudit").doc(uid).delete(); } catch { /* manual cleanup */ }
+      try { await db.collection("deviceTokens").doc(uid).delete(); } catch { /* manual cleanup */ }
+      throw new HttpsError("internal", "המחיקה נעצרה לפני שנמחק מידע, ושום נתון לא נמחק. נסה שוב בעוד רגע או פנה אלינו.");
+    }
+
+    // 3. Cut the advisor's write path, and revoke refresh tokens.
+    await step(uid, "revokeSessions", async () => { await getAuth().revokeRefreshTokens(uid); });
+
+    // 4. Advisor-side links. Links where WE are the advisor belong to OTHER
+    //    users and hold their consent record — orphan them, never delete.
+    const orphanedClients = [];
+    await step(uid, "advisorLinks", async () => {
+      const asAdvisor = await db.collection("clientLinks").where("invitedByUid", "==", uid).get();
+      for (const d of asAdvisor.docs) {
+        const data = d.data();
+        // Only ACTIVE, registered clients get the "your advisor left" mail —
+        // a declined or never-registered invitee has no advisor to lose.
+        if (data.status === "active" && data.clientUid && data.invitedEmail
+            && orphanedClients.length < MAX_NOTIFY_CLIENTS) {
+          orphanedClients.push(data.invitedEmail);
+        }
+        await d.ref.update({
+          invitedByUid: null,
+          status: "orphaned",
+          access: "read",
+          advisorRemovedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      return { orphaned: asAdvisor.size };
+    });
+
+    await step(uid, "ownLinks", async () => {
+      await db.collection("clientLinks").doc(uid).delete();
+      await db.collection("advisors").doc(uid).delete();
+      const member = await db.collection("practices").where("advisorUids", "array-contains", uid).get();
+      for (const p of member.docs) await p.ref.update({ advisorUids: FieldValue.arrayRemove(uid) });
+      // Solo practices only — RE-READ first: an advisor may have claimed a
+      // role (or a client consented) between the pre-check and this step, and
+      // deleting the practice would orphan them and their branding.
+      let ownedDeleted = 0; let ownedSkipped = 0;
+      for (const p of ownedPractices.docs) {
+        const fresh = await p.ref.get();
+        if (!fresh.exists) continue;
+        const uids = Array.isArray(fresh.data().advisorUids) ? fresh.data().advisorUids : [];
+        if (uids.some((u) => u !== uid)) { ownedSkipped += 1; continue; }
+        await p.ref.delete();
+        ownedDeleted += 1;
+      }
+      return { practices: member.size, ownedDeleted, ownedSkipped };
+    });
+
+    // 5. Device / channel bindings.
+    await step(uid, "channels", async () => {
+      const links = await deleteByQuery(db.collection("whatsappLinks").where("uid", "==", uid));
+      const codes = await deleteByQuery(db.collection("whatsappLinkCodes").where("uid", "==", uid));
+      await db.collection("pushSubscriptions").doc(uid).delete();
+      return { whatsappLinks: links, whatsappCodes: codes };
+    });
+
+    // 6. Storage BEFORE the metadata that points at it. Bucket named
+    //    explicitly — the default depends on runtime config being present.
+    const bucketName = `${process.env.GCLOUD_PROJECT}.firebasestorage.app`;
+    await step(uid, "storage", async () => {
+      await getStorage().bucket(bucketName).deleteFiles({ prefix: `intake/${uid}/` });
+    });
+
+    // 7. The data itself. recursiveDelete covers subcollections (versions,
+    //    intake/files, inbox items) AND the parent docs — the inbox parent
+    //    holds a merchant name and an amount, so it must go too.
+    await step(uid, "userData", async () => {
+      await db.recursiveDelete(db.collection("intake").doc(uid));
+      await db.recursiveDelete(db.collection("transactionInbox").doc(uid));
+      await db.recursiveDelete(db.collection("users").doc(uid));
+    });
+
+    // 8. Send audit: keep the row, drop everything identifying — including the
+    //    provider id, which points at the provider's own copy.
+    await step(uid, "emailLog", async () => {
+      const rows = await db.collection("emailLog").where("to", "==", email).get();
+      let n = 0;
+      for (const d of rows.docs) {
+        await d.ref.update({ to: DELETED_MAIL_PLACEHOLDER, error: "", resendId: null, redactedAt: FieldValue.serverTimestamp() });
+        n += 1;
+      }
+      return { redacted: n };
+    });
+
+    // 9. Notifications — best effort, never block the deletion, and REPORT
+    //    what actually happened rather than what was attempted.
+    await step(uid, "notify", async () => {
+      // Confirmation to the user. Logged ALREADY redacted, otherwise the last
+      // act of deletion would write the address back into the log.
+      const key = RESEND_API_KEY.value();
+      if (key) {
+        try {
+          const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ from: myBrand.from, to: [email], subject: "החשבון שלך נמחק", html: deletionConfirmHtml(myBrand) }),
+          });
+          await logEmail({
+            type: "account-deleted", to: DELETED_MAIL_PLACEHOLDER, practiceId: myBrand.practiceId,
+            resendId: null, status: res.ok ? "accepted" : "rejected", httpStatus: res.status,
+          });
+        } catch (e) {
+          console.warn("[deleteMyAccount] confirmation mail failed", e && e.message);
+        }
+      }
+      // The advisor who held this client.
+      let advisorNotified = false;
+      if (myAdvisorUid) {
+        const adv = await db.collection("advisors").doc(myAdvisorUid).get();
+        const advEmail = adv.exists ? adv.data().email : null;
+        if (advEmail) {
+          advisorNotified = await deletionSendMail(advEmail, "לקוח הסיר את חשבונו מהמערכת",
+            advisorClientLeftHtml(email, myBrand), myBrand.from,
+            { type: "client-deleted", practiceId: myBrand.practiceId });
+        }
+      }
+      // Clients who just lost their advisor (this account WAS the advisor).
+      // Brand resolved BEFORE the practice was deleted (see top of the flow).
+      let clientsNotified = 0;
+      for (const clientEmail of orphanedClients) {
+        const sent = await deletionSendMail(clientEmail, "היועץ שלך אינו פעיל יותר במערכת",
+          advisorGoneHtml(advisorGoneBrand), advisorGoneBrand.from,
+          { type: "advisor-deleted", practiceId: advisorGoneBrand.practiceId });
+        if (sent) clientsNotified += 1;
+      }
+      return { advisorNotified, clientsNotified, orphaned: orphanedClients.length };
+    });
+
+    // 10. The Auth user LAST — while it exists the user can retry; once it is
+    //     gone a callable can no longer authenticate them.
+    const authGone = await step(uid, "authUser", async () => { await getAuth().deleteUser(uid); });
+
+    // 11. Prove it: anything that came back during the run is recorded, and the
+    //     user is told the truth rather than a blanket "done".
+    const leftovers = [];
+    await step(uid, "verify", async () => {
+      for (const path of [["users", uid], ["transactionInbox", uid], ["intake", uid], ["clientLinks", uid], ["advisors", uid]]) {
+        const s = await db.collection(path[0]).doc(path[1]).get();
+        if (s.exists) leftovers.push(path[0]);
+      }
+      const versions = await db.collection("users").doc(uid).collection("versions").limit(1).get();
+      if (!versions.empty) leftovers.push("users/versions");
+      const [remaining] = await getStorage().bucket(bucketName)
+        .getFiles({ prefix: `intake/${uid}/`, maxResults: 1 });
+      if (remaining.length) leftovers.push("storage");
+      if (leftovers.length) {
+        // A second pass: whatever re-appeared was written after we deleted it.
+        for (const c of ["users", "transactionInbox", "intake"]) {
+          await db.recursiveDelete(db.collection(c).doc(uid));
+        }
+        for (const c of ["clientLinks", "advisors"]) {
+          try { await db.collection(c).doc(uid).delete(); } catch { /* recorded above */ }
+        }
+      }
+      return { leftovers };
+    });
+    // A surviving Auth user is a leftover too — the client must not show a
+    // clean success over it.
+    if (!authGone.ok) leftovers.push("authUser");
+
+    console.log(`[deleteMyAccount] done uid=${uid} leftovers=${leftovers.length}`);
+    return { ok: true, authDeleted: authGone.ok, leftovers };
+  },
+);

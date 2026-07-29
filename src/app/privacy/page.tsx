@@ -2,7 +2,7 @@ import { BRAND } from '@/lib/brand'
 import { BrandContactEmail } from '@/components/layout/BrandProvider'
 
 export default function PrivacyPage() {
-  const updated = '25 ביולי 2026'
+  const updated = '29 ביולי 2026'
 
   return (
     <div className="min-h-screen bg-surface py-12 px-4">
@@ -25,7 +25,7 @@ export default function PrivacyPage() {
           <ul>
             <li><strong>פרטי זיהוי:</strong> כתובת מייל ושם (דרך Google Sign-In או הרשמה ישירה)</li>
             <li><strong>נתוני כרטיס אשראי שמועלים:</strong> קבצי Excel שמעלה המשתמש — מעובדים בדפדפן ו/או נשלחים ל-Claude AI לצורך קטגוריזציה</li>
-            <li><strong>נתוני תקציב ומיפוי:</strong> נשמרים ב-Firestore תחת ה-UID של המשתמש — נגישים אך ורק למשתמש עצמו</li>
+            <li><strong>נתוני תקציב ומיפוי:</strong> נשמרים ב-Firestore תחת ה-UID של המשתמש. נגישים למשתמש עצמו, וליועץ הפיננסי שלו רק אם המשתמש אישר זאת במפורש ורק כל עוד האישור בתוקף. אפשר לבטל את השיתוף בכל רגע במסך „שיתוף עם היועץ”</li>
             <li><strong>לוגים טכניים:</strong> Vercel ו-Firebase עשויים לשמור לוגי גישה סטנדרטיים (IP, זמן, נתיב)</li>
           </ul>
         </Section>
@@ -34,7 +34,8 @@ export default function PrivacyPage() {
           <ul>
             <li>הצגת הנתונים למשתמש ושמירתם בין ביקורים</li>
             <li>שליחת תיאורי עסקאות ל-Claude API (Anthropic) לצורך קטגוריזציה אוטומטית — ללא פרטים מזהים נוספים</li>
-            <li>שיפור דיוק הסיווג דרך מנגנון למידה מקומי (learnedDB) השמור בחשבון המשתמש</li>
+            <li>שיפור דיוק הסיווג דרך מילון שמות בתי עסק המשותף לכלל המשתמשים. המילון מכיל אך ורק צמד של „שם בית עסק” ו„קטגוריה”, בלי שם, בלי סכום, בלי תאריך ובלי כל פרט מזהה, ולכן הוא נשאר במערכת גם לאחר מחיקת חשבון</li>
+            <li>שליחת הודעות מערכת דרך ספק הדיוור Resend, ששומר את פרטי המשלוח לפי המדיניות שלו. אצלנו נשמרת רשומת שליחה טכנית בלבד, ולאחר מחיקת חשבון כתובת המייל מוסרת ממנה</li>
             <li>מדידת שימוש מצרפית באתר לצורך שיפור השירות, בלי מזהים אישיים (פירוט בסעיף 7)</li>
           </ul>
           <p className="text-muted-txt text-sm">
@@ -45,10 +46,10 @@ export default function PrivacyPage() {
         <Section title="4. אחסון, אבטחה ותקופת שמירה">
           <ul>
             <li>הנתונים מאוחסנים ב-<strong>Google Firebase Firestore</strong> (אזור אירופה)</li>
-            <li>כל משתמש ניגש אך ורק לנתונים שלו — מוגן על ידי כללי Firestore Security Rules</li>
+            <li>הגישה מוגנת בכללי Firestore Security Rules: משתמש ניגש לנתונים שלו, ויועץ ניגש לנתוני לקוח רק בזמן שקיים אישור שיתוף פעיל מאותו לקוח</li>
             <li>התקשורת מוצפנת ב-HTTPS בכל שלב</li>
             <li>מפתח ה-API של Claude מאוחסן אך ורק בשרת (Vercel Env Variables) ולא נחשף ללקוח</li>
-            <li><strong>תקופת שמירה:</strong> הנתונים נשמרים כל עוד החשבון פעיל. עם מחיקת חשבון — כל הנתונים נמחקים תוך 30 ימים</li>
+            <li><strong>תקופת שמירה:</strong> הנתונים נשמרים כל עוד החשבון פעיל. עם מחיקת חשבון הנתונים נמחקים מיד, ללא תקופת המתנה וללא אפשרות שחזור. שתי חריגות מפורטות בעמוד <a href="/delete-account" className="text-gold hover:underline">מחיקת חשבון</a></li>
           </ul>
         </Section>
 
@@ -57,12 +58,12 @@ export default function PrivacyPage() {
           <ul>
             <li><strong>לעיין</strong> במידע השמור עליך</li>
             <li><strong>לתקן</strong> מידע שגוי</li>
-            <li><strong>למחוק</strong> את חשבונך ואת כל הנתונים הקשורים אליו</li>
+            <li><strong>למחוק</strong> את חשבונך ואת כל הנתונים הקשורים אליו, בעצמך ומיד, דרך „החשבון שלי” במערכת</li>
           </ul>
           <p>
-            למימוש זכויות אלה, שלח בקשה ל:
+            מחיקת החשבון זמינה לך ישירות במערכת ומתבצעת מיד. למימוש שאר הזכויות, או אם איבדת גישה לחשבון, שלח בקשה ל:
             <BrandContactEmail className="text-gold hover:underline mr-1" />
-            — תגובה תינתן תוך 30 ימים.
+            . תגובה תינתן תוך 30 ימים.
           </p>
         </Section>
 
