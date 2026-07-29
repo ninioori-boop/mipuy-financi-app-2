@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/rateLimit'
+import { checkAiBudget } from '@/lib/aiBudget'
+import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
+
+// firebase-admin (rate limit + quota) needs the Node runtime.
+export const runtime = 'nodejs'
 
 // Client-facing (every user / advisor can upload a bank statement). Per-user
 // daily cap to bound AI cost/abuse — a real statement is one call, but an
 // advisor may process many clients in a day.
-const userLimitMap = new Map<string, { count: number; start: number }>()
 const USER_LIMIT  = 60
 const WINDOW_MS   = 86_400_000 // 24 hours
 
@@ -31,14 +36,6 @@ const SYSTEM_PROMPT = `אתה קורא דוח חשבון עו"ש (בנק) ישר
 החזר JSON תקין בלבד, ללא טקסט נוסף:
 {"transactions":[{"date":"2026-06-14","desc":"שופרסל","amount":250,"dir":"out"}]}`
 
-function isUserLimited(uid: string): boolean {
-  const now   = Date.now()
-  const entry = userLimitMap.get(uid) ?? { count: 0, start: now }
-  if (now - entry.start > WINDOW_MS) { entry.count = 0; entry.start = now }
-  entry.count++
-  userLimitMap.set(uid, entry)
-  return entry.count > USER_LIMIT
-}
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
@@ -46,9 +43,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'נדרשת התחברות' }, { status: 401 })
   }
   let uid: string
+  let email: string | null = null
   try {
     const result = await verifyFirebaseToken(auth.slice(7))
     uid = result.uid
+    email = result.email ?? null
   } catch {
     return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
   }
@@ -61,9 +60,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (isUserLimited(uid)) {
+  // Global panic switch / deployment-wide daily ceiling.
+  const budget = await checkAiBudget()
+  if (budget.stopped) {
+    return NextResponse.json({ error: 'השירות עמוס כרגע, נסה שוב מאוחר יותר' }, { status: 503 })
+  }
+  // Per-user limit — Firestore-backed so it survives cold starts and
+  // cannot be bypassed by spreading requests across serverless instances.
+  const rl = await checkRateLimit({ key: 'bank-statement:' + uid, limit: USER_LIMIT, windowMs: WINDOW_MS })
+  if (!rl.allowed) {
     return NextResponse.json(
-      { error: 'הגעת למגבלת קריאת הדוחות היומית (15) — נסה שוב מחר' },
+      { error: 'הגעת למגבלת קריאת הדוחות היומית (60), נסה שוב מחר' },
       { status: 429 },
     )
   }
@@ -87,6 +94,14 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(`[bank-statement] uid=${uid} contentBytes=${size} blocks=${content.length}`)
+
+  // Per-practice ceiling + usage accounting, consumed only once the call is
+  // actually going out: a user rejected by their own limit must never eat
+  // into the firm shared budget (one loop would lock out the whole firm).
+  const quota = await checkAiQuota({ uid, email, route: 'bank-statement' })
+  if (!quota.allowed) {
+    return NextResponse.json({ error: aiQuotaMessage(quota.reason) }, { status: 429 })
+  }
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

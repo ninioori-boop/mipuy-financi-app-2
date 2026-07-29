@@ -6,6 +6,8 @@ import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
+import { checkAiBudget } from '@/lib/aiBudget'
+import { checkAiQuota } from '@/lib/aiQuota'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).
@@ -141,8 +143,20 @@ export async function POST(req: NextRequest) {
     const learnedDB = await loadSharedLearned(db)
     category = categorize(cleanMerchant, learnedDB)
     if (category === 'שונות') {
-      const ai = await aiCategorizeOne(cleanMerchant)
-      if (ai) category = ai
+      // This is an AI call too, on a route authenticated by a never-expiring
+      // device token — a miswired automation loop (which has happened here
+      // before) could otherwise run unmetered. Blocked = keep 'שונות'; the
+      // charge is still captured, because that is this route's contract.
+      const budget = await checkAiBudget()
+      const quota = budget.stopped
+        ? { allowed: false }
+        : await checkAiQuota({ uid, route: 'categorize-one' })
+      if (quota.allowed) {
+        const ai = await aiCategorizeOne(cleanMerchant)
+        if (ai) category = ai
+      } else {
+        console.log(`[transaction] ai categorize skipped (quota) uid=${uid}`)
+      }
     }
   }
 
