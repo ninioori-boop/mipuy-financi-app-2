@@ -6,7 +6,7 @@ import {
   VAR_CATEGORIES, ANNUAL_CATEGORIES, FIXED_CATEGORIES,
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 export interface MappingRow {
   id: string

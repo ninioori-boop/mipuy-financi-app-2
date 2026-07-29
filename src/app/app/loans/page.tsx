@@ -4,6 +4,11 @@ import { useState, useMemo } from 'react'
 import { useBrand } from '@/components/layout/BrandProvider'
 
 // ── types ──────────────────────────────────────────────────────────────────
+// Neutral tint rather than a second surface token — mergeBrand doesn't derive
+// the neutrals for a light practice surface, so surface/surface2 can diverge
+// into unreadable alternating rows. See compound/page.tsx for the same note.
+const ZEBRA = 'rgba(127,127,127,0.07)'
+
 type CalcMode    = 'byAmount'  | 'byPayment'
 type RepayMethod = 'spitzer'   | 'equalPrincipal'
 type IndexMode   = 'none'      | 'indexed'
@@ -256,49 +261,49 @@ export default function LoansPage() {
           <div className="overflow-auto max-h-[55vh]">
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10">
-                <tr style={{ backgroundColor: '#1e1e1e' }}>
+                <tr style={{ backgroundColor: brand.colors.surface3 }}>
                   {['חודש', 'תשלום חודשי', 'קרן', 'ריבית', 'יתרה'].map(h => (
                     <th key={h} style={{
                       padding: '9px 14px', textAlign: 'right', fontSize: 11,
-                      fontWeight: 600, color: '#8A8178', whiteSpace: 'nowrap',
-                      border: '1px solid #2A2A2A',
+                      fontWeight: 600, color: brand.colors.mutedTxt, whiteSpace: 'nowrap',
+                      border: `1px solid ${brand.colors.line}`,
                     }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {table.map((row, i) => (
-                  <tr key={row.month} style={{ backgroundColor: i % 2 === 0 ? '#111' : '#161616' }}>
-                    <td style={{ padding: '6px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#8A8178', fontWeight: 600 }}>
+                  <tr key={row.month} style={{ backgroundColor: i % 2 === 0 ? 'transparent' : ZEBRA }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'right', border: `1px solid ${brand.colors.line}`, color: brand.colors.mutedTxt, fontWeight: 600 }}>
                       {row.month}
                     </td>
-                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: brand.colors.gold, fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.gold, fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
                       {fmt(row.payment, 2)}
                     </td>
-                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontVariantNumeric: 'tabular-nums' }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.income, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(row.principal, 2)}
                     </td>
-                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#f87171', fontVariantNumeric: 'tabular-nums' }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.expense, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(row.interest, 2)}
                     </td>
-                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#F0EDEA', fontVariantNumeric: 'tabular-nums' }}>
+                    <td style={{ padding: '6px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.txt, fontVariantNumeric: 'tabular-nums' }}>
                       {fmt(row.balance, 2)}
                     </td>
                   </tr>
                 ))}
                 {/* Totals row */}
-                <tr style={{ backgroundColor: '#1e1e1e', position: 'sticky', bottom: 0 }}>
-                  <td style={{ padding: '8px 14px', textAlign: 'right', border: '1px solid #2A2A2A', color: '#F0EDEA', fontWeight: 700 }}>סך הכל</td>
-                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: brand.colors.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                <tr style={{ backgroundColor: brand.colors.surface3, position: 'sticky', bottom: 0 }}>
+                  <td style={{ padding: '8px 14px', textAlign: 'right', border: `1px solid ${brand.colors.line}`, color: brand.colors.txt, fontWeight: 700 }}>סך הכל</td>
+                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(totalPayment, 2)}
                   </td>
-                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#4ade80', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.income, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(principal, 2)}
                   </td>
-                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: '1px solid #2A2A2A', color: '#f87171', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '8px 14px', textAlign: 'left', direction: 'ltr', border: `1px solid ${brand.colors.line}`, color: brand.colors.expense, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(totalInterest, 2)}
                   </td>
-                  <td style={{ padding: '8px 14px', border: '1px solid #2A2A2A' }} />
+                  <td style={{ padding: '8px 14px', border: `1px solid ${brand.colors.line}` }} />
                 </tr>
               </tbody>
             </table>

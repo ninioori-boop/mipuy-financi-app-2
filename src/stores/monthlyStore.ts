@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES } from '@/lib/constants'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 function uid() { return Math.random().toString(36).slice(2) }
 

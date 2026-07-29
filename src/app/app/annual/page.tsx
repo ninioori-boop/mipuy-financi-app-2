@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { useAnnualStore, type AnnualSection } from '@/stores/annualStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { MONTHS_LIST } from '@/lib/constants'
-import { exportAnnualXlsx } from '@/lib/exportAnnualXlsx'
 import { toast } from 'sonner'
 
 const MONTH_IDS = MONTHS_LIST.map(m => m.id)
@@ -115,9 +114,11 @@ export default function AnnualPage() {
     }
   }
 
-  function handleExportXlsx() {
+  async function handleExportXlsx() {
     try {
       setExporting('xlsx')
+      // Loaded on click — keeps xlsx (~408KB) out of this route's bundle.
+      const { exportAnnualXlsx } = await import('@/lib/exportAnnualXlsx')
       exportAnnualXlsx({
         year: store.year,
         income: store.income, fixed: store.fixed, variable: store.variable,

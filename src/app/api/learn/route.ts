@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).

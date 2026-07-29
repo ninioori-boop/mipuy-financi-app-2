@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useMappingStore, type MappingRow } from '@/stores/mappingStore'
 import type { Transaction } from '@/types/transaction'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 function fmt(n: number) {
   return '₪' + n.toLocaleString('he-IL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })

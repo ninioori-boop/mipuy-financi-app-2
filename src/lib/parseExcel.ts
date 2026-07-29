@@ -1,5 +1,3 @@
-import * as XLSX from 'xlsx'
-
 // allSheets: concatenate every sheet's rows (with a blank separator row between),
 // for statements that split sections across sheets (e.g. Isracard "בארץ"/"בחו"ל").
 // Default false keeps single-sheet behavior for callers that don't opt in.
@@ -7,6 +5,10 @@ export async function parseExcelFile(
   file: File,
   opts: { allSheets?: boolean } = {},
 ): Promise<unknown[][]> {
+  // xlsx (~408KB) loads only when a file is actually parsed — four routes
+  // import this module, but none of them need the parser until the user picks
+  // a file. The function was already async, so no caller changes.
+  const XLSX = await import('xlsx')
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {

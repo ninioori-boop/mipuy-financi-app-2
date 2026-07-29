@@ -19,17 +19,18 @@ const fmtTip = (v: any, name: any) => [fmt(Number(v)), String(name)] as [string,
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const fmtTipCash = (v: any, name: any) => [`${Number(v) >= 0 ? '+' : '−'}${fmt(Number(v))}`, String(name)] as [string, string]
 
-const TOOLTIP_STYLE = {
-  backgroundColor: '#1A1A1A',
-  border: '1px solid #2A2A2A',
-  borderRadius: 8,
-  color: '#F0EDEA',
-  fontSize: 12,
-  direction: 'rtl' as const,
-}
-
 export default function TrendsPage() {
   const brand = useBrand()
+  // Chrome (grid/axis/tooltip) follows the firm's palette — a fixed dark-theme
+  // tooltip is unreadable on a light-branded firm (e.g. tachles' aqua surface).
+  const tooltipStyle = {
+    backgroundColor: brand.colors.surface2,
+    border: `1px solid ${brand.colors.line}`,
+    borderRadius: 8,
+    color: brand.colors.txt,
+    fontSize: 12,
+    direction: 'rtl' as const,
+  }
   const { months } = useMonthlyStore()
 
   const allRows = MONTHS_LIST.map((m, i) => {
@@ -164,14 +165,14 @@ export default function TrendsPage() {
         <h2 className="font-semibold text-txt">💰 הכנסות מול הוצאות</h2>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={incomeExpData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
-            <XAxis dataKey="month" tick={{ fill: '#8A8178', fontSize: 12 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#8A8178', fontSize: 10 }} axisLine={false} tickLine={false}
+            <CartesianGrid strokeDasharray="3 3" stroke={brand.colors.line} vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: brand.colors.mutedTxt, fontSize: 12 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: brand.colors.mutedTxt, fontSize: 10 }} axisLine={false} tickLine={false}
               tickFormatter={tickFmt} width={44} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
-            <Legend iconSize={8} wrapperStyle={{ color: '#8A8178', fontSize: 11, paddingTop: 8 }} />
-            <Bar dataKey="הכנסות" fill="#4ade80" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
-            <Bar dataKey="הוצאות" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
+            <Tooltip contentStyle={tooltipStyle} formatter={fmtTip} />
+            <Legend iconSize={8} wrapperStyle={{ color: brand.colors.mutedTxt, fontSize: 11, paddingTop: 8 }} />
+            <Bar dataKey="הכנסות" fill={brand.colors.income} radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
+            <Bar dataKey="הוצאות" fill={brand.colors.expense} radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -181,12 +182,12 @@ export default function TrendsPage() {
         <h2 className="font-semibold text-txt">📋 פירוט הוצאות לפי קטגוריה</h2>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={stackData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
-            <XAxis dataKey="month" tick={{ fill: '#8A8178', fontSize: 12 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#8A8178', fontSize: 10 }} axisLine={false} tickLine={false}
+            <CartesianGrid strokeDasharray="3 3" stroke={brand.colors.line} vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: brand.colors.mutedTxt, fontSize: 12 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: brand.colors.mutedTxt, fontSize: 10 }} axisLine={false} tickLine={false}
               tickFormatter={tickFmt} width={44} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
-            <Legend iconSize={8} wrapperStyle={{ color: '#8A8178', fontSize: 11, paddingTop: 8 }} />
+            <Tooltip contentStyle={tooltipStyle} formatter={fmtTip} />
+            <Legend iconSize={8} wrapperStyle={{ color: brand.colors.mutedTxt, fontSize: 11, paddingTop: 8 }} />
             <Bar dataKey="קבוע"    fill="#6366f1" stackId="a" maxBarSize={44} isAnimationActive={false} />
             <Bar dataKey="משתנה"  fill="#a78bfa" stackId="a" maxBarSize={44} isAnimationActive={false} />
             <Bar dataKey="מנויים" fill="#22d3ee" stackId="a" maxBarSize={44} isAnimationActive={false} />
@@ -206,12 +207,12 @@ export default function TrendsPage() {
                 <stop offset="95%" stopColor={brand.colors.gold} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
-            <XAxis dataKey="month" tick={{ fill: '#8A8178', fontSize: 12 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#8A8178', fontSize: 10 }} axisLine={false} tickLine={false}
+            <CartesianGrid strokeDasharray="3 3" stroke={brand.colors.line} vertical={false} />
+            <XAxis dataKey="month" tick={{ fill: brand.colors.mutedTxt, fontSize: 12 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: brand.colors.mutedTxt, fontSize: 10 }} axisLine={false} tickLine={false}
               tickFormatter={tickFmt} width={44} />
-            <ReferenceLine y={0} stroke="#3A3A3A" strokeWidth={1.5} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTipCash} />
+            <ReferenceLine y={0} stroke={brand.colors.line} strokeWidth={1.5} />
+            <Tooltip contentStyle={tooltipStyle} formatter={fmtTipCash} />
             <Area type="monotone" dataKey="תזרים" stroke={brand.colors.gold} strokeWidth={2}
               fill="url(#cfGrad)" dot={{ fill: brand.colors.gold, r: 4, strokeWidth: 0 }}
               activeDot={{ r: 8, strokeWidth: 0 }} isAnimationActive={false} />
@@ -227,17 +228,17 @@ export default function TrendsPage() {
             <AreaChart data={savingsData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
               <defs>
                 <linearGradient id="savGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#4ade80" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#4ade80" stopOpacity={0.02} />
+                  <stop offset="5%"  stopColor={brand.colors.income} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={brand.colors.income} stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2A2A2A" vertical={false} />
-              <XAxis dataKey="month" tick={{ fill: '#8A8178', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#8A8178', fontSize: 10 }} axisLine={false} tickLine={false}
+              <CartesianGrid strokeDasharray="3 3" stroke={brand.colors.line} vertical={false} />
+              <XAxis dataKey="month" tick={{ fill: brand.colors.mutedTxt, fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: brand.colors.mutedTxt, fontSize: 10 }} axisLine={false} tickLine={false}
                 tickFormatter={tickFmt} width={44} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={fmtTip} />
-              <Area type="monotone" dataKey="חיסכון" stroke="#4ade80" strokeWidth={2}
-                fill="url(#savGrad)" dot={{ fill: '#4ade80', r: 4, strokeWidth: 0 }}
+              <Tooltip contentStyle={tooltipStyle} formatter={fmtTip} />
+              <Area type="monotone" dataKey="חיסכון" stroke={brand.colors.income} strokeWidth={2}
+                fill="url(#savGrad)" dot={{ fill: brand.colors.income, r: 4, strokeWidth: 0 }}
                 activeDot={{ r: 8, strokeWidth: 0 }} isAnimationActive={false} />
             </AreaChart>
           </ResponsiveContainer>

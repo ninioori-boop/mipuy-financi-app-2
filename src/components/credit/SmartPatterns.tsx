@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import type { Transaction } from '@/types/transaction'
 import { useMappingStore } from '@/stores/mappingStore'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { INSURANCE_CATEGORIES } from '@/lib/constants'
 
 type MappingSection = 'fixed' | 'sub' | 'ins'

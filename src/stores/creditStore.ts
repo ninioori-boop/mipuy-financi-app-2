@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import type { Transaction } from '@/types/transaction'
-import { normalizeForLookup } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { saveLearnedEntry } from '@/lib/firestoreService'
 
 interface CreditState {
