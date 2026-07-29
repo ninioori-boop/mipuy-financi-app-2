@@ -43,6 +43,7 @@
   --color-muted-txt:   var(--muted-txt);
   --color-income:      var(--income);
   --color-expense:     var(--expense);
+  --color-warn:        var(--warn);
   --color-neutral:     var(--neutral);
 }
 
@@ -79,6 +80,7 @@
   --muted-txt:   #6B6560;
   --income:      #2E7D32;
   --expense:     #C62828;
+  --warn:        #A15C07;
   --neutral:     #78716C;
 }
 
@@ -114,6 +116,7 @@
   --muted-txt:   #8A8178;
   --income:      #4ADE80;
   --expense:     #F87171;
+  --warn:        #FBBF24;
   --neutral:     #A8A29E;
 }
 

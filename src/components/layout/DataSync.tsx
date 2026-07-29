@@ -165,6 +165,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const liveToastCount   = useRef<number>(0)
   const stableCacheSrc   = useRef<string>('')  // lazy canonical form of lastSavedJson
   const stableCacheOut   = useRef<string>('')
+  // onSnapshot is terminal on error (a revoked link must not retry-loop), so a
+  // transient network blip would otherwise leave live sync silently off for the
+  // rest of the session. This drives a re-attach when the tab comes back.
+  const liveDead         = useRef<boolean>(false)
+  const [liveRetry, setLiveRetry] = useState(0)
   const [retryCount, setRetryCount] = useState(0)
 
   // A write (or an async apply) is in flight. Counted, not a boolean: a save
@@ -998,6 +1003,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         scheduleLiveEval(LIVE_APPLY_DEBOUNCE_MS)
       },
       () => {
+        liveDead.current = true
         // Terminal for this listener (a revoked link must not retry-loop).
         // Correctness still holds: the focus refetch and the pre-write probe
         // are untouched. Only impersonation gets a notice — the advisor is the
@@ -1052,7 +1058,27 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       liveEvalRef.current = () => {}
       useSyncStore.getState().setRemoteActivity(null)
     }
-  }, [user, hydrated, impUid, impMode])
+  }, [user, hydrated, impUid, impMode, liveRetry])
+
+  // ── 2d. Revive a listener that died on a transient error ──
+  // Only re-attaches when it actually died, and only on a signal that the
+  // connection is likely back — never a retry loop against a revoked link.
+  useEffect(() => {
+    const revive = () => {
+      if (!liveDead.current) return
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return
+      liveDead.current = false
+      setLiveRetry(n => n + 1)
+    }
+    document.addEventListener('visibilitychange', revive)
+    window.addEventListener('online', revive)
+    window.addEventListener('focus', revive)
+    return () => {
+      document.removeEventListener('visibilitychange', revive)
+      window.removeEventListener('online', revive)
+      window.removeEventListener('focus', revive)
+    }
+  }, [])
 
   // ── 3. Mirror mapping installments/debts/savings into all monthly tabs ──
   // Subscribe to any mapping change; on user pause (500ms debounce) call

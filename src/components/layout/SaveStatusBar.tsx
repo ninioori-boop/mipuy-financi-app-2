@@ -40,8 +40,8 @@ export function SaveStatusBar() {
 
   if (!user) {
     return (
-      <span className="inline-flex items-center gap-2 text-sm text-muted-txt px-2.5 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/5">
-        <span className="size-2.5 rounded-full bg-yellow-400/80" />
+      <span className="inline-flex items-center gap-2 text-sm text-muted-txt px-2.5 py-1 rounded-full border border-warn/30 bg-warn/5">
+        <span className="size-2.5 rounded-full bg-warn/80" />
         מצב מקומי, נתונים לא נשמרים
       </span>
     )
@@ -85,10 +85,10 @@ export function SaveStatusBar() {
     textColor  = 'text-expense'
     label      = errorMessage ?? 'שגיאת שמירה'
   } else if (status === 'offline') {
-    dotColor   = 'bg-yellow-400'
-    pillBg     = 'bg-yellow-400/10'
-    pillBorder = 'border-yellow-400/30'
-    textColor  = 'text-yellow-300'
+    dotColor   = 'bg-warn'
+    pillBg     = 'bg-warn/10'
+    pillBorder = 'border-warn/30'
+    textColor  = 'text-warn'
     label      = 'מצב לא מקוון, השמירה מושהית'
   } else if (showPresence && Date.now() - remoteActivity!.seenAt < PRESENCE_PRIORITY_MS) {
     // Fresh foreign write outranks the derived dirt an apply leaves behind.
@@ -102,10 +102,10 @@ export function SaveStatusBar() {
     // Explicit "there are changes waiting to be saved" signal. Kept between
     // the last keystroke and the debounced save landing (up to 2s), and
     // also shown when the user typed more while a save was in flight.
-    dotColor   = 'bg-orange-400 animate-pulse'
-    pillBg     = 'bg-orange-400/10'
-    pillBorder = 'border-orange-400/30'
-    textColor  = 'text-orange-300'
+    dotColor   = 'bg-warn animate-pulse'
+    pillBg     = 'bg-warn/10'
+    pillBorder = 'border-warn/30'
+    textColor  = 'text-warn'
     label      = 'שינויים לא-שמורים…'
   } else if (showPresence) {
     dotColor   = 'bg-gold'
@@ -115,17 +115,17 @@ export function SaveStatusBar() {
     label      = presenceLabel
     timePart   = presenceTime
   } else if (status === 'saved') {
-    dotColor   = 'bg-green-400'
-    pillBg     = 'bg-green-400/10'
-    pillBorder = 'border-green-400/30'
-    textColor  = 'text-green-400'
+    dotColor   = 'bg-income'
+    pillBg     = 'bg-income/10'
+    pillBorder = 'border-income/30'
+    textColor  = 'text-income'
     label      = 'נשמר'
     timePart   = lastSavedAt ? timeAgo(lastSavedAt) : ''
   } else if (lastSavedAt) {
-    dotColor   = 'bg-green-400/70'
-    pillBg     = 'bg-green-400/5'
-    pillBorder = 'border-green-400/20'
-    textColor  = 'text-green-400/80'
+    dotColor   = 'bg-income/70'
+    pillBg     = 'bg-income/5'
+    pillBorder = 'border-income/20'
+    textColor  = 'text-income/80'
     label      = 'נשמר'
     timePart   = timeAgo(lastSavedAt)
   }

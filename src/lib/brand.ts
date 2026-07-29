@@ -47,6 +47,8 @@ export interface Brand {
     mutedTxt: string
     income: string
     expense: string
+    /** Attention states (unsaved changes, offline) — amber by default. */
+    warn: string
   }
   logo: {
     icon192: string
@@ -85,6 +87,7 @@ const BRANDS: Record<string, Brand> = {
       mutedTxt: '#8A8178',
       income: '#4ADE80',
       expense: '#F87171',
+      warn: '#FBBF24',
     },
     logo: {
       icon192: '/icon-192.png',
@@ -128,7 +131,7 @@ export const PRACTICE_BRAND_STRING_KEYS = [
 
 export const PRACTICE_BRAND_COLOR_KEYS = [
   'gold', 'goldLight', 'goldDark', 'surface', 'surface2', 'surface3',
-  'line', 'txt', 'mutedTxt', 'income', 'expense',
+  'line', 'txt', 'mutedTxt', 'income', 'expense', 'warn',
 ] as const
 
 // Only CSS-valid hex lengths (3/4/6/8) — a 5- or 7-digit value would be
@@ -176,6 +179,8 @@ export function mergeBrand(base: Brand, practice: PracticeBrand | null | undefin
   if (practice.colors?.surface && hexLuminance(practice.colors.surface) > 0.45) {
     if (!practice.colors.income)  colors.income  = '#138E4F'
     if (!practice.colors.expense) colors.expense = '#B53C3C'
+    // Same story for the status pills' warning amber (unsaved changes, offline).
+    if (!practice.colors.warn)    colors.warn    = '#A15C07'
   }
   return {
     ...base,
@@ -236,4 +241,5 @@ export const BRAND_CSS_VARS: Record<keyof Brand['colors'], string[]> = {
   mutedTxt:  ['--muted-txt', '--muted-foreground'],
   income:    ['--income'],
   expense:   ['--expense'],
+  warn:      ['--warn'],
 }
