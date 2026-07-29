@@ -9,6 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "export:clients": "tsx scripts/export-clients.ts",
+    "report:funnel": "tsx scripts/funnel-report.ts",
+    "report:data": "tsx scripts/data-report.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

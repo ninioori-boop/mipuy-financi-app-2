@@ -21,19 +21,26 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const Anthropic = require("@anthropic-ai/sdk");
+const { verifyMetaSignature } = require("./waSignature");
 
 // ── Secrets (set via `firebase functions:secrets:set NAME`, never in code) ────
 const WHATSAPP_TOKEN = defineSecret("WHATSAPP_TOKEN"); // Meta permanent/temp access token
 const WHATSAPP_PHONE_ID = defineSecret("WHATSAPP_PHONE_ID"); // sender phone-number ID
 const WHATSAPP_VERIFY_TOKEN = defineSecret("WHATSAPP_VERIFY_TOKEN"); // webhook verify string (we choose it)
 const WHATSAPP_TO = defineSecret("WHATSAPP_TO"); // Ori's number, e.g. 9725XXXXXXXX (digits only)
-const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY"); // server-side only
+// Meta app secret — verifies X-Hub-Signature-256 on incoming POSTs (shared with clientBot).
+const WHATSAPP_APP_SECRET = defineSecret("WHATSAPP_APP_SECRET");
+// Reuses the EXISTING Secret Manager secret named "mail" — it holds the
+// Anthropic/Claude API key (the same one the weekly digest in index.js uses).
+// Do NOT rename; there is no separate ANTHROPIC_API_KEY secret in this project.
+const ANTHROPIC_API_KEY = defineSecret("mail"); // server-side only
 
 const ALL_SECRETS = [
   WHATSAPP_TOKEN,
   WHATSAPP_PHONE_ID,
   WHATSAPP_VERIFY_TOKEN,
   WHATSAPP_TO,
+  WHATSAPP_APP_SECRET,
   ANTHROPIC_API_KEY,
 ];
 
@@ -42,8 +49,8 @@ const TZ = "Asia/Jerusalem";
 
 // Approved template names in Meta (language he). Static text, no variables —
 // see docs/whatsapp-goal-bot-setup.md for the exact wording to submit.
-const TEMPLATE_EVENING = "goals_evening";
-const TEMPLATE_MIDDAY = "goals_midday";
+const TEMPLATE_EVENING = "goals_evening_2";
+const TEMPLATE_MIDDAY = "goals_midday_2";
 
 // ── Date helpers (Asia/Jerusalem, YYYY-MM-DD) ────────────────────────────────
 function dayKey(offsetDays = 0) {
@@ -279,6 +286,12 @@ exports.goalBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) =>
   }
 
   if (req.method !== "POST") return res.sendStatus(405);
+
+  // Authenticate the request as genuinely from Meta before trusting its body.
+  if (!verifyMetaSignature(req, WHATSAPP_APP_SECRET.value())) {
+    console.error("goalBot: invalid X-Hub-Signature-256");
+    return res.sendStatus(403);
+  }
 
   // Always ack fast so Meta doesn't retry; process best-effort.
   try {

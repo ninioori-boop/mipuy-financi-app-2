@@ -2,13 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Advisor identification for cross-user reads (mirrors src/lib/labAccess.ts
-    // LAB_EMAILS — rules can't import app code, keep the two in sync). Used ONLY
-    // for the intake cross-read below. The advisor↔client management system
-    // (clientLinks) does NOT use this — it keys off invitedByUid on the link.
-    function isAdvisor() {
+    // The caller is the client's OWN advisor: the ACTIVE link names them.
+    // Deliberately link-scoped (not role-scoped) — in a multi-firm deployment an
+    // advisor role alone must never grant cross-practice reads of client data.
+    function ownsClient(userId) {
       return request.auth != null
-        && request.auth.token.email in ['ninioori@gmail.com', 'eden00076@gmail.com'];
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid;
     }
 
     // Platform owner (super-admin) — reads the oversight ledger across all
@@ -35,10 +36,11 @@ service cloud.firestore {
     // so the app is unusable for them until the advisor adds their email.
     // (exists() runs with rule privileges, so `allowlist` stays private below.)
     match /users/{userId} {
-      // UNCHANGED — owner-only + allowlist, read AND write:
+      // UNCHANGED — owner-only + allowlist, read AND write (email lowercased to
+      // match the allowlist doc-id convention — fixes uppercase-email lockout):
       allow read, write: if request.auth != null
         && request.auth.uid == userId
-        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+        && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
 
       // NEW (additive, READ-ONLY): a consented advisor whose ACTIVE link names
       // them may read this client's financial doc. OR-combined, so the owner
@@ -55,7 +57,38 @@ service cloud.firestore {
       // owner write clause above is untouched; dropping the link (status!='active')
       // or the tier (access!='write' — incl. auto-expiry at 'סוף תהליך') cuts
       // write instantly at the rule level.
-      allow write: if request.auth != null
+      // create/update only — an advisor must never be able to DELETE a client's
+      // financial file (deletion stays owner-only via the clause above).
+      allow create, update: if request.auth != null
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.access == 'write';
+    }
+
+    // ── Portfolio sections — heavy data split out of the main doc ─────
+    // users/{uid}/sections/{sectionId} holds sections too large to keep inside
+    // users/{uid}.data (first: `credit` — the transaction list is ~64% of a
+    // real portfolio's weight, and the main doc has a ~1MB hard cap).
+    // EXACTLY the parent doc's three clauses — the split must never change who
+    // can see or edit what. Additive collection; the old live app never
+    // touches it, so zero-risk to it.
+    match /users/{userId}/sections/{sectionId} {
+      // Owner + allowlist, read AND write (mirrors the parent doc):
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
+
+      // Consented advisor may READ at both access tiers (a view-mode advisor
+      // must see the credit tab exactly like the rest of the portfolio):
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/clientLinks/$(userId))
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
+        && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid;
+
+      // WRITE-tier advisor: create/update only, NEVER delete — an advisor must
+      // not be able to delete a client's financial data (same as the parent).
+      allow create, update: if request.auth != null
         && exists(/databases/$(database)/documents/clientLinks/$(userId))
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid
@@ -68,10 +101,10 @@ service cloud.firestore {
     // doc: owner-only + invite-only allowlist. Additive collection — the old
     // live app never touches it, so zero-risk to it.
     match /users/{userId}/versions/{versionId} {
-      // UNCHANGED — owner-only + allowlist:
+      // UNCHANGED — owner-only + allowlist (lowercased, same as the parent doc):
       allow read, write: if request.auth != null
         && request.auth.uid == userId
-        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email));
+        && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
 
       // NEW (additive): a WRITE-tier consented advisor may read + write version
       // snapshots in the CLIENT's history — full transparency, the client can
@@ -117,11 +150,11 @@ service cloud.firestore {
     // read everyone's to triage. Additive collection — the old live app never
     // touches it, so this is zero-risk to it.
     match /intake/{userId} {
-      allow read:  if request.auth != null && (request.auth.uid == userId || isAdvisor());
+      allow read:  if request.auth != null && (request.auth.uid == userId || ownsClient(userId));
       allow write: if request.auth != null && request.auth.uid == userId;
 
       match /files/{fileId} {
-        allow read:  if request.auth != null && (request.auth.uid == userId || isAdvisor());
+        allow read:  if request.auth != null && (request.auth.uid == userId || ownsClient(userId));
         allow write: if request.auth != null && request.auth.uid == userId;
       }
     }
