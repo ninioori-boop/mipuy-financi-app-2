@@ -37,6 +37,7 @@ import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
+import { saveCreditSection } from '@/lib/creditSection'
 import { registerLiveRefresh } from '@/lib/liveRefresh'
 import { stableStringify, deriveByAdvisor, tsToMillis } from '@/lib/liveSync'
 import { onSnapshot, doc as fsDoc } from 'firebase/firestore'
@@ -83,6 +84,18 @@ const LIVE_HOLD_RETRY_MS = 300
 // then fall back to one per minute (the status pill carries the rest).
 const LIVE_TOAST_MIN_GAP_MS = 60_000
 const LIVE_TOAST_BURST = 3
+// ── Live-connection economics ──
+// A streamed listener bills one read per remote change PER OPEN CLIENT — an
+// idle tab watching a co-editing session costs ~30 reads/min for nothing. So
+// the connection follows the USER, not the tab:
+//   active (input in the last 2 min, tab visible)  → full live stream
+//   idle                                           → 1 light poll per minute
+//   away (15 min without any input, or tab hidden) → nothing at all;
+//     the first interaction forces a refresh and re-attaches the stream.
+const LIVE_ACTIVE_WINDOW_MS  = 2 * 60_000
+const LIVE_IDLE_POLL_MS      = 60_000
+const LIVE_AWAY_AFTER_MS     = 15 * 60_000
+const LIVE_MODE_TICK_MS      = 30_000
 
 const SELF_CONFLICT_MSG = {
   title: 'נמצאה גרסה חדשה יותר בענן',
@@ -163,6 +176,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const viewNotifyTs     = useRef<number>(0)   // advisor VIEW mode: last acknowledged server ts
   const liveToastAt      = useRef<number>(0)
   const liveToastCount   = useRef<number>(0)
+  // Credit-split phase A (shadow write): the last credit payload mirrored to
+  // users/{uid}/sections/credit, so unchanged credit costs no extra write.
+  const lastCreditShadowJson = useRef<string>('')
+  // Live-connection mode (see the economics comment above the constants).
+  const lastActivityAt = useRef<number>(Date.now())
+  const [liveMode, setLiveMode] = useState<'live' | 'idle' | 'away'>('live')
   const stableCacheSrc   = useRef<string>('')  // lazy canonical form of lastSavedJson
   const stableCacheOut   = useRef<string>('')
   // onSnapshot is terminal on error (a revoked link must not retry-loop), so a
@@ -346,6 +365,23 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (liveEvalTimer.current) clearTimeout(liveEvalTimer.current)
     liveEvalTimer.current = setTimeout(() => liveEvalRef.current(), delay)
   }
+
+  // Credit-split phase A: mirror the heavy credit fields to their own document
+  // after every successful main save. SHADOW ONLY — nothing reads it yet; it
+  // builds a verified second copy so the read switch (phase B) starts from
+  // weeks of proven parity. Fire-and-forget: a mirror failure must never
+  // surface as a save error, the main document is still the source of truth.
+  const shadowWriteCredit = (targetUid: string) => {
+    try {
+      const c = useCreditStore.getState()
+      const payload = { transactions: c.transactions, uploadedFileNames: c.uploadedFileNames }
+      const json = JSON.stringify(payload)
+      if (json === lastCreditShadowJson.current) return
+      saveCreditSection(targetUid, payload)
+        .then(() => { lastCreditShadowJson.current = json })
+        .catch(err => console.warn('[DataSync] credit shadow write failed:', err))
+    } catch { /* never disturb the save path */ }
+  }
   // Effect 2c installs the real evaluator here (it needs the effect's target).
   const liveEvalRef = useRef<() => void>(() => {})
 
@@ -440,6 +476,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       viewNotifyTs.current       = 0
       liveToastAt.current        = 0
       liveToastCount.current     = 0
+      lastCreditShadowJson.current = ''
       stableCacheSrc.current     = ''
       syncBusyAt.current         = 0
       syncDepth.current          = 0
@@ -464,6 +501,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     knownAdvisorEditAt.current = 0
     liveToastAt.current        = 0
     liveToastCount.current     = 0
+    lastCreditShadowJson.current = ''
     stableCacheSrc.current     = ''
     if (conflictToastId.current != null) {
       toast.dismiss(conflictToastId.current)
@@ -637,6 +675,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
             lastSavedJson.current      = json
             clientDocBaseline.current  = Date.now()
             lastProbeAt.current        = Date.now()
+            shadowWriteCredit(clientUid)
             // Our write supersedes anything the listener was holding: replaying
             // an older event now would revert what we just persisted, and the
             // next save would push that revert to the server.
@@ -714,6 +753,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           selfDocBaseline.current = Date.now()
           lastProbeAt.current     = Date.now()
           pendingRemote.current   = null   // see the advisor path above
+          shadowWriteCredit(user.uid)
           markSaved()
           // Only clear the dirty flag if nothing else changed WHILE the save
           // was in flight. If it did, isDirty stays true — the next debounce
@@ -751,6 +791,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       lastProbeAt.current     = Date.now()
       stableCacheSrc.current  = ''     // canonical cache must rebuild
       pendingRemote.current   = null   // this write supersedes any held event
+      // The drain wrote the WHOLE snapshot (credit included) straight to the
+      // main doc — mirror the shadow too, or the verify script reads permanent
+      // false drift and the phase-B gate becomes meaningless.
+      shadowWriteCredit(user.uid)
     })
 
     const unsubs = [
@@ -806,6 +850,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       knownAdvisorEditAt.current = 0
       liveToastAt.current        = 0
       liveToastCount.current     = 0
+      lastCreditShadowJson.current = ''
       stableCacheSrc.current     = ''
       // A pending self-conflict prompt must never act on CLIENT data, and the
       // advisor's FIRST client save must not ride a recent self-probe's throttle:
@@ -832,7 +877,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const impMode = useImpersonationStore(s => s.mode)
 
   useEffect(() => {
-    if (!user || !hydrated) return
+    // The stream exists only while the user is actually here: an idle tab
+    // falls back to a once-a-minute poll, an away tab holds no connection at
+    // all (effect 2c½ forces a refresh on the way back in). Cleanup runs on
+    // every mode change, so leaving 'live' detaches immediately.
+    if (!user || !hydrated || liveMode !== 'live') return
     const targetUid = impUid ?? user.uid
     const listenerMode: 'self' | 'edit' | 'view' =
       impUid ? (impMode === 'edit' ? 'edit' : 'view') : 'self'
@@ -1058,7 +1107,55 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       liveEvalRef.current = () => {}
       useSyncStore.getState().setRemoteActivity(null)
     }
-  }, [user, hydrated, impUid, impMode, liveRetry])
+  }, [user, hydrated, impUid, impMode, liveRetry, liveMode])
+
+  // ── 2c½. Connection economics: the stream follows the USER, not the tab ──
+  // Cheap passive listeners (refs only, zero re-renders); a slow tick decides
+  // the mode. Transitions INTO 'live' force one refresh first, so a user
+  // returning from 'away' never acts on stale numbers.
+  useEffect(() => {
+    if (!user || !hydrated) return
+    const touch = () => { lastActivityAt.current = Date.now() }
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']
+    for (const e of events) window.addEventListener(e, touch, { passive: true })
+
+    const tick = () => {
+      const idleFor = Date.now() - lastActivityAt.current
+      const hidden = document.visibilityState !== 'visible'
+      const next: 'live' | 'idle' | 'away' =
+        hidden || idleFor > LIVE_AWAY_AFTER_MS ? 'away'
+          : idleFor > LIVE_ACTIVE_WINDOW_MS ? 'idle'
+            : 'live'
+      setLiveMode(prev => {
+        if (prev === next) return prev
+        // Coming back from a disconnected state: refresh BEFORE the stream
+        // re-attaches, so the first thing the user sees is current.
+        if (next === 'live' && prev === 'away') void refetchOnFocus()
+        return next
+      })
+    }
+    const interval = setInterval(tick, LIVE_MODE_TICK_MS)
+    // React to visibility promptly (the tick alone could lag half a minute).
+    document.addEventListener('visibilitychange', tick)
+    tick()
+    return () => {
+      for (const e of events) window.removeEventListener(e, touch)
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', tick)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, hydrated])
+
+  // Idle: one light freshness check per minute instead of a billed read per
+  // remote change. refetchOnFocus already carries every safety guard (dirty
+  // check, conflict prompt, echo suppression), so it is reused as-is; its own
+  // 30s floor is shorter than the poll period, so polls are never swallowed.
+  useEffect(() => {
+    if (!user || !hydrated || liveMode !== 'idle') return
+    const id = setInterval(() => { void refetchOnFocus() }, LIVE_IDLE_POLL_MS)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, hydrated, liveMode])
 
   // ── 2d. Revive a listener that died on a transient error ──
   // Only re-attaches when it actually died, and only on a signal that the

@@ -1010,6 +1010,8 @@ exports.deleteMyAccount = onCall(
         if (s.exists) leftovers.push(path[0]);
       }
       const versions = await db.collection("users").doc(uid).collection("versions").limit(1).get();
+      const sections = await db.collection("users").doc(uid).collection("sections").limit(1).get();
+      if (!sections.empty) leftovers.push("users/sections");
       if (!versions.empty) leftovers.push("users/versions");
       const [remaining] = await getStorage().bucket(bucketName)
         .getFiles({ prefix: `intake/${uid}/`, maxResults: 1 });
