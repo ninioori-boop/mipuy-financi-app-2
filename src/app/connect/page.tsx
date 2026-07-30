@@ -290,10 +290,24 @@ export default function ConnectPage() {
                 הקש על «קיצור דרך» → בחר{' '}
                 <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
                 <br />
-                מעכשיו כל תשלום Apple Pay נרשם לבד — עם התראה וסטטוס תקציב ✨
+                נשאר צעד אחד קצר וחשוב — בלעדיו התשלום הראשון ייכשל ↓
               </div>
 
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 4 · הוסף את האפליקציה למסך הבית</p>
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 4 · הרצה ראשונה לאישור הרשאות (חובה)</p>
+              <div className="rounded-lg border border-gold/40 bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
+                <span className="text-txt font-semibold">כשהמכשיר פתוח</span>, בקיצורי דרך: הקש הקשה רגילה על{' '}
+                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+                אשר את כל חלוניות ההרשאה שקופצות, בעיקר החיבור אל app.orimipuy.com
+                (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> — בחר בו).
+                <br />
+                בסוף תופיע שגיאה קטנה על notify — <span className="text-txt font-semibold">זה תקין</span>,
+                זה רק בגלל שאין תשלום אמיתי מאחורי ההרצה.
+                <br />
+                למה זה חובה: את ההרשאות האלה iOS מבקש פעם אחת, והוא לא מסוגל להציג את השאלה
+                כשהמכשיר נעול — ותשלום Apple Pay תמיד קורה כשהמכשיר נעול.
+              </div>
+
+              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 5 · הוסף את האפליקציה למסך הבית</p>
               <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
                 בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
                 → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
