@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { suggestBudgets } from '@/lib/budgetSuggest'
@@ -19,7 +18,7 @@ const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
  * only the categories without a budget yet, so a manual budget is never clobbered.
  */
 export function SmartBudgetSuggest() {
-  const user      = useAuthStore(s => s.user)
+  const { allowed: labAllowed } = useLabAccess()
   const entries   = useExpenseLogStore(s => s.entries)
   const budgets   = useCategoryBudgetStore(s => s.budgets)
   const setBudget = useCategoryBudgetStore(s => s.setBudget)
@@ -27,7 +26,7 @@ export function SmartBudgetSuggest() {
 
   const { months, suggestions } = useMemo(() => suggestBudgets(entries), [entries])
 
-  if (!hasLabAccess(user?.email)) return null      // lab-gated for now
+  if (!labAllowed) return null      // lab-gated for now (email list OR advisor role)
   if (suggestions.length === 0) return null
 
   const gaps = suggestions.filter(s => !(budgets[s.category] > 0))

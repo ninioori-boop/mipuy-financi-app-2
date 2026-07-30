@@ -7,7 +7,7 @@ import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { InsightCards } from '@/components/home/InsightCards'
 import { SubscriptionsCard } from '@/components/home/SubscriptionsCard'
@@ -53,8 +53,9 @@ export default function HomePage() {
   const user        = useAuthStore(s => s.user)
   const ym          = currentMonth()
   const firstName   = (user?.displayName || '').trim().split(' ')[0]
-  // Subscriptions are lab-gated for now — advisor-only until it's ready for clients.
-  const isAdvisor   = hasLabAccess(user?.email)
+  // Subscriptions are lab-gated for now — advisor-only until it's ready for
+  // clients. Email list OR a real advisors/{uid} role.
+  const { allowed: isAdvisor } = useLabAccess()
 
   const s = useMemo(() => {
     const now = new Date()

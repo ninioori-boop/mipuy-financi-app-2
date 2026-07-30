@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useSubscriptionPrefsStore, type DismissReason } from '@/stores/subscriptionPrefsStore'
 import { detectSubscriptions, subscriptionsMonthlyTotal } from '@/lib/subscriptions'
@@ -25,14 +25,17 @@ function dateLabel(iso: string) {
 // log. The big total (monthly + yearly) is the eye-opener; each row can be
 // removed ("cancelled" / "not a subscription"), reversibly. Pure/local, no server.
 export default function SubscriptionsPage() {
-  const router    = useRouter()
-  const user      = useAuthStore(s => s.user)
-  const isAdvisor = hasLabAccess(user?.email)
+  const router = useRouter()
+  const user   = useAuthStore(s => s.user)
+  const { allowed: isAdvisor, ready } = useLabAccess()
 
   // Lab-gated for now — advisor-only, even via a direct URL. Send clients home.
+  // `ready` is essential: the advisor role resolves asynchronously, and
+  // redirecting while it is still unknown would bounce a real advisor off the
+  // page a split second after they open it.
   useEffect(() => {
-    if (user && !hasLabAccess(user.email)) router.replace('/app/home')
-  }, [user, router])
+    if (user && ready && !isAdvisor) router.replace('/app/home')
+  }, [user, ready, isAdvisor, router])
 
   const entries   = useExpenseLogStore(s => s.entries)
   const dismissed = useSubscriptionPrefsStore(s => s.dismissed)

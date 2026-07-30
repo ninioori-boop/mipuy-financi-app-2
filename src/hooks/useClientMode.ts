@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { embeddedKind } from '@/lib/isEmbedded'
 
 // True when the app runs as a CLIENT experience: the Android in-app WebView, OR
@@ -18,11 +17,19 @@ import { embeddedKind } from '@/lib/isEmbedded'
 // starts false on the server / first paint and flips after mount — guard layout
 // on it, never data.
 export function useClientMode(): boolean {
-  const email = useAuthStore(s => s.user?.email ?? null)
+  const { allowed: isAdvisor, ready } = useLabAccess()
   const [client, setClient] = useState(false)
   useEffect(() => {
     const kind = embeddedKind()   // 'android-app' | 'pwa' | null
-    setClient(kind === 'android-app' || (kind === 'pwa' && !hasLabAccess(email)))
-  }, [email])
+    // The Android WebView is always a client, whoever is signed in.
+    if (kind === 'android-app') { setClient(true); return }
+    // A standalone PWA is client mode unless the user is a known advisor.
+    // While the role is still unknown we assume CLIENT: the app has many
+    // clients and a handful of advisors, and the layout shell already commits
+    // to the client chrome immediately — so this keeps chrome and page density
+    // consistent, and an advisor's own PWA simply expands once the role lands.
+    if (kind === 'pwa') { setClient(!(ready && isAdvisor)); return }
+    if (kind === null) setClient(false)
+  }, [isAdvisor, ready])
   return client
 }

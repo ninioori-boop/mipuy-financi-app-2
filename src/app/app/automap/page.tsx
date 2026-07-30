@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { takeHandoffFiles } from '@/lib/intakeHandoff'
 import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
@@ -70,10 +70,12 @@ export default function AutoMapPage() {
   } = useAutoMapStore()
 
   // Full page-level guard: only the advisor may view this, even via direct URL.
-  const isAdvisor = hasLabAccess(user?.email)
+  // Waits for `ready` — the advisor role loads asynchronously, and redirecting
+  // on a not-yet-known role would bounce a real advisor off their own page.
+  const { allowed: isAdvisor, ready } = useLabAccess()
   useEffect(() => {
-    if (user && !hasLabAccess(user.email)) router.replace('/app/credit')
-  }, [user, router])
+    if (user && ready && !isAdvisor) router.replace('/app/credit')
+  }, [user, ready, isAdvisor, router])
 
   const [txns, setTxns]           = useState<Transaction[]>([])
   const [fileNames, setFileNames] = useState<string[]>([])

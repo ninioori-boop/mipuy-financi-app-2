@@ -10,7 +10,7 @@ import { auth, db, callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
-import { hasLabAccess } from '@/lib/labAccess'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { SaveStatusBar } from '@/components/layout/SaveStatusBar'
 import { BrandNameHe, BrandNameEn, BrandWordmarkShort } from '@/components/layout/BrandProvider'
 
@@ -128,8 +128,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isAdvisorRole, setIsAdvisorRole]   = useState(false)
   const [isFirmOwner, setIsFirmOwner]       = useState(false)   // advisor whose advisors/{uid}.role === 'owner' (manages a practice)
   const [isOwnerRole, setIsOwnerRole]       = useState(false)
+  const setAdvisorRoleGlobal = useAuthStore(s => s.setAdvisorRole)
   useEffect(() => {
-    if (!user) { setHasAdvisorLink(false); setIsAdvisorRole(false); setIsFirmOwner(false); setIsOwnerRole(false); return }
+    if (!user) {
+      setHasAdvisorLink(false); setIsAdvisorRole(false); setIsFirmOwner(false); setIsOwnerRole(false)
+      setAdvisorRoleGlobal(null)   // unknown again — not "not an advisor"
+      return
+    }
     let alive = true
     Promise.all([
       getDoc(doc(db, 'clientLinks', user.uid)).catch(() => null),
@@ -140,13 +145,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       const adv = advSnap?.exists() ? advSnap.data() : null
       setHasAdvisorLink(!!linkSnap?.exists())
       setIsAdvisorRole(!!adv)
+      // Publish for useLabAccess(). A FAILED read (advSnap === null, e.g. offline)
+      // stays `null` = "still unknown" rather than `false` = "not an advisor" —
+      // publishing false would make the page guards actively redirect a real
+      // advisor away on a flaky connection. Unknown only costs a client a blank
+      // lab page they cannot reach from any link.
+      setAdvisorRoleGlobal(advSnap === null ? null : advSnap.exists())
       setIsOwnerRole(!!ownerSnap?.exists())
       // First sign-in of an INVITED ADVISOR: no role doc yet — let the server
       // claim a pending advisor invite (cheap no-op for everyone else).
       if (!adv) {
         try {
           const res = await callable<Record<string, never>, { claimed: boolean; needVerify?: boolean }>('claimAdvisorRole')({})
-          if (alive && res.data.claimed) setIsAdvisorRole(true)
+          if (alive && res.data.claimed) { setIsAdvisorRole(true); setAdvisorRoleGlobal(true) }
           else if (alive && res.data.needVerify) {
             toast.info('הוזמנת כיועץ. כדי לקבל את התפקיד יש לאמת קודם את כתובת המייל (נשלח אליך קישור אימות בהרשמה) ולהיכנס מחדש.', { duration: 10000 })
           }
@@ -166,7 +177,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       }
     })
     return () => { alive = false }
-  }, [user])
+  }, [user, setAdvisorRoleGlobal])
 
   // Client-mode profile (gates the business tabs) + hydration flag, so we only
   // ask the "has business?" question once the real saved value has loaded.
@@ -189,7 +200,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false)
   }, [pathname])
 
-  const isAdvisor = hasLabAccess(user?.email)
+  // Lab visibility: the email list OR a real advisors/{uid} role — so a new
+  // firm's advisor gets the lab surfaces without a code edit.
+  const { allowed: isAdvisor } = useLabAccess()
   // Advisor exemption: Ori installing the PWA on desktop/phone still gets the
   // full system. Clients get client mode from either trigger.
   const embed = embedFlag || (standalone && !isAdvisor)
