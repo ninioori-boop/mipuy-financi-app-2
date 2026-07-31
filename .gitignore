@@ -53,9 +53,16 @@ scripts/businessdb-candidates/.benchmark-baseline.json
 clients.md
 clients.html
 .export-clients.log
+funnel-report.md
+funnel-report.json
+data-report.html
 
 # functions deps
 functions/node_modules/
+
+# marketing copy + post drafts — Ori's business content, same category as the
+# proposals/contracts below: his material, not app code.
+docs/marketing/
 
 # business/private documents at repo root — live in OneDrive/Drive, not in git
 hatzaa-*.md
