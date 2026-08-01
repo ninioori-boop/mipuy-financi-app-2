@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "export:clients": "tsx scripts/export-clients.ts",
     "report:funnel": "tsx scripts/funnel-report.ts",
-    "report:data": "tsx scripts/data-report.ts"
+    "report:data": "tsx scripts/data-report.ts",
+    "health": "tsx scripts/health.ts",
+    "test:rules": "firebase emulators:exec --only firestore \"npx vitest run --config vitest.rules.config.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
