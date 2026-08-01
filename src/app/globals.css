@@ -139,7 +139,8 @@
   }
 }
 
-/* Auth-page animated background blobs — used as a no-WebGL fallback */
+/* Auth-page animated background blobs. Since the three.js shader that used to
+   cover them was removed, this drift is the only motion on the login screen. */
 @keyframes blob-drift-a {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   33%      { transform: translate3d(6%, -8%, 0) scale(1.12); }
@@ -157,3 +158,17 @@
 .animate-blob-a { animation: blob-drift-a 26s ease-in-out infinite; }
 .animate-blob-b { animation: blob-drift-b 32s ease-in-out infinite; }
 .animate-blob-c { animation: blob-drift-c 38s ease-in-out infinite; }
+
+/* The drift is decoration, so it yields to the OS-level "reduce motion"
+   setting people turn on for migraine or vestibular reasons. Only the movement
+   stops: the gradients still paint, so the screen keeps its look rather than
+   falling back to a flat background. Scoped to these three classes on purpose —
+   killing every animation app-wide would also silence the pulses that carry
+   meaning (saving, loading), which is a separate decision. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob-a,
+  .animate-blob-b,
+  .animate-blob-c {
+    animation: none;
+  }
+}
