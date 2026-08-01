@@ -202,25 +202,6 @@ export function collectSnapshot(): Snapshot {
   }
 }
 
-/**
- * Is this blob safe to PAINT from before the server copy arrives?
- *
- * `applySnapshot` tolerates anything (it skips keys it doesn't recognise), which
- * is right for a server document but too lenient for the localStorage backup:
- * that blob can be hand-edited, truncated by a quota error mid-write, or left
- * by a much older build.
- *
- * Scope, honestly: SCHEMA_VERSION has never been bumped, and sections were added
- * to Snapshot without bumping it — so in practice this rejects junk and blobs
- * that aren't snapshots at all, NOT "an older schema". It is a sanity check, not
- * a migration gate. That is acceptable here only because the server copy
- * replaces the paint within a second and applySnapshot is per-key defensive; if
- * the cache is ever used for anything longer-lived, this needs real versioning.
- */
-export function isUsableSnapshot(raw: unknown): boolean {
-  return isObject(raw) && raw.version === SCHEMA_VERSION
-}
-
 /** Apply a snapshot to all stores. Missing/invalid keys are skipped. */
 export function applySnapshot(raw: unknown): void {
   if (!isObject(raw)) return
