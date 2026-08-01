@@ -18,6 +18,7 @@ import { FieldPath, FieldValue, getFirestore } from "firebase-admin/firestore";
 import { BUSINESS_DB } from "../src/lib/businessDB";
 import { categorize } from "../src/lib/categorize";
 import { ALL_CATEGORIES } from "../src/lib/constants";
+import { shareableLearnedEntry } from "../src/lib/learnedSharing";
 
 interface Suggestion {
   cats: Record<string, number>;
@@ -48,6 +49,22 @@ function classify(
 
   if (!ALL_CATEGORIES.includes(topCat)) {
     return { verdict: "exception", category: topCat, reason: "קטגוריה לא חוקית" };
+  }
+  // THE shared-pool gate — the same one the app's write paths use. Promotion
+  // writes to shared/learnedDB, which is consulted before BUSINESS_DB by
+  // substring for EVERY account, so this script is a shared-pool write path and
+  // must not be the one door that skips the guard. Blocks payment rails
+  // (including Hebrew clitic forms), the personal ללא-מעקב categories, and keys
+  // under 5 chars — the "play" hijack was 4, which this script's own length
+  // check would have let through.
+  if (!shareableLearnedEntry(key, topCat)) {
+    return { verdict: "exception", category: topCat, reason: "חסום לשיתוף (אמצעי תשלום / קטגוריה אישית / מפתח קצר)" };
+  }
+  // The prompt tells the model to answer שונות when it CANNOT identify a
+  // business. In learnedDB — consulted first — that stops being a fallback and
+  // becomes an override that also re-triggers the paid AI forever.
+  if (topCat === "שונות") {
+    return { verdict: "exception", category: topCat, reason: 'סיווג "לא ידוע" — לעולם לא לקדם' };
   }
   if (topCount / total < 0.8) {
     return {
@@ -127,6 +144,25 @@ async function main() {
       }
     }
     if (toPromote.length === 0) { console.log("אין מה לקדם."); return; }
+
+    // Final gate at the WRITE, not just in classify(): the manual
+    // `promote "key=category"` form never calls classify at all, so guarding
+    // only there would leave the door this script is meant to close standing
+    // open. Everything below writes to shared/learnedDB, which is consulted
+    // before BUSINESS_DB by substring for EVERY account.
+    const blocked = toPromote.filter(([k, c]) => !shareableLearnedEntry(k, c) || c === "שונות");
+    if (blocked.length) {
+      console.error(`\n❌ ${blocked.length} רשומות חסומות לשיתוף ולא יקודמו:`);
+      for (const [k, c] of blocked) console.error(`   "${k}" → ${c}`);
+      console.error(
+        `\nהסיבה: אמצעי תשלום (ביט/פייבוקס/מזומן), קטגוריה אישית ("ללא מעקב"),\n` +
+        `מפתח קצר מ-5 תווים, או הסיווג "שונות" שמשמעותו "לא ידוע".\n` +
+        `רשומות כאלה מזהמות את כל הלקוחות — זו תקלת הביט מ-29/07.\n` +
+        `אם באמת צריך רשומה כזאת, מקומה ב-businessDB.ts (קוד מבוקר), לא במאגר המשותף.`,
+      );
+      process.exit(1);
+    }
+
     if (Object.keys(learned).length + toPromote.length > LEARNED_SOFT_CAP) {
       console.error(`❌ learnedDB יעבור את תקרת ${LEARNED_SOFT_CAP} — צריך קודם לקפל רשומות ל-businessDB.ts`);
       process.exit(1);
