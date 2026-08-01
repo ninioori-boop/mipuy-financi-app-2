@@ -1,5 +1,5 @@
 import { isAccountDeleted, DELETED_ACCOUNT_RESPONSE } from '@/lib/deletionTombstone'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { sendPushToUser } from '@/lib/webPush'
@@ -16,6 +16,95 @@ export const runtime = 'nodejs'
 const MAX_MERCHANT = 200
 const MAX_AMOUNT   = 1_000_000
 
+type NotifyPayload = { title: string; body: string; text: string; warn: boolean }
+
+/** Same shape buildNotify() returns, so the Shortcut's `notify.text` step works. */
+function notifyOf(title: string, body: string): NotifyPayload {
+  return { title, body, text: `${title}\n${body}`, warn: true }
+}
+
+// A refusal the CLIENT can read, plus a breadcrumb WE can read.
+//
+// Every rejection used to return `{ error }` and nothing else. The iOS Shortcut
+// reads `notify.text`, so a missing key crashed the run with an untranslated
+// "no value was found for dictionary key notify" — identical for a dead token,
+// an empty merchant and a bad amount. Diagnosing therefore required the
+// client's phone in hand (three rounds of screenshots on a client's device,
+// 2026-07-30, and still inconclusive). Returning notify on failures turns the
+// next ordinary payment into a sentence the client can simply read out, and the
+// `transactionErrors` breadcrumb lets us diagnose with no phone at all.
+//
+// The SUCCESS path is untouched — an install that works today (Android, or an
+// iPhone whose shortcut is wired correctly) sees a byte-identical response.
+//
+// Deliberately NOT used by the echo guard: that reply must stay notify-less,
+// because the missing key is exactly what stops a self-calling shortcut from
+// looping (see the echo comment in POST).
+// The breadcrumb is written ONLY for a caller whose token verified, keyed by uid
+// (one document per user, overwritten) — never `add()`. This route is public and
+// has no rate limiting, so an `add()` on the unauthenticated 401 path would let
+// anyone mint unbounded Firestore documents for free. The 401 case still reports
+// itself through the notification text and the (ephemeral, free) server log.
+//
+// `after()` runs the write AFTER the response is sent: Firestore's default retry
+// budget is 10 minutes, and awaiting it would hang exactly during the outage or
+// throttle when this route must stay fast.
+function refuse(
+  db: Firestore | null,
+  status: number,
+  reason: string,
+  notify: NotifyPayload,
+  uid: string | null,
+  diag: Record<string, unknown> = {},
+): NextResponse {
+  if (db && uid) {
+    after(async () => {
+      try {
+        await db.collection('transactionErrors').doc(uid).set({
+          reason,
+          at: FieldValue.serverTimestamp(),
+          ...diag,
+        })
+      } catch {
+        // Diagnostics must never affect the response.
+      }
+    })
+  }
+  return NextResponse.json({ error: reason, notify }, { status })
+}
+
+// Our own notification text, coming back as a "merchant".
+//
+// A miswired shortcut can call ITSELF, feeding our reply back in as the purchase
+// (the field incident: one ₪44 tap → ~6 notifications). The loop used to die
+// because a rejection carried no `notify` and the Shortcut's dictionary step
+// crashed. Now that rejections DO carry notify, that brake is gone, so the text
+// must be recognized explicitly — including the "לא נרשם:" failure titles, which
+// the original `^נרשם:` guard does not match.
+const OUR_OWN_TEXT = /^(לא )?נרשם:|קוטלג ל/
+
+// What the caller's token LOOKS like — never the signature itself. `uidPart` is
+// logged only when it decodes to something shaped like a Firebase uid, so a
+// client who pastes the wrong clipboard content (a password, another credential)
+// into the token box does not get it echoed into our logs. `sigLen` is 43 for an
+// intact HMAC, so a truncated or half-pasted token is visible at a glance.
+function tokenShape(token: unknown): Record<string, unknown> {
+  if (typeof token !== 'string') return { tokenParts: 0 }
+  const parts = token.trim().split('.')
+  let uidPart = '(unparseable)'
+  try {
+    const decoded = Buffer.from(parts[0], 'base64url').toString()
+    if (/^[A-Za-z0-9]{20,40}$/.test(decoded)) uidPart = decoded
+  } catch {
+    // keep '(unparseable)'
+  }
+  return {
+    tokenParts: parts.length,
+    claimedUid: uidPart,
+    tokenSigLen: parts[parts.length - 1].length,
+  }
+}
+
 // Receives a single externally-pushed transaction (from an iOS Shortcut / Android
 // automation), auto-categorizes it, and drops it into the user's private inbox
 // (transactionInbox/{uid}/items) via the admin SDK. The client drains the inbox
@@ -28,29 +117,64 @@ export async function POST(req: NextRequest) {
   const secret = process.env.TRANSACTION_SECRET
   const db = getAdminDb()
   if (!secret || !db) {
-    return NextResponse.json({ error: 'service not configured' }, { status: 503 })
+    return NextResponse.json({
+      error: 'service not configured',
+      notify: notifyOf('לא נרשם: השירות אינו זמין כרגע', 'אפשר לרשום את הקנייה ידנית באפליקציה.'),
+    }, { status: 503 })
   }
 
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') {
-    return NextResponse.json({ error: 'bad request body' }, { status: 400 })
+    // No breadcrumb: reachable without any credential.
+    return refuse(db, 400, 'bad request body', notifyOf(
+      'לא נרשם: הבקשה הגיעה בלי תוכן',
+      'צריך להתקין מחדש את הקיצור מהעמוד app.orimipuy.com/connect.',
+    ), null)
   }
   const { token, merchant, amount, date, ref, category: catOverride, source } = body as Record<string, unknown>
 
+  // Loop-breaker FIRST, before auth: a self-calling shortcut whose token is also
+  // dead would otherwise bounce off the 401 (which now carries notify) forever,
+  // never reaching the guard further down. No notify in this reply, on purpose.
+  if (typeof merchant === 'string' && OUR_OWN_TEXT.test(stripInvisible(merchant).trim())) {
+    console.log('[transaction] ECHO_REJECTED')
+    return NextResponse.json({ error: 'echo' }, { status: 400 })
+  }
+
   const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
   if (!uid) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    // No breadcrumb: this branch is reachable without any credential.
+    console.log('[transaction] UNAUTHORIZED', JSON.stringify(tokenShape(token)))
+    return refuse(db, 401, 'unauthorized', notifyOf(
+      'לא נרשם: החיבור לחשבון אינו תקף',
+      'צריך להעתיק קוד חיבור חדש מהעמוד app.orimipuy.com/connect ולהדביק אותו בקיצור.',
+    ), null)
   }
 
   // The device token is a stateless HMAC with no expiry, so a deleted account's
   // phone would keep pushing charges forever — creating inbox documents that no
   // one can ever read or delete (there is no auth user left to match the rule).
   if (await isAccountDeleted(uid)) {
-    return NextResponse.json(DELETED_ACCOUNT_RESPONSE.body, { status: DELETED_ACCOUNT_RESPONSE.status })
+    // No breadcrumb: writing one would re-create documents carrying a deleted
+    // account's uid on every tap — the exact residue the tombstone exists to
+    // prevent (see lib/deletionTombstone.ts).
+    return refuse(db, DELETED_ACCOUNT_RESPONSE.status, DELETED_ACCOUNT_RESPONSE.body.error, notifyOf(
+      'לא נרשם: החשבון נמחק',
+      'אפשר למחוק את הקיצור והאוטומציה מהמכשיר.',
+    ), null)
   }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
-    return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
+    // Wording note: a MANUAL run of the shortcut always lands here (no live
+    // transaction behind it), and that run is a mandatory setup step — so this
+    // text must not order a correct install to go "fix" a healthy automation.
+    return refuse(db, 400, 'bad merchant', notifyOf(
+      'לא נרשם: לא התקבלו פרטי הקנייה',
+      'בהרצה ידנית לבדיקה זה תקין. אם זה קרה בתשלום אמיתי, צריך לתקן את פעולת המלל באוטומציית הארנק.',
+    ), uid, {
+      merchantType: typeof merchant,
+      merchantLen: typeof merchant === 'string' ? merchant.length : 0,
+    })
   }
   // The iOS Shortcut's transaction "Amount" arrives as a CURRENCY-FORMATTED
   // STRING ("₪32.83", "32.83 ₪", "$32.83") — parseFloat("₪32.83") is NaN — so
@@ -69,10 +193,9 @@ export async function POST(req: NextRequest) {
   // rows). A merchant that carries our notify signature is never a real
   // business — reject it, which also kills the loop on its first round trip
   // (no notify in the response → the shortcut's dictionary step stops the run).
-  if (/^נרשם:|קוטלג ל/.test(cleanMerchant)) {
-    console.log('[transaction] ECHO_REJECTED')
-    return NextResponse.json({ error: 'echo' }, { status: 400 })
-  }
+  // (The echo check itself now runs BEFORE authentication — see OUR_OWN_TEXT
+  // near the top of the file — so a looping shortcut with a dead token dies on
+  // its first round trip too. Kept here only as the record of why it exists.)
 
   // iPhone Shortcut fallback: a hand-built shared Shortcut can't extract the
   // Merchant/Amount properties from the Apple Pay transaction (the editor
@@ -88,7 +211,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (!Number.isFinite(amt) || amt <= 0 || amt > MAX_AMOUNT) {
-    return NextResponse.json({ error: 'bad amount' }, { status: 400 })
+    return refuse(db, 400, 'bad amount', notifyOf(
+      'לא נרשם: לא זוהה סכום בקנייה',
+      'הקנייה הגיעה בלי סכום קריא. אפשר לרשום אותה ידנית באפליקציה.',
+    ), uid, { merchantLen: cleanMerchant.length })
   }
   const dateStr = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
     ? date
