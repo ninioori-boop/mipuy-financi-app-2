@@ -246,12 +246,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                // The desktop sidebar renders EVERY tab at once and is always
-                // visible, so Next's default viewport-prefetch downloaded the
-                // bundle for all ~37 screens on first entry — measured at 3.9MB
-                // / 79 requests, for an app whose heaviest document is 163KB.
-                // Next still prefetches on hover, i.e. before the click lands.
-                prefetch={false}
                 className={[
                   'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
                   active
@@ -354,7 +348,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <Link
                       key={t.href}
                       href={t.href}
-                      prefetch={false}   // same reason as the desktop nav above
                       className={[
                         'flex items-center gap-3 px-3 py-3 rounded-lg text-sm transition-colors',
                         active ? 'bg-gold/15 text-gold font-semibold' : 'text-txt/80 hover:bg-surface3 hover:text-txt',
@@ -370,7 +363,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     or the feature does not exist for them. */}
                 <Link
                   href="/app/settings"
-                  prefetch={false}
                   className="flex items-center gap-3 px-3 py-3 mt-2 border-t border-line pt-4 rounded-lg text-sm text-txt/80 hover:bg-surface3 hover:text-txt transition-colors"
                 >
                   <span className="text-base leading-none">⚙️</span>
@@ -423,7 +415,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link
               href="/app/settings"
               title="החשבון שלי"
-              prefetch={false}
               className="text-xs text-muted-txt hidden md:block truncate max-w-[160px] hover:text-txt transition-colors"
             >
               {user.email}
