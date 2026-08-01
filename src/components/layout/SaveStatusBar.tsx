@@ -19,6 +19,7 @@ const PRESENCE_PRIORITY_MS = 4_000
 
 export function SaveStatusBar() {
   const status        = useSyncStore(s => s.status)
+  const painted       = useSyncStore(s => s.painted)
   const lastSavedAt   = useSyncStore(s => s.lastSavedAt)
   const errorMessage  = useSyncStore(s => s.errorMessage)
   const isDirty       = useSyncStore(s => s.isDirty)
@@ -66,7 +67,18 @@ export function SaveStatusBar() {
   const presenceLabel = remoteActivity?.byAdvisor ? 'היועץ עדכן נתונים' : 'עודכן ממכשיר אחר'
   const presenceTime  = remoteActivity ? timeAgoCoarse(remoteActivity.seenAt) : ''
 
-  if (status === 'loading') {
+  if (status === 'loading' && painted) {
+    // Cache-first paint: real numbers are on screen, but they came from this
+    // device's backup and NO save path is armed until the server copy lands.
+    // A grey "loading" pill would read as "almost done" — anything typed in
+    // this window is discarded when the server copy replaces the cache, so the
+    // pill has to say so rather than imply the app is ready.
+    dotColor   = 'bg-warn animate-pulse'
+    pillBg     = 'bg-warn/15'
+    pillBorder = 'border-warn/40'
+    textColor  = 'text-warn'
+    label      = 'מסתנכרן… שינויים לא יישמרו עד שיסתיים'
+  } else if (status === 'loading') {
     dotColor   = 'bg-muted-txt animate-pulse'
     pillBg     = 'bg-surface3'
     pillBorder = 'border-line'

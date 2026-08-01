@@ -8,6 +8,16 @@ interface SyncState {
   status:        SyncStatus
   lastSavedAt:   number | null   // epoch ms
   hydrated:      boolean         // true once initial load from Firestore completed
+  /**
+   * True once the stores hold something WORTH SHOWING — either the server copy
+   * (then `hydrated` is true too) or, earlier, the localStorage backup.
+   *
+   * Deliberately separate from `hydrated`, which keeps its exact meaning: "the
+   * SERVER copy is loaded". Every save gate, baseline, export gate and the live
+   * listener stay on `hydrated`, so cached data can never be written anywhere.
+   * Only render gates may consult `painted`.
+   */
+  painted:       boolean
   errorMessage:  string | null
   // True when the live in-memory snapshot differs from the last successfully
   // saved snapshot. Kept orthogonal to `status` so an error/offline banner
@@ -23,6 +33,7 @@ interface SyncState {
 
   setStatus:     (s: SyncStatus, err?: string | null) => void
   setHydrated:   (h: boolean) => void
+  setPainted:    (p: boolean) => void
   markSaved:     () => void
   setDirty:      (d: boolean) => void
   setRemoteActivity: (a: { at: number; seenAt: number; byAdvisor: boolean } | null) => void
@@ -32,6 +43,7 @@ export const useSyncStore = create<SyncState>((set) => ({
   status:       'idle',
   lastSavedAt:  null,
   hydrated:     false,
+  painted:      false,
   errorMessage: null,
   isDirty:      false,
   remoteActivity: null,
@@ -40,6 +52,8 @@ export const useSyncStore = create<SyncState>((set) => ({
     set({ status, errorMessage: status === 'error' ? err : null }),
 
   setHydrated: (hydrated) => set({ hydrated }),
+
+  setPainted: (painted) => set({ painted }),
 
   // markSaved leaves isDirty alone — DataSync decides whether the just-saved
   // snapshot still matches the current in-memory state (it doesn't when the

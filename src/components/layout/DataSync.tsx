@@ -35,7 +35,7 @@ import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
-import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
+import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize, isUsableSnapshot } from '@/lib/dataSync'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
 import { saveCreditSection } from '@/lib/creditSection'
 import { registerLiveRefresh } from '@/lib/liveRefresh'
@@ -143,6 +143,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const errorMessage    = useSyncStore(s => s.errorMessage)
   const setStatus       = useSyncStore(s => s.setStatus)
   const setHydrated     = useSyncStore(s => s.setHydrated)
+  const setPainted      = useSyncStore(s => s.setPainted)
   const markSaved       = useSyncStore(s => s.markSaved)
 
   const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -164,6 +165,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const lastFocusProbeAt = useRef<number>(0)
   const skipProbeOnce    = useRef<boolean>(false)          // set by "שמור בכל זאת"
   const conflictToastId  = useRef<string | number | null>(null)
+  // The "local backup is newer" prompt. Tracked so it can be dismissed on an
+  // identity change or when entering act-as-client — it has no expiry, and a
+  // stale one belongs to a portfolio that is no longer on screen.
+  const restoreToastId   = useRef<string | number | null>(null)
   const requestSaveRef   = useRef<() => void>(() => {})    // effect 2 exposes triggerSave here
   // ── Live-sync state (effect 2c) ──
   const syncBusyAt       = useRef<number>(0)   // epoch ms a write/apply started; 0 = idle
@@ -461,6 +466,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       }
       resetAllStores()
       setHydrated(false)
+      setPainted(false)      // nothing on screen belongs to anyone now
       setStatus('idle')
       lastSavedJson.current = ''
       // Anti-clobber state must not leak into the next session/user:
@@ -485,6 +491,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         toast.dismiss(conflictToastId.current)
         conflictToastId.current = null
       }
+      if (restoreToastId.current != null) {
+        toast.dismiss(restoreToastId.current)
+        restoreToastId.current = null
+      }
       return
     }
 
@@ -496,6 +506,15 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     skipProbeOnce.current    = false
     lastProbeAt.current      = 0
     lastFocusProbeAt.current = 0
+    // These three describe the PREVIOUS identity's document and must not carry
+    // over. Leaving selfDocBaseline set meant probeBeforeWrite compared user B's
+    // remote timestamp against user A's baseline, and waved the write through
+    // whenever B's document happened to be older. Zeroing it makes the probe
+    // block-and-prompt instead — the safe direction. All three are re-seeded
+    // from the server response below, before any save gate opens.
+    selfDocBaseline.current  = 0
+    lastSavedJson.current    = ''
+    lastBackupJson.current   = ''
     pendingRemote.current      = null
     lastRemoteApplied.current  = 0
     knownAdvisorEditAt.current = 0
@@ -507,6 +526,46 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       toast.dismiss(conflictToastId.current)
       conflictToastId.current = null
     }
+    if (restoreToastId.current != null) {
+      toast.dismiss(restoreToastId.current)
+      restoreToastId.current = null
+    }
+
+    // Whatever is in the stores belongs to the PREVIOUS identity until proven
+    // otherwise. Clearing here (not only in the logged-out branch above) also
+    // closes a direct userA→userB switch, which never passes through that
+    // branch and would otherwise have B's document merged onto A's leftovers.
+    // Must run BEFORE loadSharedLearnedDB() below, which resetAllStores() wipes.
+    //
+    // ⚠️ setHydrated(false) is NOT optional here. Emptying the stores while
+    // `hydrated` is still true leaves every write gate open over empty data:
+    // the shared-pool load resolving would fire the save subscriptions, the
+    // 500ms mirror would overwrite the localStorage backup with nothing, and
+    // the 2s debounce would call saveUserData with an EMPTY snapshot — which
+    // probeBeforeWrite waves through, because it compares timestamps, not
+    // content. That destroys both copies of a real portfolio. Reachable on any
+    // re-run of this effect that does not pass through the logged-out branch
+    // (a uid change with no null between, or a new User object for the same
+    // uid, e.g. signInWithCustomToken on /connect).
+    resetAllStores()
+    setHydrated(false)
+    setPainted(false)
+
+    // Paint from the local backup so the user sees their data immediately
+    // instead of waiting ~840ms for a document from a US region. This is
+    // DISPLAY ONLY: `hydrated` stays false, and every write path in this file
+    // (the debounced save and its 14 store subscriptions, the beacon, the inbox
+    // drain, recurring expenses, the live listener) is gated on `hydrated` — so
+    // nothing here can reach Firestore. Rejects a cache from another schema.
+    const cached = readLocalBackup(user.uid)
+    if (cached && isUsableSnapshot(cached.snapshot)) {
+      try {
+        applySnapshot(cached.snapshot)
+        setPainted(true)
+      } catch {
+        resetAllStores()      // malformed cache → behave exactly as before
+      }
+    }
 
     // Shared cross-account category-learning pool — loaded silently, never blocks
     // the main load. Lives outside the per-user snapshot, so it never triggers a save.
@@ -517,7 +576,23 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     loadUserData(user.uid)
       .then(result => {
         if (cancelled) return
+        // ⚠️ The reset here is load-bearing, not tidiness. applySnapshot MERGES:
+        // any key the server document lacks keeps whatever the store already
+        // holds. With a cache painted above, applying the server copy on top
+        // would leave cache∪server in the stores — and the very next line would
+        // launder that union into `lastSavedJson` as "what the server has".
+        // Every anti-clobber guard downstream would then agree we are clean
+        // (probeBeforeWrite compares timestamps, not content; so do the echo
+        // and dirty tests), and the first real edit would push the union back,
+        // resurrecting rows the user deleted on another device.
+        // sharedLearnedDB is preserved across the reset exactly as applyRemote
+        // does — it lives outside the snapshot and is loaded once per session.
+        const shared = useCreditStore.getState().sharedLearnedDB
+        resetAllStores()
         if (result?.data) applySnapshot(result.data)
+        if (shared && Object.keys(shared).length) {
+          useCreditStore.setState({ sharedLearnedDB: shared })
+        }
         // baseline snapshot prevents an immediate auto-save right after load
         lastSavedJson.current = JSON.stringify(collectSnapshot())
         // Seed the localStorage-backup baseline too so a fresh load doesn't
@@ -529,6 +604,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // The listener's attach event replays this same state — mark it as
         // already consumed so it can never be treated as a foreign change.
         lastRemoteApplied.current = result?.updatedAt ?? 0
+        // The stores now hold exactly the server copy, so nothing is pending.
+        // Without this a flag set before hydration would stick, turning every
+        // later live update into a conflict prompt and making every tab close
+        // ask about unsaved changes.
+        useSyncStore.getState().setDirty(false)
+        setPainted(true)     // also covers the no-cache path
         setHydrated(true)
         setStatus('idle')
 
@@ -543,7 +624,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           const label = new Date(backup.ts).toLocaleString('he-IL', {
             hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit',
           })
-          toast.info(
+          restoreToastId.current = toast.info(
             `💾 נמצא גיבוי מקומי חדש יותר מהענן (${label}) — לשחזר?`,
             {
               duration: Infinity,
@@ -551,7 +632,27 @@ export function DataSync({ children }: { children: React.ReactNode }) {
               action: {
                 label: 'שחזר',
                 onClick: () => {
+                  // This toast never expires, so by the time it is clicked the
+                  // app may be showing someone else entirely — a different
+                  // account, or a CLIENT opened in advisor edit mode, where the
+                  // save path is redirected to the client's uid. Applying this
+                  // backup there would write one person's whole portfolio into
+                  // another's document (and mint it as a version in their
+                  // history). Re-validate the identity at click time.
+                  const nowUid = useAuthStore.getState().user?.uid
+                  if (nowUid !== uid || useImpersonationStore.getState().client) {
+                    toast.error('הגיבוי שייך לחשבון אחר — לא שוחזר.')
+                    return
+                  }
+                  // Replace, don't merge: applySnapshot keeps any key the backup
+                  // lacks, which would leave server ∪ backup and then push that
+                  // union upstream (lastSavedJson is cleared just below).
+                  const shared = useCreditStore.getState().sharedLearnedDB
+                  resetAllStores()
                   applySnapshot(backup.snapshot)
+                  if (shared && Object.keys(shared).length) {
+                    useCreditStore.setState({ sharedLearnedDB: shared })
+                  }
                   // Force the next debounced save to push this restored state
                   // upstream so the local + cloud converge.
                   lastSavedJson.current = ''
@@ -573,13 +674,22 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       })
 
     return () => { cancelled = true }
-  }, [user, authLoading, setStatus, setHydrated, retryCount])
+  }, [user, authLoading, setStatus, setHydrated, setPainted, retryCount])
 
   // ── 2. Subscribe to data stores → debounced save + local backup ──
   useEffect(() => {
     if (!user || !hydrated) return
 
     const triggerSave = () => {
+      // Re-check hydration AT FIRE TIME, not just in the effect gate. The gate
+      // uses the `hydrated` captured when this effect was created; on a re-run
+      // of the load effect from an already-hydrated session, React re-creates
+      // this effect in the same commit that empties the stores, so the closure
+      // can still say `true` for one macrotask. Reading the store live makes the
+      // "nothing is written before the server copy is loaded" rule an invariant
+      // rather than something that happens to hold because of scheduling.
+      if (!useSyncStore.getState().hydrated) return
+
       // ADVISOR IMPERSONATION BRANCHING:
       //  • VIEW mode → HARD-BLOCK. The stores hold the CLIENT's data; persisting
       //    it to the advisor's own account would corrupt it. Warn once, return.
@@ -859,6 +969,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       if (conflictToastId.current != null) {
         toast.dismiss(conflictToastId.current)
         conflictToastId.current = null
+      }
+      if (restoreToastId.current != null) {
+        toast.dismiss(restoreToastId.current)
+        restoreToastId.current = null
       }
     })
     return () => unsub()
@@ -1249,6 +1363,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     const uid = user.uid
 
     function flushIfDirty() {
+      // Same fire-time re-check as triggerSave: never flush stores that do not
+      // yet hold the server copy.
+      if (!useSyncStore.getState().hydrated) return
       const imp = useImpersonationStore.getState()
       if (imp.client) {
         // EDIT mode: mirror the client's in-progress edits to THEIR localStorage

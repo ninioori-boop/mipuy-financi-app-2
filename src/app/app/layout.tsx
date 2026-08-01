@@ -268,6 +268,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (embed) {
     // Wait for the saved profile to load before deciding what to show — avoids
     // flashing the "has business?" question to a client who already answered.
+    //
+    // Deliberately still `hydrated`, NOT the cache-first `painted` flag. This
+    // gate is also the only thing that makes the pre-hydration window
+    // non-interactive for phone clients, and no save path is armed until
+    // `hydrated` — so opening it early would let a client edit against cached
+    // data on a slow connection and have those edits silently discarded when
+    // the server copy lands. Desktop has no such gate and gets the cache-first
+    // paint regardless; the phone client keeps the stronger guarantee.
     if (!hydrated) {
       return (
         <div className="min-h-screen bg-surface flex items-center justify-center">

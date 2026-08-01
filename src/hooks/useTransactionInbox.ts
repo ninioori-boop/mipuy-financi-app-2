@@ -90,6 +90,14 @@ export function useTransactionInbox() {
         // Re-check at drain time — a snapshot event may already be in flight
         // when impersonation starts.
         if (useImpersonationStore.getState().client) return
+        // Same for hydration, and it matters more here than anywhere else: this
+        // handler calls saveUserData DIRECTLY — un-debounced, no anti-clobber
+        // probe — and then launders the result into the save baselines. The
+        // effect gate above uses the `hydrated` captured at subscribe time, so
+        // on a re-mount the attach event (which replays every existing item as
+        // "added") could otherwise fire against empty or cache-only stores and
+        // overwrite the server document.
+        if (!useSyncStore.getState().hydrated) return
         const added = snap.docChanges().filter(c => c.type === 'added')
         if (added.length === 0) return
 
