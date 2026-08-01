@@ -6,6 +6,7 @@ import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
+import { logAiSuggestion } from '@/lib/aiSuggestions'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota } from '@/lib/aiQuota'
 import { ALL_CATEGORIES } from '@/lib/constants'
@@ -261,6 +262,7 @@ export async function POST(req: NextRequest) {
   } catch { /* guard is best-effort — never blocks a capture */ }
 
   let category: string
+  let aiResolved: string | null = null   // set only when the AI actually named a merchant
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
     category = catOverride
   } else if (isTransfer) {
@@ -279,7 +281,13 @@ export async function POST(req: NextRequest) {
         : await checkAiQuota({ uid, route: 'categorize-one' })
       if (quota.allowed) {
         const ai = await aiCategorizeOne(cleanMerchant)
-        if (ai) category = ai
+        if (ai) {
+          category = ai
+          // Queue for the review funnel — but log it AFTER the capture below,
+          // never before: this is telemetry, and the charge must land even if
+          // the suggestion write is slow.
+          aiResolved = ai
+        }
       } else {
         console.log(`[transaction] ai categorize skipped (quota) uid=${uid}`)
       }
@@ -298,6 +306,17 @@ export async function POST(req: NextRequest) {
   await inboxRef
     .set({ last: { m: cleanMerchant, a: roundedAmt, at: Date.now(), cat: category } }, { merge: true })
     .catch(() => { /* guard metadata only */ })
+
+  // Review funnel: a merchant BUSINESS_DB didn't know, whose AI answer is worth
+  // reviewing and possibly promoting. Runs in after() for the same reason the
+  // error breadcrumbs do — it is telemetry, and Firestore's retry budget is 10
+  // minutes, so awaiting it would slow the capture exactly during the outage or
+  // throttle when this route must stay fast. (after() also keeps Vercel from
+  // freezing it, which a bare fire-and-forget would risk.)
+  if (aiResolved) {
+    const resolved = aiResolved
+    after(() => logAiSuggestion(db, cleanMerchant, resolved))
+  }
 
   // uid + bucket only — no merchant/amount detail logged.
   console.log(`[transaction] uid=${uid} cat=${category}`)
