@@ -7,6 +7,7 @@ import { db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { ConsentScreen, type PendingInvite } from '@/components/auth/ConsentScreen'
 import { refreshBrand } from '@/components/layout/BrandProvider'
+import { raceWithTimeout, TIMED_OUT } from '@/lib/promiseTimeout'
 
 // Sits between AuthProvider and DataSync. For a signed-in user it does ONE read
 // of clientLinks/pending_{email}: if a pending invite exists, it shows the
@@ -15,6 +16,15 @@ import { refreshBrand } from '@/components/layout/BrandProvider'
 // after a single null read. Fail-open: any error → render the app.
 
 const PUBLIC = ['/auth', '/privacy', '/connect', '/delete-account']
+
+// A Firestore read that never settles used to strand this gate on "טוען…"
+// forever: the reads had a success path and an error path but no path for
+// "no answer at all", and this component renders ABOVE the whole app, so the
+// user's only escape was to guess that a manual reload might help.
+// Timing out extends the fail-open rule already stated above from "any error"
+// to "any error or silence" — the invite is simply re-checked on the next load.
+// Generous on purpose: the two reads normally land in a few hundred ms.
+const CONSENT_CHECK_TIMEOUT_MS = 8_000
 
 export function ConsentGate({ children }: { children: ReactNode }) {
   const { user } = useAuthStore()
@@ -34,12 +44,17 @@ export function ConsentGate({ children }: { children: ReactNode }) {
     // Two independent reads: the pre-registration invite (pending_{email}) and
     // the active link keyed by uid (which carries an edit REQUEST). A brand-new
     // view invite takes priority; otherwise an outstanding edit request shows.
-    Promise.all([
+    raceWithTimeout(Promise.all([
       getDoc(doc(db, 'clientLinks', `pending_${email}`)).catch(() => null),
       getDoc(doc(db, 'clientLinks', uid)).catch(() => null),
-    ])
-      .then(([pendingSnap, linkSnap]) => {
+    ]), CONSENT_CHECK_TIMEOUT_MS)
+      .then(result => {
         if (!alive) return
+        // Silence is treated exactly like the error path below. Because this is
+        // a race there is only ever one settle, so a read landing late can no
+        // longer dismiss a consent screen that is already on the user's screen.
+        if (result === TIMED_OUT) { setStatus('clear'); return }
+        const [pendingSnap, linkSnap] = result
         if (pendingSnap?.exists() && pendingSnap.data().status === 'pending') {
           const pd = pendingSnap.data()
           // Combined view+edit invites (the default now) carry requestedAccess:
