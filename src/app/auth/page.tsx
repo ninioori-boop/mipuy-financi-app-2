@@ -1,22 +1,19 @@
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { EmailAuthForm } from '@/components/auth/EmailAuthForm'
-import { ShaderAnimation } from '@/components/ui/shader-animation'
 import { BrandNameEn, BrandTagline, BrandMark } from '@/components/layout/BrandProvider'
 
 export default function AuthPage() {
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-[#0A0A0A]">
 
-      {/* Animated CSS blob mesh — pure CSS, runs everywhere (no-WebGL fallback) */}
+      {/* Animated CSS blob mesh. This IS the background — it used to sit under a
+          three.js shader canvas, but that pulled 1.4MB of WebGL library onto the
+          very first screen every visitor sees, just to overlay some thin light
+          rays. Removed; the mesh below runs everywhere at zero download cost. */}
       <div aria-hidden className="absolute inset-0 z-0 overflow-hidden">
         <div className="absolute top-[15%] left-[10%] w-[55vw] h-[55vw] max-w-[700px] max-h-[700px] rounded-full bg-gold/25 blur-[120px] animate-blob-a will-change-transform" />
         <div className="absolute top-[40%] right-[5%] w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] rounded-full bg-gold-dark/30 blur-[140px] animate-blob-b will-change-transform" />
         <div className="absolute bottom-[5%] left-[30%] w-[45vw] h-[45vw] max-w-[600px] max-h-[600px] rounded-full bg-gold-light/15 blur-[110px] animate-blob-c will-change-transform" />
-      </div>
-
-      {/* Animated shader background (overlays the CSS mesh when WebGL is available) */}
-      <div className="absolute inset-0 z-[1]">
-        <ShaderAnimation />
       </div>
 
       {/* Vignette overlay — darkens edges so the glass card pops */}
