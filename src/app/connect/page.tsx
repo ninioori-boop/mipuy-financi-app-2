@@ -242,80 +242,7 @@ export default function ConnectPage() {
           <p className="text-income font-semibold mb-4">התחברת בהצלחה!</p>
 
           {isIOS && !isNativeApp ? (
-            <>
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 1 · העתק את הטוקן</p>
-              <div
-                dir="ltr"
-                className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
-              >
-                {token}
-              </div>
-              <button
-                onClick={copyToken}
-                className="w-full bg-surface2 text-txt border border-line rounded-xl px-8 py-2.5 hover:bg-surface3 transition-colors mb-6"
-              >
-                {copied ? '✓ הועתק' : '📋 העתק טוקן'}
-              </button>
-
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 2 · הוסף את הקיצור והדבק את הטוקן</p>
-              <a
-                href={SHORTCUT_ICLOUD_URL}
-                className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors mb-3"
-              >
-                📲 הוסף את הקיצור
-              </a>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
-                אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
-                לחיצה <span className="text-txt font-semibold">ארוכה</span> על{' '}
-                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
-                «עריכה» → מחק את «הדבק כאן טוקן» מתיבת המלל →
-                <span className="text-txt font-semibold"> הדבק את הטוקן</span> שהעתקת בשלב 1 → סיום.
-              </div>
-
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 3 · צור את האוטומציה (חד־פעמי, ~2 דקות)</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
-                בקיצורי דרך: לשונית <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> (האמצעית)
-                → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> →
-                «כאשר אני מקיש» → בחר את הכרטיסים שלך →
-                <span className="text-txt font-semibold"> «הפעל מיד»</span> → הבא.
-                <br />
-                עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» למטה):
-                <br />
-                <span className="text-txt font-semibold">① «מלל»</span> — הקש בתיבה →
-                «בחירת משתנה» → <span className="text-txt font-semibold">«קלט של קיצור»</span> →
-                הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span> →
-                הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
-                בחר <span className="text-txt font-semibold">«בית עסק»</span>.
-                <br />
-                <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
-                הקש על «קיצור דרך» → בחר{' '}
-                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
-                <br />
-                נשאר צעד אחד קצר וחשוב — בלעדיו התשלום הראשון ייכשל ↓
-              </div>
-
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 4 · הרצה ראשונה לאישור הרשאות (חובה)</p>
-              <div className="rounded-lg border border-gold/40 bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed mb-6">
-                <span className="text-txt font-semibold">כשהמכשיר פתוח</span>, בקיצורי דרך: הקש הקשה רגילה על{' '}
-                <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
-                אשר את כל חלוניות ההרשאה שקופצות, בעיקר החיבור אל app.orimipuy.com
-                (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> — בחר בו).
-                <br />
-                בסוף תופיע שגיאה קטנה על notify — <span className="text-txt font-semibold">זה תקין</span>,
-                זה רק בגלל שאין תשלום אמיתי מאחורי ההרצה.
-                <br />
-                למה זה חובה: את ההרשאות האלה iOS מבקש פעם אחת, והוא לא מסוגל להציג את השאלה
-                כשהמכשיר נעול — ותשלום Apple Pay תמיד קורה כשהמכשיר נעול.
-              </div>
-
-              <p className="text-txt text-sm font-semibold mb-2 text-end">שלב 5 · הוסף את האפליקציה למסך הבית</p>
-              <div className="rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
-                בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
-                → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> → <span className="text-txt font-semibold">«הוסף»</span>.
-                <br />
-                מעכשיו «מעקב הוצאות» נפתחת מהמסך הראשי — כמו כל אפליקציה. 🎉
-              </div>
-            </>
+            <IosWizard token={token} copied={copied} onCopy={copyToken} />
           ) : (
             <>
               <p className="text-muted-txt text-sm mb-6">לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.</p>
@@ -349,5 +276,230 @@ export default function ConnectPage() {
         </>
       )}
     </main>
+  )
+}
+
+// ─── iOS setup wizard ────────────────────────────────────────────────────────
+// Same five steps as before, one screen at a time instead of all at once. The
+// content is unchanged — what changed is that a client no longer meets a wall
+// of five open steps, which is most of what made this feel impossible.
+//
+// The step is kept in sessionStorage because this flow REQUIRES leaving Safari
+// (steps 2-4 happen in the Shortcuts app), and iOS may discard the tab while
+// it is in the background. Without this, coming back would land the client at
+// the top again with no idea which parts they had already done.
+
+const IOS_STEP_KEY = 'connectIosStep'
+
+const IOS_STEPS = [
+  'העתק את הטוקן',
+  'הוסף את הקיצור',
+  'צור את האוטומציה',
+  'אישור הרשאות',
+  'הוספה למסך הבית',
+]
+
+function IosWizard({
+  token,
+  copied,
+  onCopy,
+}: {
+  token: string
+  copied: boolean
+  onCopy: () => void
+}) {
+  const [step, setStep] = useState(1)
+  const [restored, setRestored] = useState(false)
+  const [done, setDone] = useState(false)
+
+  // sessionStorage can throw outright in a locked-down Safari, and losing the
+  // saved step is a far smaller problem than a wizard that fails to render at
+  // all — so both sides are guarded and simply fall back to starting at 1.
+  useEffect(() => {
+    try {
+      const saved = Number(sessionStorage.getItem(IOS_STEP_KEY))
+      if (saved >= 1 && saved <= IOS_STEPS.length) setStep(saved)
+    } catch {
+      /* no persistence available — the wizard still works, it just restarts */
+    }
+    setRestored(true)
+  }, [])
+
+  // Guarded on `restored` so the initial render does not overwrite a saved
+  // step with 1 before the restore effect has run.
+  useEffect(() => {
+    if (!restored) return
+    try {
+      sessionStorage.setItem(IOS_STEP_KEY, String(step))
+    } catch {
+      /* see above */
+    }
+  }, [step, restored])
+
+  const card =
+    'rounded-lg border border-line bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed'
+
+  if (done) {
+    return (
+      <div>
+        <div className="text-5xl mb-4">🎉</div>
+        <p className="text-income font-semibold mb-2">הכל מוכן!</p>
+        <p className="text-muted-txt text-sm leading-relaxed">
+          מעכשיו כל תשלום בארנק נרשם אוטומטית במעקב ההוצאות.
+        </p>
+        <button
+          onClick={() => {
+            setDone(false)
+            setStep(1)
+          }}
+          className="mt-6 text-xs text-muted-txt underline hover:text-gold transition-colors"
+        >
+          הצג שוב את שלבי ההתקנה
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Numbers stay LTR so 1..5 reads left-to-right like any progress bar. */}
+      <div dir="ltr" className="flex items-center justify-center gap-1.5 mb-3">
+        {IOS_STEPS.map((_, i) => {
+          const n = i + 1
+          return (
+            <span
+              key={n}
+              className={
+                'size-6 rounded-full grid place-items-center text-[11px] border transition-colors ' +
+                (n < step
+                  ? 'bg-gold text-surface border-gold'
+                  : n === step
+                    ? 'border-gold text-gold'
+                    : 'border-line text-muted-txt')
+              }
+            >
+              {n < step ? '✓' : n}
+            </span>
+          )
+        })}
+      </div>
+
+      <p className="text-[11px] text-muted-txt mb-1">
+        שלב {step} מתוך {IOS_STEPS.length}
+      </p>
+      <h2 className="text-txt font-semibold mb-4">{IOS_STEPS[step - 1]}</h2>
+
+      {step === 1 && (
+        <>
+          <div
+            dir="ltr"
+            className="rounded-lg border border-line bg-surface2 p-3 text-[11px] text-txt break-all select-all mb-3 text-left"
+          >
+            {token}
+          </div>
+          <button
+            onClick={onCopy}
+            className="w-full bg-surface2 text-txt border border-line rounded-xl px-8 py-2.5 hover:bg-surface3 transition-colors"
+          >
+            {copied ? '✓ הועתק' : '📋 העתק טוקן'}
+          </button>
+          <div className={card + ' mt-3'}>
+            הטוקן הוא המפתח האישי שלך למערכת. אין צורך לזכור אותו, רק להדביק אותו
+            בשלב הבא. אל תשתף אותו עם אף אחד.
+          </div>
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <a
+            href={SHORTCUT_ICLOUD_URL}
+            className="block w-full bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors mb-3"
+          >
+            📲 הוסף את הקיצור
+          </a>
+          <div className={card}>
+            אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
+            לחיצה <span className="text-txt font-semibold">ארוכה</span> על{' '}
+            <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+            «עריכה» → מחק את «הדבק כאן טוקן» מתיבת המלל →
+            <span className="text-txt font-semibold"> הדבק את הטוקן</span> → סיום.
+          </div>
+          {/* The clipboard is easily lost on the way to the Shortcuts app and
+              back, so the token stays one tap away instead of a step back. */}
+          <button
+            onClick={onCopy}
+            className="mt-3 text-xs text-muted-txt underline hover:text-gold transition-colors"
+          >
+            {copied ? '✓ הטוקן הועתק שוב' : 'העתק שוב את הטוקן'}
+          </button>
+        </>
+      )}
+
+      {step === 3 && (
+        <div className={card}>
+          בקיצורי דרך: לשונית <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> (האמצעית)
+          → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> →
+          «כאשר אני מקיש» → בחר את הכרטיסים שלך →
+          <span className="text-txt font-semibold"> «הפעל מיד»</span> → הבא.
+          <br />
+          עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» למטה):
+          <br />
+          <span className="text-txt font-semibold">① «מלל»</span> — הקש בתיבה →
+          «בחירת משתנה» → <span className="text-txt font-semibold">«קלט של קיצור»</span> →
+          הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span> →
+          הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
+          בחר <span className="text-txt font-semibold">«בית עסק»</span>.
+          <br />
+          <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
+          הקש על «קיצור דרך» → בחר{' '}
+          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
+          <br />
+          זה השלב הארוך ביותר, וזה האחרון הארוך. אחריו נשארו שתי דקות.
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="rounded-lg border border-gold/40 bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
+          <span className="text-txt font-semibold">כשהמכשיר פתוח</span>, בקיצורי דרך: הקש הקשה רגילה על{' '}
+          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+          אשר את כל חלוניות ההרשאה שקופצות, בעיקר החיבור אל app.orimipuy.com
+          (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> — בחר בו).
+          <br />
+          בסוף תופיע שגיאה קטנה על notify — <span className="text-txt font-semibold">זה תקין</span>,
+          זה רק בגלל שאין תשלום אמיתי מאחורי ההרצה.
+          <br />
+          למה זה חובה: את ההרשאות האלה iOS מבקש פעם אחת, והוא לא מסוגל להציג את השאלה
+          כשהמכשיר נעול — ותשלום Apple Pay תמיד קורה כשהמכשיר נעול.
+        </div>
+      )}
+
+      {step === 5 && (
+        <div className={card}>
+          בספארי: הקש על כפתור <span className="text-txt font-semibold">השיתוף</span> (הריבוע עם החץ למעלה)
+          → <span className="text-txt font-semibold">«הוספה למסך הבית»</span> →{' '}
+          <span className="text-txt font-semibold">«הוסף»</span>.
+          <br />
+          מעכשיו «מעקב הוצאות» נפתחת מהמסך הראשי — כמו כל אפליקציה.
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 mt-6">
+        {step > 1 && (
+          <button
+            onClick={() => setStep(step - 1)}
+            className="rounded-xl border border-line bg-surface2 px-4 py-2.5 text-sm text-muted-txt hover:text-txt transition-colors"
+          >
+            חזרה
+          </button>
+        )}
+        <button
+          onClick={() => (step < IOS_STEPS.length ? setStep(step + 1) : setDone(true))}
+          className="flex-1 bg-gold text-surface font-bold rounded-xl px-6 py-2.5 hover:bg-gold-light transition-colors"
+        >
+          {step < IOS_STEPS.length ? 'הבא ←' : 'סיימתי 🎉'}
+        </button>
+      </div>
+    </div>
   )
 }
