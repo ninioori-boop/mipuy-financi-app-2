@@ -1,11 +1,11 @@
 const { beforeUserCreated, HttpsError } = require("firebase-functions/v2/identity");
 const { onCall } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const { getStorage } = require("firebase-admin/storage");
-const { BRAND } = require("./brand");
 
 initializeApp();
 const db = getFirestore();
@@ -23,8 +23,17 @@ const FINAL_STAGE = "סוף תהליך";
 // RESEND_API_KEY). Never in code or env files.
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 
+// Anthropic key for the weekly digest's AI action-suggestions. Optional: if the
+// secret is unset or the call fails, the digest gracefully falls back to the
+// rule-based flags, so it never breaks. Same key/model family the app already
+// uses (src/app/api/analyze/route.ts).
+// NOTE: the Secret Manager secret is named "mail" (Ori created it under that
+// name); it holds the CLAUDE/Anthropic API key, NOT a mail/Resend key.
+const ANTHROPIC_API_KEY = defineSecret("mail");
+
 // Brand identity (name, app URL, verified Resend sender) lives in functions/brand.js
 // so invitations go out under the active brand for this deployment.
+const { BRAND } = require("./brand");
 const APP_URL = BRAND.appUrl;
 const MAIL_FROM = BRAND.mailFrom;
 
@@ -652,6 +661,430 @@ exports.setClientStage = onCall(async (request) => {
   return { ok: true, stage, access: patch.access ?? (linkSnap.data().access || "read") };
 });
 
+// ── Weekly advisor digest ─────────────────────────────────────────────────────
+// Every Sunday 08:00 (Asia/Jerusalem) each ADVISOR gets ONE email summarising
+// THEIR clients — a meeting-prep briefing (status + this-week activity + rule-
+// based action flags). CLIENTS receive nothing. Best-effort: one client's or one
+// advisor's failure never blocks the rest. A Claude-written variant can layer on
+// later (would add the ANTHROPIC_API_KEY secret).
+
+const num = (v) => (typeof v === "number" && isFinite(v) ? v : 0);
+const ils = (n) => "₪" + Math.round(num(n)).toLocaleString("he-IL");
+const sumAmt = (rows) => (Array.isArray(rows) ? rows.reduce((s, r) => s + num(r && r.amount), 0) : 0);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function ymNowUTC() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function nameFromEmail(email) {
+  const local = String(email || "").split("@")[0] || String(email || "");
+  return local.replace(/[._]/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+/** Monthly income/expenses/cashflow from a client snapshot (mirrors advisorMock.clientTotals). */
+function clientTotals(data) {
+  const m = (data && data.mapping) || {};
+  const varMonths = Math.max(1, num(m.varMonths) || 1);
+  const income = sumAmt(m.income);
+  const varMo = sumAmt(m.variable) / varMonths;
+  const annMo = (Array.isArray(m.annual) ? m.annual.reduce((s, r) => s + num(r && r.annualAmount), 0) : 0) / 12;
+  const debtMo = Array.isArray(m.debts) ? m.debts.reduce((s, r) => s + num(r && r.monthlyPayment), 0) : 0;
+  const instMo = Array.isArray(m.installments) ? m.installments.reduce((s, r) => s + num(r && r.monthlyPayment), 0) : 0;
+  const expenses = sumAmt(m.fixed) + sumAmt(m.sub) + sumAmt(m.ins) + varMo + annMo + debtMo + instMo;
+  return { income: Math.round(income), expenses: Math.round(expenses), cashflow: Math.round(income - expenses) };
+}
+
+/** This-month budget standing + this-week activity from the expense log. */
+function budgetActivity(data) {
+  const ym = ymNowUTC();
+  const entries = (data && data.expenseLog && Array.isArray(data.expenseLog.entries)) ? data.expenseLog.entries : [];
+  const budgets = (data && data.categoryBudgets && data.categoryBudgets.budgets) || {};
+  const weekAgoMs = Date.now() - 7 * 86400000;
+
+  let monthSpent = 0, weekCount = 0, weekSpent = 0;
+  const spentByCat = {};
+  for (const e of entries) {
+    if (!e || typeof e.date !== "string") continue;
+    const amt = num(e.amount);
+    if (e.date.slice(0, 7) === ym) {
+      monthSpent += amt;
+      spentByCat[e.category] = (spentByCat[e.category] || 0) + amt;
+    }
+    const t = Date.parse(e.date);
+    if (isFinite(t) && t >= weekAgoMs) { weekCount++; weekSpent += amt; }
+  }
+  const overCats = [];
+  for (const cat of Object.keys(spentByCat)) {
+    const cap = num(budgets[cat]);
+    if (cap > 0 && spentByCat[cat] > cap) overCats.push({ cat, spent: Math.round(spentByCat[cat]), cap: Math.round(cap) });
+  }
+  const totalBudget = Object.keys(budgets).reduce((s, k) => s + num(budgets[k]), 0);
+  return { monthSpent: Math.round(monthSpent), totalBudget: Math.round(totalBudget), overCats, weekCount, weekSpent: Math.round(weekSpent), hasBudget: totalBudget > 0 };
+}
+
+/** Assigned-task completion across ALL the client's meetings (the checklist the
+ *  advisor assigns and the client ticks off). Snapshot path: data.meetings.meetings[].tasks[]. */
+function taskStats(data) {
+  const meetings = (data && data.meetings && Array.isArray(data.meetings.meetings)) ? data.meetings.meetings : [];
+  let done = 0, total = 0;
+  for (const mtg of meetings) {
+    const tasks = mtg && Array.isArray(mtg.tasks) ? mtg.tasks : [];
+    for (const t of tasks) { if (t && t.text) { total++; if (t.done) done++; } }
+  }
+  return { done, total, open: total - done };
+}
+
+/** "What changed since the last meeting" — the meeting-prep delta. Reliable:
+ *  uses meeting/expense DATES only (no dependency on version-history retention).
+ *  Returns null when the client has no recorded meeting yet. */
+function sinceLastMeeting(data) {
+  const meetings = (data && data.meetings && Array.isArray(data.meetings.meetings)) ? data.meetings.meetings : [];
+  const dates = meetings.map((m) => m && m.date).filter((d) => typeof d === "string" && d);
+  if (!dates.length) return null;
+  const lastDate = dates.reduce((a, b) => (a > b ? a : b));
+  const lastMs = Date.parse(lastDate);
+  if (!isFinite(lastMs)) return null;
+  const daysAgo = Math.max(0, Math.floor((Date.now() - lastMs) / 86400000));
+  const entries = (data && data.expenseLog && Array.isArray(data.expenseLog.entries)) ? data.expenseLog.entries : [];
+  let newCount = 0, newSum = 0;
+  for (const e of entries) {
+    if (e && typeof e.date === "string" && e.date >= lastDate) { newCount++; newSum += num(e.amount); }
+  }
+  return { lastDate, daysAgo, newCount, newSum: Math.round(newSum) };
+}
+
+/** Rule-based action flags — the meeting talking-points. Each item: {tone, text}. */
+function actionFlags(data, totals, ba, updatedMs, tstats, since) {
+  const flags = [];
+  if (totals.cashflow < 0) flags.push({ tone: "red", text: `תזרים שלילי של ${ils(-totals.cashflow)} — ההוצאות גבוהות מההכנסות.` });
+  for (const o of ba.overCats.slice(0, 3)) flags.push({ tone: "orange", text: `חריגה בקטגוריית "${o.cat}": ${ils(o.spent)} מתוך ${ils(o.cap)} החודש.` });
+  if (tstats && tstats.open > 0) flags.push({ tone: "orange", text: `נותרו ${tstats.open} משימות פתוחות שהוקצו ללקוח (מתוך ${tstats.total}).` });
+  const sinceDisconnect = since && since.daysAgo >= 14 && since.newCount === 0;
+  if (sinceDisconnect) flags.push({ tone: "orange", text: `מאז הפגישה האחרונה (לפני ${since.daysAgo} ימים) הלקוח לא תיעד אף הוצאה — ייתכן ניתוק.` });
+  // Expense-logging lapse — mirrors the dashboard's TRACKING_STALE_DAYS=5 pill
+  // (src/lib/advisorMock.ts trackingStatus). Skipped when the stronger
+  // since-meeting disconnect flag above already fired.
+  if (!sinceDisconnect) {
+    const entries = data && data.expenseLog && Array.isArray(data.expenseLog.entries) ? data.expenseLog.entries : [];
+    let lastLog = 0;
+    for (const e of entries) {
+      const t = num(e && e.createdAt) || Date.parse((e && e.date) || "") || 0;
+      if (t > lastLog) lastLog = t;
+    }
+    if (lastLog) {
+      const staleDays = Math.floor((Date.now() - lastLog) / 86400000);
+      if (staleDays >= 5) flags.push({ tone: "orange", text: `הלקוח לא תיעד הוצאות כבר ${staleDays} ימים.` });
+    }
+  }
+  const m = (data && data.mapping) || {};
+  const savingsMo = Array.isArray(m.savings) ? m.savings.reduce((s, r) => s + num(r && r.monthlyContribution), 0) : 0;
+  if (totals.cashflow > 1000 && savingsMo < totals.cashflow * 0.5) {
+    flags.push({ tone: "green", text: `עודף תזרים של ${ils(totals.cashflow)} שלא מוקצה במלואו לחיסכון — הזדמנות להפניה ליעד.` });
+  }
+  const overdraft = Array.isArray(m.bankAccounts) ? m.bankAccounts.find((b) => num(b && b.balance) < 0) : null;
+  if (overdraft) flags.push({ tone: "red", text: `מינוס בעו״ש: ${ils(overdraft.balance)} (${overdraft.name || "חשבון"}).` });
+  if (!ba.hasBudget) flags.push({ tone: "gray", text: "עדיין לא הוגדר תקציב חודשי — כדאי לבנות יחד בפגישה." });
+  if (updatedMs && Date.now() - updatedMs > 30 * 86400000) flags.push({ tone: "gray", text: "הלקוח לא עדכן נתונים מעל 30 יום." });
+  return flags;
+}
+
+/** Compact Hebrew data summary for the AI prompt — AGGREGATES only (no raw
+ *  transactions / merchant names), keeping the client's exposure minimal. */
+function clientSummaryText(c, data) {
+  const m = (data && data.mapping) || {};
+  const L = [];
+  L.push(`לקוח: ${c.name} · שלב ליווי: ${c.stage}`);
+  L.push(`הכנסה חודשית: ${ils(c.totals.income)} · הוצאות חודשיות: ${ils(c.totals.expenses)} · תזרים: ${ils(c.totals.cashflow)}`);
+  L.push(c.ba.hasBudget ? `תקציב חודשי כולל: ${ils(c.ba.totalBudget)} · הוצאת החודש: ${ils(c.ba.monthSpent)}` : "לא הוגדר תקציב חודשי.");
+  if (c.ba.overCats.length) L.push(`חריגות תקציב: ${c.ba.overCats.map((o) => `${o.cat} (${ils(o.spent)}/${ils(o.cap)})`).join(", ")}`);
+  const savingsMo = Array.isArray(m.savings) ? m.savings.reduce((s, r) => s + num(r && r.monthlyContribution), 0) : 0;
+  const savingsBal = Array.isArray(m.savings) ? m.savings.reduce((s, r) => s + num(r && r.accumulated), 0) : 0;
+  if (savingsMo || savingsBal) L.push(`חיסכון חודשי: ${ils(savingsMo)} · נצבר: ${ils(savingsBal)}`);
+  const debtMo = Array.isArray(m.debts) ? m.debts.reduce((s, r) => s + num(r && r.monthlyPayment), 0) : 0;
+  if (debtMo) L.push(`החזרי חוב חודשיים: ${ils(debtMo)}`);
+  const bank = Array.isArray(m.bankAccounts) ? m.bankAccounts.map((b) => `${(b && b.name) || "חשבון"}: ${ils(b && b.balance)}`).join(", ") : "";
+  if (bank) L.push(`יתרות עו״ש: ${bank}`);
+  const goals = [];
+  const g = (data && data.goals) || {};
+  for (const h of ["short", "medium", "long"]) {
+    if (Array.isArray(g[h])) for (const goal of g[h]) {
+      if (goal && (goal.name || num(goal.required) > 0)) goals.push(`${goal.name || "יעד"} (${ils(goal.current)}/${ils(goal.required)})`);
+    }
+  }
+  if (goals.length) L.push(`יעדים: ${goals.join(", ")}`);
+  if (c.since) L.push(`מאז הפגישה האחרונה (${c.since.lastDate}, לפני ${c.since.daysAgo} ימים): ${c.since.newCount} הוצאות חדשות בסך ${ils(c.since.newSum)}.`);
+  if (c.tasks && c.tasks.total > 0) L.push(`משימות שהוקצו: ${c.tasks.done} מתוך ${c.tasks.total} הושלמו (${c.tasks.open} פתוחות).`);
+  if (c.flags.length) L.push(`דגלים שזוהו אוטומטית: ${c.flags.map((f) => f.text).join(" | ")}`);
+  return L.join("\n");
+}
+
+const DIGEST_AI_SYSTEM = [
+  "אתה עוזר של יועץ פיננסי (מאמן כלכלי). המשימה: להכין את היועץ לפגישה הקרובה עם הלקוח.",
+  "בהינתן תמונת המצב הפיננסית של הלקוח, כתוב 2 עד 4 נקודות קצרות וממוקדות לשולחן הפגישה:",
+  "דגלים לבדוק, הזדמנויות לפעולה, ותזכורות. פנה אל היועץ (לא אל הלקוח).",
+  "כל נקודה בשורה נפרדת, משפט אחד, בלי מספור ובלי כוכביות, בלי מבוא ובלי סיכום.",
+  "התבסס אך ורק על הנתונים שניתנו — אל תמציא מספרים או עובדות. עברית בלבד.",
+].join(" ");
+
+/** AI-written meeting talking-points for one client. Returns string[] or null on
+ *  ANY failure (missing secret, API error, empty) — caller falls back to flags. */
+async function aiActionSuggestions(c, data) {
+  const key = ANTHROPIC_API_KEY.value();
+  if (!key) return null;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 400,
+        system: DIGEST_AI_SYSTEM,
+        messages: [{ role: "user", content: clientSummaryText(c, data) }],
+      }),
+    });
+    if (!res.ok) { console.warn("digest AI: rejected", res.status); return null; }
+    const json = await res.json();
+    const text = (json && json.content && json.content[0] && json.content[0].text) || "";
+    const items = text.split("\n").map((s) => s.replace(/^[\s\-*•\d.)]+/, "").trim()).filter(Boolean).slice(0, 4);
+    return items.length ? items : null;
+  } catch (e) { console.warn("digest AI: failed", e && e.message ? e.message : e); return null; }
+}
+
+const TONE_COLOR = { red: "#c0392b", orange: "#c47f17", green: "#2f7d4f", gray: "#8a8178" };
+const STAGE_DEFAULT = ENGAGEMENT_STAGES[0];
+
+/** One client's meeting-prep card (inline styles — email-client safe). */
+function clientCardHtml(c) {
+  const cf = c.totals.cashflow;
+  const cfColor = cf >= 0 ? "#2f7d4f" : "#c0392b";
+  const cfText = (cf >= 0 ? "+" : "−") + ils(Math.abs(cf));
+  const budgetLine = c.ba.hasBudget
+    ? `תקציב החודש: הוצאת <b>${ils(c.ba.monthSpent)}</b> מתוך ${ils(c.ba.totalBudget)}`
+    : `לא הוגדר תקציב חודשי`;
+  let flagsHtml;
+  if (c.aiSuggestions && c.aiSuggestions.length) {
+    // AI-written meeting talking-points (preferred when available).
+    flagsHtml = `<div style="font-size:11px;color:#a8894c;font-weight:bold;margin:10px 0 4px;">🤖 המלצות לפגישה</div>` +
+      `<ul style="margin:0;padding:0 18px 0 0;list-style:none;">` +
+      c.aiSuggestions.map((t) => `<li style="font-size:13px;line-height:1.6;color:#333;margin:0 0 4px;">
+        <span style="color:#C9A86C;font-weight:bold;">•</span> ${esc(t)}</li>`).join("") +
+      `</ul>`;
+  } else if (c.flags.length) {
+    // Deterministic rule-based flags (fallback when AI is off/unavailable).
+    flagsHtml = `<ul style="margin:10px 0 0;padding:0 18px 0 0;list-style:none;">` +
+      c.flags.map((f) => `<li style="font-size:13px;line-height:1.6;color:#333;margin:0 0 4px;">
+        <span style="color:${TONE_COLOR[f.tone] || "#333"};font-weight:bold;">•</span> ${esc(f.text)}</li>`).join("") +
+      `</ul>`;
+  } else {
+    flagsHtml = `<div style="font-size:13px;color:#2f7d4f;margin-top:8px;">אין דגלים — הלקוח יציב החודש. ✓</div>`;
+  }
+  const border = c.attention ? "#c0392b" : "#e5e0d8";
+  return `<div style="background:#ffffff;border:1px solid #e5e0d8;border-right:4px solid ${border};border-radius:10px;padding:16px 18px;margin:0 0 12px;">
+    <div style="display:flex;justify-content:space-between;">
+      <div style="font-size:16px;font-weight:bold;color:#1a1a1a;">${esc(c.name)}</div>
+      <div style="font-size:12px;color:#a8894c;">${esc(c.stage)}</div>
+    </div>
+    <div style="font-size:13px;color:#333;margin-top:6px;">
+      תזרים חודשי: <b style="color:${cfColor};">${cfText}</b> &nbsp;·&nbsp; ${budgetLine}
+    </div>
+    <div style="font-size:12px;color:#8a8178;margin-top:4px;">השבוע: ${c.ba.weekCount} הוצאות (${ils(c.ba.weekSpent)})${c.tasks && c.tasks.total > 0 ? ` &nbsp;·&nbsp; ✅ משימות: ${c.tasks.done}/${c.tasks.total} הושלמו` : ""}</div>
+    ${c.since ? `<div style="font-size:12px;color:#8a8178;margin-top:2px;">🗓️ מאז הפגישה (${esc(c.since.lastDate)} · לפני ${c.since.daysAgo} ימים): ${c.since.newCount} הוצאות חדשות${c.since.newSum ? ` (${ils(c.since.newSum)})` : ""}</div>` : ""}
+    ${flagsHtml}
+  </div>`;
+}
+
+/** The full weekly digest email for one advisor, in their practice's brand. */
+function digestEmailHtml(advisorName, clients, b) {
+  const today = new Date().toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
+  const attentionCount = clients.filter((c) => c.attention).length;
+  const cards = clients.map(clientCardHtml).join("");
+  const summary = attentionCount > 0
+    ? `<b style="color:#c0392b;">${attentionCount}</b> מהלקוחות דורשים תשומת לב השבוע.`
+    : `כל הלקוחות יציבים השבוע. 👌`;
+  return `<!doctype html><html dir="rtl" lang="he"><body style="margin:0;padding:0;background:#f6f5f2;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:28px 16px;direction:rtl;text-align:right;">
+    <div style="font-size:13px;color:${b.accent};letter-spacing:2px;margin-bottom:6px;">${escapeHtml(b.wordmark)}</div>
+    <h1 style="font-size:21px;color:#1a1a1a;margin:0 0 4px;">הסיכום השבועי שלך</h1>
+    <div style="font-size:13px;color:#8a8178;margin:0 0 4px;">${esc(today)}</div>
+    <p style="font-size:14px;color:#333;line-height:1.7;margin:0 0 18px;">שלום ${esc(advisorName)}, הנה מצב הלקוחות שלך לקראת השבוע. ${summary}</p>
+    ${cards}
+    <div style="text-align:center;margin:22px 0 6px;">
+      <a href="${APP_URL}/app/advisor?utm_source=email&utm_medium=email&utm_campaign=digest" style="background:${b.accent};color:${b.buttonText};text-decoration:none;font-size:15px;font-weight:bold;padding:11px 30px;border-radius:999px;display:inline-block;">כניסה לדשבורד</a>
+    </div>
+    <p style="font-size:11px;color:#a8a29a;text-align:center;margin:14px 0 0;">סיכום שבועי אוטומטי · ${escapeHtml(b.nameHe)} · ${APP_URL.replace("https://", "")}</p>
+  </div>
+</body></html>`;
+}
+
+/** Generic Resend send. Best-effort — returns true only when accepted. */
+async function sendMail(toEmail, subject, html, from, meta) {
+  const key = RESEND_API_KEY.value();
+  if (!key || !toEmail) return false;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: from || MAIL_FROM, to: [toEmail], subject, html }),
+    });
+    const bodyText = await res.text().catch(() => "");
+    let resendId = null;
+    try { resendId = JSON.parse(bodyText).id ?? null; } catch { /* non-JSON body */ }
+    await logEmail({
+      type: (meta && meta.type) || "generic", to: toEmail,
+      practiceId: (meta && meta.practiceId) || null, resendId,
+      status: res.ok ? "accepted" : "rejected", httpStatus: res.status,
+      ...(res.ok ? {} : { error: bodyText.slice(0, 300) }),
+    });
+    if (!res.ok) { console.warn("sendMail: resend rejected", res.status, bodyText); return false; }
+    return true;
+  } catch (e) {
+    console.warn("sendMail: send failed", e && e.message ? e.message : e);
+    await logEmail({ type: (meta && meta.type) || "generic", to: toEmail, practiceId: (meta && meta.practiceId) || null, resendId: null, status: "error", httpStatus: 0, error: String(e && e.message ? e.message : e).slice(0, 300) });
+    return false;
+  }
+}
+
+/** Build + send the weekly digest for ONE advisor. Returns {sent, clientCount}. */
+async function sendAdvisorDigest(advisorUid, advisorEmail, advisorName, practiceId) {
+  const linksSnap = await db.collection("clientLinks")
+    .where("invitedByUid", "==", advisorUid).where("status", "==", "active").get();
+
+  const clients = [];
+  for (const linkDoc of linksSnap.docs) {
+    const link = linkDoc.data();
+    const clientUid = link.clientUid;
+    if (!clientUid) continue;
+    try {
+      const uDoc = await db.collection("users").doc(clientUid).get();
+      const data = uDoc.exists ? uDoc.data().data : null;
+      const updatedMs = uDoc.exists && uDoc.data().updatedAt && typeof uDoc.data().updatedAt.toMillis === "function"
+        ? uDoc.data().updatedAt.toMillis() : 0;
+      const totals = clientTotals(data);
+      const ba = budgetActivity(data);
+      const tstats = taskStats(data);
+      const since = sinceLastMeeting(data);
+      const flags = actionFlags(data, totals, ba, updatedMs, tstats, since);
+      const attention = totals.cashflow < 0 || ba.overCats.length > 0 || flags.some((f) => f.tone === "red");
+      const c = { name: nameFromEmail(link.invitedEmail), stage: link.stage || STAGE_DEFAULT, totals, ba, tasks: tstats, since, flags, attention };
+      c.aiSuggestions = await aiActionSuggestions(c, data);   // null → card falls back to flags
+      clients.push(c);
+    } catch (e) { console.warn("digest: client load failed", clientUid, e && e.message ? e.message : e); }
+  }
+  if (clients.length === 0) return { sent: false, clientCount: 0 };
+  clients.sort((a, b) => (b.attention === a.attention ? 0 : b.attention ? 1 : -1));
+  const brand = await mailBrandForPractice(practiceId);
+  const sent = await sendMail(advisorEmail, "הסיכום השבועי שלך — מצב הלקוחות",
+    digestEmailHtml(advisorName, clients, brand), brand.from,
+    { type: "digest", practiceId: practiceId || null });
+  if (sent) {
+    // Heartbeat — a stalled Sunday scheduler becomes visible in the report.
+    db.collection("advisors").doc(advisorUid)
+      .set({ lastDigestAt: FieldValue.serverTimestamp() }, { merge: true })
+      .catch(() => {});
+  }
+  return { sent, clientCount: clients.length };
+}
+
+function advisorDisplayName(advData) {
+  return (advData && (advData.name || advData.displayName)) || nameFromEmail(advData && advData.email) || "יועץ";
+}
+
+// Scheduled: every Sunday 08:00 Asia/Jerusalem, to every advisor.
+exports.weeklyAdvisorDigest = onSchedule(
+  { schedule: "0 8 * * 0", timeZone: "Asia/Jerusalem", secrets: [RESEND_API_KEY, ANTHROPIC_API_KEY] },
+  async () => {
+    const advisors = await db.collection("advisors").get();
+    for (const a of advisors.docs) {
+      const email = a.data().email;
+      // Demo advisors (seeded example.com fixtures) get skipped — their sends
+      // can only bounce.
+      if (!email || a.data().demo || email.endsWith("@example.com")) continue;
+      try { await sendAdvisorDigest(a.id, email, advisorDisplayName(a.data()), a.data().practiceId); }
+      catch (e) { console.warn("weeklyAdvisorDigest: advisor failed", a.id, e && e.message ? e.message : e); }
+    }
+  },
+);
+
+// On-demand: an advisor sends THEIR OWN digest to THEIR OWN email (for testing /
+// "send me now"). Never targets a client. Gated on the advisors/{uid} role.
+exports.sendDigestNow = onCall({ secrets: [RESEND_API_KEY, ANTHROPIC_API_KEY] }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+  const adv = await db.collection("advisors").doc(uid).get();
+  if (!adv.exists) throw new HttpsError("permission-denied", "רק יועץ יכול לשלוח סיכום.");
+  const email = adv.data().email;
+  if (!email) throw new HttpsError("failed-precondition", "אין כתובת מייל ליועץ.");
+  const { sent, clientCount } = await sendAdvisorDigest(uid, email, advisorDisplayName(adv.data()), adv.data().practiceId);
+  return { ok: true, sent, clientCount, email };
+});
+
+/**
+ * getFirmOverview — a firm MANAGER (the practice owner) reads their firm's
+ * advisors and the clients each brought in. The middle tier between the platform
+ * owner (/app/admin, all firms) and a single advisor (/app/advisor, own clients).
+ * Authorized here (caller must be practices/{id}.ownerUid) so no client-side rule
+ * change is needed. Returns statuses + dates only — NEVER a client's financial data.
+ */
+exports.getFirmOverview = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "נדרשת התחברות.");
+
+  const advSnap = await db.collection("advisors").doc(uid).get();
+  if (!advSnap.exists) throw new HttpsError("permission-denied", "רק יועץ יכול לצפות.");
+  const practiceId = advSnap.data().practiceId;
+  if (!practiceId) throw new HttpsError("failed-precondition", "לא משויך משרד.");
+
+  const practiceSnap = await db.collection("practices").doc(practiceId).get();
+  if (!practiceSnap.exists) throw new HttpsError("failed-precondition", "המשרד לא נמצא.");
+  const practice = practiceSnap.data();
+  if (practice.ownerUid !== uid) throw new HttpsError("permission-denied", "רק מנהל המשרד יכול לצפות במשרד.");
+
+  const advisorsSnap = await db.collection("advisors").where("practiceId", "==", practiceId).get();
+  const advisors = [];
+  for (const a of advisorsSnap.docs) {
+    const linksSnap = await db.collection("clientLinks").where("invitedByUid", "==", a.id).get();
+    const clients = [];
+    let activeCount = 0;
+    linksSnap.forEach((l) => {
+      const d = l.data();
+      if (d.status === "consumed") return;
+      const ts = d.statusChangedAt || d.createdAt;
+      const dateMs = ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0;
+      clients.push({ email: d.invitedEmail, status: d.status, dateMs });
+      if (d.status === "active") activeCount++;
+    });
+    clients.sort((x, y) => y.dateMs - x.dateMs);
+    advisors.push({
+      uid: a.id,
+      email: a.data().email || a.id,
+      role: a.data().role || "member",
+      clients,
+      activeCount,
+    });
+  }
+  advisors.sort((x, y) => y.clients.length - x.clients.length);
+
+  return { practiceName: practice.name || practiceId, advisorCount: advisors.length, advisors };
+});
+
+// ── Personal WhatsApp goal bot — RETIRED 2026-07-29 ──────────────────────────
+// The goals project was cancelled. goalBotEvening/goalBotMidday are DELETED in
+// the cloud; re-exporting them would recreate the daily 13:00/21:00 sends on the
+// next deploy (which is exactly what happened on 2026-07-27). The webhook stays
+// exported but is inert: the Meta callback points at clientBotWebhook.
+// Module kept at functions/goalBot.js. See docs/whatsapp-goal-bot-setup.md.
+const goalBot = require("./goalBot");
+exports.goalBotWebhook = goalBot.goalBotWebhook;
+
+// ── Multi-tenant WhatsApp CLIENT bot (product) ───────────────────────────────
+// Isolated module (functions/clientBot.js), own secrets + collections. Additive.
+// Clients log expenses (reusing /api/transaction) and ask questions (aggregates
+// only). See docs/whatsapp-platform-strategy.md.
+const clientBot = require("./clientBot");
+exports.clientBotWebhook = clientBot.clientBotWebhook;
+
 /* ── Full account deletion ─────────────────────────────────────────────
  * Self-service, immediate and irreversible. Everything runs here (admin SDK)
  * because almost every collection involved is client-write-blocked by rules.
@@ -1035,3 +1468,7 @@ exports.deleteMyAccount = onCall(
     return { ok: true, authDeleted: authGone.ok, leftovers };
   },
 );
+
+// Daily credit-split drift check (phase A gate) - isolated module. Additive.
+const creditSplitCheck = require("./creditSplitCheck");
+exports.creditSplitDailyCheck = creditSplitCheck.creditSplitDailyCheck;
