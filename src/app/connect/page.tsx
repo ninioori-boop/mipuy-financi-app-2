@@ -16,13 +16,24 @@ import { BRAND } from '@/lib/brand'
 // Custom scheme the Android tracker app listens for. The token rides in the path.
 const SCHEME = 'mipuytracker://token/'
 
-// One-tap import of the shared iOS Shortcut ("THE HOME ECONOMIST 1"). Authored
-// on Ori's iPhone (2026-07-14, v2: single notify.text dictionary get — zero
-// manual variable wiring). Holds ALL the logic: POST {token, merchant} →
-// notify.text → lock-screen notification. The client pastes their token into
-// the Text box; their Wallet automation builds "[Amount] [Merchant]" text and
-// runs this shortcut (the server's extractFromRaw splits amount/merchant).
-const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/69275622abc0441491f7cb88bca7cc9b'
+// One-tap import of the shared iOS Shortcut. Holds ALL the logic: POST
+// {token, merchant} → notify.text → lock-screen notification. The client's
+// Wallet automation builds "[Amount] [Merchant]" text and runs this shortcut
+// (the server's extractFromRaw splits amount/merchant).
+//
+// v3 (2026-08-02) carries an IMPORT QUESTION: adding the shortcut now prompts
+// for the connection code instead of leaving the client to find the Text box
+// themselves. That replaced the worst five taps of the whole setup — open
+// Shortcuts, long-press, Edit, clear the placeholder, paste — and with them the
+// step most likely to be done wrong, since pasting into the wrong action fails
+// silently and only shows up as a dead automation days later.
+//
+// Verified from the shared copy itself, not just on the authoring device: the
+// published file carries the import question and contains NO token (an earlier
+// draft was duplicated from a WORKING shortcut, so shipping it unchecked would
+// have handed every new client someone else's live token and quietly routed
+// their expenses into that account).
+const SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/84fe4d77cc164b1ab0a68675c4fa7b5c'
 
 type Phase = 'loading' | 'signin' | 'fetching' | 'ready' | 'error'
 
@@ -419,11 +430,11 @@ function IosWizard({
             📲 הוסף את הקיצור
           </a>
           <div className={card}>
-            אחרי ההוספה: פתח את אפליקציית <span className="text-txt font-semibold">קיצורי דרך</span> →
-            לחיצה <span className="text-txt font-semibold">ארוכה</span> על{' '}
-            <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
-            «עריכה» → מחק את «הדבק כאן טוקן» מתיבת המלל →
-            <span className="text-txt font-semibold"> הדבק את הטוקן</span> → סיום.
+            הקש על <span className="text-txt font-semibold">«הגדרת קיצור»</span>, וייפתח מסך
+            שמבקש <span className="text-txt font-semibold">«הדבק כאן את קוד החיבור מהאתר»</span> —
+            הדבק שם את הקוד שהעתקת בשלב 1 ואשר.
+            <br />
+            זהו. אין צורך לפתוח את «קיצורי דרך» ואין מה לערוך.
           </div>
           {/* The clipboard is easily lost on the way to the Shortcuts app and
               back, so the token stays one tap away instead of a step back. */}
@@ -453,7 +464,7 @@ function IosWizard({
           <br />
           <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
           הקש על «קיצור דרך» → בחר{' '}
-          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> → סיום.
+          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 2</bdi> → סיום.
           <br />
           זה השלב הארוך ביותר, וזה האחרון הארוך. אחריו נשארו שתי דקות.
         </div>
@@ -462,7 +473,7 @@ function IosWizard({
       {step === 4 && (
         <div className="rounded-lg border border-gold/40 bg-surface2 p-3 text-xs text-muted-txt text-end leading-relaxed">
           <span className="text-txt font-semibold">כשהמכשיר פתוח</span>, בקיצורי דרך: הקש הקשה רגילה על{' '}
-          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 1</bdi> →
+          <bdi className="text-txt font-semibold">THE HOME ECONOMIST 2</bdi> →
           אשר את כל חלוניות ההרשאה שקופצות, בעיקר החיבור אל app.orimipuy.com
           (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> — בחר בו).
           <br />
