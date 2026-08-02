@@ -20,6 +20,20 @@ describe('parseAmount', () => {
   it('negates parenthesized values', () => {
     expect(parseAmount('(150)')).toBe(-150)
   })
+  // A trailing minus is the other accounting-style negative. parseFloat stops at
+  // the sign and silently returns a POSITIVE number, so a refund row was read as
+  // a charge: extractTransactions derives `isRefund` from `amount < 0`, and the
+  // statement total then moves by twice the refund in the wrong direction.
+  it('negates a trailing minus', () => {
+    expect(parseAmount('250.00-')).toBe(-250)
+    expect(parseAmount('₪250.00-')).toBe(-250)
+    expect(parseAmount('1,250.50-')).toBe(-1250.5)
+    expect(parseAmount('250.00 -')).toBe(-250)
+  })
+  it('does not treat an internal or leading-only minus as trailing', () => {
+    expect(parseAmount('-250')).toBe(-250)
+    expect(parseAmount('250')).toBe(250)
+  })
   it('returns NaN for null', () => {
     expect(parseAmount(null)).toBeNaN()
   })
@@ -156,6 +170,21 @@ describe('extractTransactions', () => {
     expect(txns[0].amount).toBe(250)
     expect(txns[0].source).toBe('test.xlsx')
     expect(txns[0].category).toBe('מזון לבית')
+  })
+
+  // The skip list was written with a straight quote only ('סה"כ'), but the
+  // standard Hebrew form uses gershayim (U+05F4). A summary row written that way
+  // was imported as a real transaction, double-counting the whole statement.
+  it('skips the statement TOTAL row in every Hebrew quoting style', () => {
+    const withTotals = [
+      ['תאריך רכישה', 'שם בית עסק', 'סכום חיוב', 'פירוט נוסף'],
+      ['2024-01-15', 'שופרסל', '250', ''],
+      ['2024-01-31', 'סה״כ עסקאות', '250', ''],   // gershayim U+05F4
+      ['2024-01-31', 'סה׳כ לחשבון', '250', ''],   // geresh U+05F3
+      ['2024-01-31', 'Total for card', '250', ''], // lower-case variant
+    ]
+    const txns = extractTransactions(withTotals as unknown[][], 'test.xlsx')
+    expect(txns.map(t => t.desc)).toEqual(['שופרסל'])
   })
 
   it('returns empty array for unrecognized format', () => {
