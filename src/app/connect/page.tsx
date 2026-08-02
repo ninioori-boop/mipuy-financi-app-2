@@ -52,6 +52,7 @@ export default function ConnectPage() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
+  const [iosMajor, setIosMajor] = useState<number | null>(null)
   const [isNativeApp, setIsNativeApp] = useState(false)
   const [copied, setCopied] = useState(false)
   const [resetMsg, setResetMsg] = useState('')
@@ -84,8 +85,16 @@ export default function ConnectPage() {
   )
 
   // iPhone has no native app to receive the token → show a copy-token flow (for the Shortcut).
+  // Also read the major iOS version: Apple's Wallet TRANSACTION TRIGGER only exists
+  // from iOS 17, so on anything older this setup cannot be completed at all — the
+  // trigger the whole flow depends on is simply absent from the Shortcuts app.
+  // Clients hit this as "my phone doesn't have «קלט של קיצור»" and read it as their
+  // mistake, after twenty minutes of trying. Better to say so on the first screen.
   useEffect(() => {
-    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent))
+    const ua = navigator.userAgent
+    setIsIOS(/iPad|iPhone|iPod/.test(ua))
+    const m = ua.match(/(?:iPhone|CPU) OS (\d+)/)
+    if (m) setIosMajor(Number(m[1]))
   }, [])
 
   // The native iOS app opens this page in Safari with ?native=1 — it CAN
@@ -253,7 +262,7 @@ export default function ConnectPage() {
           <p className="text-income font-semibold mb-4">התחברת בהצלחה!</p>
 
           {isIOS && !isNativeApp ? (
-            <IosWizard token={token} copied={copied} onCopy={copyToken} />
+            <IosWizard token={token} copied={copied} onCopy={copyToken} iosMajor={iosMajor} />
           ) : (
             <>
               <p className="text-muted-txt text-sm mb-6">לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.</p>
@@ -321,14 +330,20 @@ const IOS_STEPS = [
   'הוספה למסך הבית',
 ]
 
+// Apple added the Wallet transaction trigger in iOS 17. Below that the trigger
+// does not exist, so no amount of instruction can complete this setup.
+const MIN_IOS_FOR_WALLET_TRIGGER = 17
+
 function IosWizard({
   token,
   copied,
   onCopy,
+  iosMajor,
 }: {
   token: string
   copied: boolean
   onCopy: () => void
+  iosMajor: number | null
 }) {
   const [step, setStep] = useState(1)
   const [restored, setRestored] = useState(false)
@@ -382,8 +397,25 @@ function IosWizard({
     )
   }
 
+  const tooOld = iosMajor !== null && iosMajor < MIN_IOS_FOR_WALLET_TRIGGER
+
   return (
     <div>
+      {/* Shown BEFORE step 1, not discovered at step 3. Without the trigger the
+          setup is impossible, and the way that surfaces to a client is the
+          «קלט של קיצור» option being absent — which reads as their mistake. */}
+      {tooOld && (
+        <div className="rounded-lg border border-expense/50 bg-expense/10 p-3 text-xs text-txt text-end leading-relaxed mb-5">
+          <span className="font-semibold">המכשיר הזה מריץ iOS {iosMajor}, והקליטה האוטומטית דורשת iOS 17 ומעלה.</span>
+          <br />
+          אפל הוסיפה את הטריגר של תשלומי הארנק רק ב-iOS 17, ובגרסאות ישנות יותר הוא פשוט לא
+          קיים באפליקציית «קיצורי דרך» — אז אי אפשר להשלים את ההגדרה כאן, וזה לא תלוי בך.
+          <br />
+          <span className="font-semibold">מה כן אפשר:</span> לעדכן את iOS (הגדרות ← כללי ← עדכון תוכנה),
+          ואז לחזור לעמוד הזה. עד אז אפשר לרשום הוצאות ידנית באפליקציה — זה עובד מצוין.
+        </div>
+      )}
+
       {/* Numbers stay LTR so 1..5 reads left-to-right like any progress bar. */}
       <div dir="ltr" className="flex items-center justify-center gap-1.5 mb-3">
         {IOS_STEPS.map((_, i) => {
@@ -488,6 +520,14 @@ function IosWizard({
           <br />
           <span className="text-txt font-semibold">שתי הפעולות חובה.</span> אוטומציה שרק מפעילה את
           הקיצור, בלי «מלל», מגיעה לשרת בלי סכום — ואז שום קנייה לא נרשמת, בשקט.
+          <br />
+          <br />
+          <span className="text-txt font-semibold">לא מוצא את «קלט של קיצור» ברשימת המשתנים?</span>{' '}
+          זה כמעט תמיד אחד משלושה, ולפי הסדר: הטלפון באנגלית והשם שם הוא{' '}
+          <Bi en="Shortcut Input" /> · אתה בתוך קיצור חדש ולא בתוך האוטומציה (באוטומציה כתוב
+          למעלה מתי היא רצה, עם הכרטיסים) · או שבראש הפעולה לא מופיע{' '}
+          <Bi en="Receive transaction as input" />, ואז אין עסקה להציע ממנה מאפיינים.
+          <br />
           <br />
           זה השלב הארוך ביותר, וזה האחרון הארוך. אחריו נשארו שתי דקות.
         </div>
