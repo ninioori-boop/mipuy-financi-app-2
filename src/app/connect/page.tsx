@@ -302,6 +302,17 @@ export default function ConnectPage() {
 
 const IOS_STEP_KEY = 'connectIosStep'
 
+// The English name of an iOS label, shown next to the Hebrew one.
+//
+// Not decoration: a client whose iPhone is set to English sees "Shortcut Input"
+// and no «קלט של קיצור» anywhere, and reports the option as MISSING rather than
+// renamed — which reads as a broken phone and ends the onboarding. One client
+// ran a month of zero capture on exactly that misunderstanding.
+// bdi keeps the Latin text from reordering inside the RTL sentence.
+function Bi({ en }: { en: string }) {
+  return <bdi className="text-muted-txt/70">({en})</bdi>
+}
+
 const IOS_STEPS = [
   'העתק את הטוקן',
   'הוסף את הקיצור',
@@ -449,22 +460,34 @@ function IosWizard({
 
       {step === 3 && (
         <div className={card}>
-          בקיצורי דרך: לשונית <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> (האמצעית)
-          → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> →
-          «כאשר אני מקיש» → בחר את הכרטיסים שלך →
-          <span className="text-txt font-semibold"> «הפעל מיד»</span> → הבא.
+          {/* Every label carries its English name too: an iPhone set to English
+              shows "Shortcut Input", never «קלט של קיצור», and a client hunting
+              for the Hebrew wording reports the option as MISSING rather than
+              renamed. That misread cost one client a month of zero capture. */}
+          <p className="mb-2 text-[11px] text-muted-txt/80">
+            הטלפון שלך באנגלית? כל שם מופיע כאן גם באנגלית, בסוגריים.
+          </p>
+          בקיצורי דרך <Bi en="Shortcuts" />: לשונית{' '}
+          <span className="text-txt font-semibold">«פעולות אוטומטיות»</span> <Bi en="Automation" /> (האמצעית)
+          → ＋ → גלול ובחר <span className="text-txt font-semibold">«ארנק»</span> <Bi en="Wallet" /> →
+          «כאשר אני מקיש» <Bi en="When I Tap" /> → בחר את הכרטיסים שלך →
+          <span className="text-txt font-semibold"> «הפעל מיד»</span> <Bi en="Run Immediately" /> → הבא.
           <br />
-          עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» למטה):
+          עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» <Bi en="Search for actions" /> למטה):
           <br />
-          <span className="text-txt font-semibold">① «מלל»</span> — הקש בתיבה →
-          «בחירת משתנה» → <span className="text-txt font-semibold">«קלט של קיצור»</span> →
-          הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span> →
-          הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
-          בחר <span className="text-txt font-semibold">«בית עסק»</span>.
+          <span className="text-txt font-semibold">① «מלל»</span> <Bi en="Text" /> — הקש בתיבה →
+          «בחירת משתנה» <Bi en="Select Variable" /> →{' '}
+          <span className="text-txt font-semibold">«קלט של קיצור»</span> <Bi en="Shortcut Input" /> →
+          הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span>{' '}
+          <Bi en="Amount" /> → הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
+          בחר <span className="text-txt font-semibold">«בית עסק»</span> <Bi en="Merchant" />.
           <br />
-          <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> —
+          <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> <Bi en="Run Shortcut" /> —
           הקש על «קיצור דרך» → בחר{' '}
           <bdi className="text-txt font-semibold">THE HOME ECONOMIST 2</bdi> → סיום.
+          <br />
+          <span className="text-txt font-semibold">שתי הפעולות חובה.</span> אוטומציה שרק מפעילה את
+          הקיצור, בלי «מלל», מגיעה לשרת בלי סכום — ואז שום קנייה לא נרשמת, בשקט.
           <br />
           זה השלב הארוך ביותר, וזה האחרון הארוך. אחריו נשארו שתי דקות.
         </div>
@@ -475,13 +498,19 @@ function IosWizard({
           <span className="text-txt font-semibold">כשהמכשיר פתוח</span>, בקיצורי דרך: הקש הקשה רגילה על{' '}
           <bdi className="text-txt font-semibold">THE HOME ECONOMIST 2</bdi> →
           אשר את כל חלוניות ההרשאה שקופצות, בעיקר החיבור אל app.orimipuy.com
-          (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> — בחר בו).
+          (אם מוצע <span className="text-txt font-semibold">«אפשר תמיד»</span> <Bi en="Always Allow" /> —
+          בחר בו, <span className="text-txt font-semibold">לא</span> «אפשר פעם אחת» <Bi en="Allow Once" />).
           <br />
           בסוף תופיע שגיאה קטנה על notify — <span className="text-txt font-semibold">זה תקין</span>,
           זה רק בגלל שאין תשלום אמיתי מאחורי ההרצה.
           <br />
           למה זה חובה: את ההרשאות האלה iOS מבקש פעם אחת, והוא לא מסוגל להציג את השאלה
           כשהמכשיר נעול — ותשלום Apple Pay תמיד קורה כשהמכשיר נעול.
+          <br />
+          כבר קרה ונבחר «אפשר פעם אחת»? אז הקיצור לא ישאל שוב והרצה חוזרת לא תתקן. צריך
+          לאפס: ⋯ ← «פרטים» <Bi en="Details" /> ← «פרטיות» <Bi en="Privacy" /> ←{' '}
+          <span className="text-txt font-semibold">«איפוס פרטיות»</span> <Bi en="Reset Privacy" /> —
+          ואז להריץ שוב ולבחור «אפשר תמיד».
         </div>
       )}
 
