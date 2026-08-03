@@ -3,6 +3,8 @@ import { randomInt } from 'crypto'
 import { FieldValue } from 'firebase-admin/firestore'
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin'
 import { signDeviceToken } from '@/lib/deviceToken'
+import { getCurrentTokenVersion } from '@/lib/deviceTokenRevocation'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 // firebase-admin needs the Node runtime (not Edge).
 export const runtime = 'nodejs'
@@ -16,10 +18,9 @@ export const runtime = 'nodejs'
 // minting here and letting the bot reuse the stored token keeps the secret in one
 // place. The bot then POSTs expenses to /api/transaction with it.
 //
-// NOTE: this is the additive, main-compatible variant — it uses the 2-arg
-// signDeviceToken (v0 token) and no rate-limit/revocation libs (those live only on
-// the feature branch's security work). When that security work lands on main,
-// restore the branch version (versioned token + checkRateLimit).
+// The token minted here is versioned (see deviceTokenRevocation.ts), so revoking
+// a client's device also invalidates the copy stashed on their link-code docs.
+// Rate-limited because every call mints a fresh credential and writes a doc.
 // 503 until the backend (TRANSACTION_SECRET + service account) is configured.
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no I, O, 0, 1 (unambiguous)
@@ -51,6 +52,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'אימות נכשל' }, { status: 401 })
   }
 
+  // Each call mints a credential and writes a document, so cap it. Generous
+  // enough that a client retrying a failed link never notices.
+  const rl = await checkRateLimit({ key: 'wa-link:' + uid, limit: 10, windowMs: 3_600_000 })
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'יותר מדי בקשות — נסה שוב בעוד כמה דקות' }, { status: 429 })
+  }
+
   // Capture the client's advisor + firm (tenancy) if a link exists — optional
   // metadata for the later advisor cockpit / per-firm (white-label) routing.
   let practiceId: string | null = null
@@ -66,8 +74,16 @@ export async function POST(req: NextRequest) {
     /* tenancy is optional metadata; never block linking on it */
   }
 
-  // Mint the client's device token (reused by the bot to POST /api/transaction).
-  const deviceToken = signDeviceToken(uid, secret)
+  // Mint the client's device token (reused by the bot to POST /api/transaction),
+  // at their current version so a revocation invalidates this copy too. Fail
+  // closed: this token gets PERSISTED onto the link-code doc and copied to
+  // whatsappLinks by the bot, so minting a stale one means the client links
+  // successfully and then silently never works.
+  const version = await getCurrentTokenVersion(uid)
+  if (version === null) {
+    return NextResponse.json({ error: 'שגיאה זמנית — נסה שוב בעוד רגע' }, { status: 503 })
+  }
+  const deviceToken = signDeviceToken(uid, secret, version)
 
   // Mint a unique short code (retry on the rare collision).
   for (let attempt = 0; attempt < 5; attempt++) {

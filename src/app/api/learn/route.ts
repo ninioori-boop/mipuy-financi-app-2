@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
+import { isAccountDeleted } from '@/lib/deletionTombstone'
+import { checkRateLimit } from '@/lib/rateLimit'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { shareableLearnedEntry } from '@/lib/learnedSharing'
 import { ALL_CATEGORIES } from '@/lib/constants'
@@ -9,6 +12,13 @@ import { ALL_CATEGORIES } from '@/lib/constants'
 export const runtime = 'nodejs'
 
 const MAX_MERCHANT = 200
+// The normalized KEY is what lands in the shared pool and is substring-scanned
+// on every categorize() call for every client, so it is capped much tighter than
+// the raw merchant string. Same cap aiSuggestions.ts already applies.
+const MAX_KEY_LEN = 40
+// This route writes through the admin SDK, which BYPASSES firestore.rules — so
+// the 20,000-key ceiling the rules enforce on browsers does not apply here.
+const MAX_SHARED_KEYS = 20_000
 
 // Teaches the shared learnedDB from a correction made in the Android tracker app.
 // Authed with the per-user HMAC device token (same as /api/transaction) — NOT a
@@ -28,9 +38,27 @@ export async function POST(req: NextRequest) {
   }
   const { token, merchant, category } = body as Record<string, unknown>
 
-  const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
-  if (!uid) {
+  const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
+  if (!verified) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+  const { uid, version } = verified
+
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return NextResponse.json({ error: 'token revoked' }, { status: 401 })
+  }
+  // This was the one device-token route that never checked the tombstone: a
+  // deleted account's still-installed tracker app kept writing into the SHARED
+  // pool — the collection with the widest blast radius — indefinitely.
+  if (await isAccountDeleted(uid)) {
+    return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+  }
+  // Unlike the AI routes this had no limiter at all, so one leaked token could
+  // grow shared/learnedDB toward the 1MB document ceiling — at which point
+  // legitimate learn writes start failing for EVERY client.
+  const rl = await checkRateLimit({ key: 'learn:' + uid, limit: 100, windowMs: 3_600_000 })
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'rate limited' }, { status: 429 })
   }
 
   if (typeof merchant !== 'string' || !merchant.trim() || merchant.length > MAX_MERCHANT) {
@@ -41,7 +69,7 @@ export async function POST(req: NextRequest) {
   }
 
   const key = normalizeForLookup(merchant.trim())
-  if (!key) {
+  if (!key || key.length > MAX_KEY_LEN) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
   }
 
@@ -55,8 +83,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, shared: false })
   }
 
+  // Enforce the key ceiling in code, since the admin SDK skips the rule that
+  // enforces it for browsers. Updating an EXISTING key is always allowed — only
+  // growth past the cap is refused, so a full pool still self-corrects.
+  const ref = db.collection('shared').doc('learnedDB')
+  // Fail open on a read blip, like every other guard on this route: the tracker
+  // app fires-and-forgets, so throwing here would silently discard a correction
+  // whose write would have succeeded. An empty map allows the write, which is the
+  // safe direction. hasOwnProperty, not `in`, so a merchant normalizing to
+  // "constructor"/"toString" isn't mistaken for an existing key.
+  let existing: Record<string, string> = {}
+  try {
+    existing = ((await ref.get()).data()?.db as Record<string, string>) ?? {}
+  } catch {
+    existing = {}
+  }
+  if (!Object.prototype.hasOwnProperty.call(existing, key) && Object.keys(existing).length >= MAX_SHARED_KEYS) {
+    console.warn(`[learn] shared pool at capacity (${MAX_SHARED_KEYS}) — refused new key`)
+    return NextResponse.json({ ok: true, shared: false })
+  }
+
   // Single-field merge — only adds/updates this one key, never replaces the doc.
-  await db.collection('shared').doc('learnedDB').set({ db: { [key]: category } }, { merge: true })
+  await ref.set({ db: { [key]: category } }, { merge: true })
 
   console.log(`[learn] uid=${uid} cat=${category}`)
   return NextResponse.json({ ok: true })

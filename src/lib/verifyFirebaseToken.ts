@@ -9,11 +9,38 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
   const now = Date.now()
 
   if (!keysCache || now - keysCacheAt > 3_600_000) {
-    const r = await fetch(
-      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
-    )
-    keysCache = (await r.json()) as Record<string, string>
-    keysCacheAt = now
+    // Build in a LOCAL first and only publish a result that actually looks like
+    // a key set. Assigning the parsed body straight into the cache meant a
+    // single 5xx from Google (whose error envelope is still valid JSON) was
+    // stored as "the keys" and stamped fresh — every authenticated route then
+    // returned 401 "פג תוקף הסשן" for a full hour, and signing in again did not
+    // help. On failure we keep serving the previous keys, which stay valid for
+    // days; only a cold instance with no cache at all is allowed to throw.
+    try {
+      // Bounded: without a timeout a hanging endpoint blocks the request until
+      // the serverless function times out, which stalls the whole app — a worse
+      // outage than the one this block exists to prevent.
+      const r = await fetch(
+        'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+        { signal: AbortSignal.timeout(5_000) },
+      )
+      if (!r.ok) throw new Error(`JWKS fetch failed: ${r.status}`)
+      const next = (await r.json()) as Record<string, string>
+      if (!next || typeof next !== 'object' || Object.keys(next).length === 0) {
+        throw new Error('JWKS response empty or malformed')
+      }
+      keysCache = next
+      keysCacheAt = now
+    } catch (err) {
+      if (!keysCache) throw err
+      // Back off ~1 minute instead of retrying on EVERY request: leaving
+      // keysCacheAt untouched would keep the refresh gate open and turn a Google
+      // blip into an outbound request storm (and likely rate-limiting, which
+      // prolongs the very outage we are riding out). Google's keys stay valid for
+      // days, so serving the cached set meanwhile is safe.
+      keysCacheAt = now - 3_600_000 + 60_000
+      console.warn('[verifyFirebaseToken] JWKS refresh failed, serving cached keys:', err)
+    }
   }
 
   const parts = idToken.split('.')

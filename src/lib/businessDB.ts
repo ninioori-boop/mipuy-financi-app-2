@@ -4552,6 +4552,16 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   ["עלה הביתה", "מזון לבית"],
   ["ירק השדה", "מזון לבית"],
   ["עדן טבע", "מזון לבית"],
+  // Real merchants that used to resolve only by accident, via a short key
+  // matching mid-word (costa→"cos", quiksilver→"quik", singapore→"gap"). Once
+  // short keys became whole-word-only those matches disappeared — correctly,
+  // since all three were filed under the WRONG category. Given proper keys here
+  // they now resolve right, instead of costing an AI call on every upload.
+  ["costa coffee", "אוכל בחוץ ובילויים"],
+  ["קוסטה קפה", "אוכל בחוץ ובילויים"],
+  ["quiksilver", "ביגוד והנעלה"],
+  ["קוויקסילבר", "ביגוד והנעלה"],
+  ["singapore airlines", "חופשה וטיול"],
   ["אורגניק מרקט", "מזון לבית"],
   ["אניס", "מזון לבית"],
   ["מעדני גורמה", "מזון לבית"],

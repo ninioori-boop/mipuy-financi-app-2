@@ -1,6 +1,7 @@
 import { isAccountDeleted } from '@/lib/deletionTombstone'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { getAdminAuth } from '@/lib/firebaseAdmin'
 
 // Exchanges a device token (the same HMAC token the Android app already holds
@@ -35,9 +36,18 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const uid = verifyDeviceToken(token, secret)
-  if (!uid) {
+  const verified = verifyDeviceToken(token, secret)
+  if (!verified) {
     return NextResponse.json({ error: 'טוקן לא תקין' }, { status: 401 })
+  }
+  const { uid, version } = verified
+
+  // Per-user revocation: a stolen/lost phone is cut off by bumping this user's
+  // minVersion, instead of rotating TRANSACTION_SECRET (which kills EVERY
+  // client's token at once). This route is the most sensitive of the five — it
+  // exchanges the device token for a full Firebase session.
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return NextResponse.json({ error: 'הטוקן בוטל — צור חיבור חדש מהאפליקציה' }, { status: 401 })
   }
 
   // Signing in with a custom token RE-CREATES the Auth user when none exists,

@@ -4,6 +4,7 @@ import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { categorize } from '@/lib/categorize'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
 import { logAiSuggestion } from '@/lib/aiSuggestions'
@@ -142,13 +143,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'echo' }, { status: 400 })
   }
 
-  const uid = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
-  if (!uid) {
+  const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
+  if (!verified) {
     // No breadcrumb: this branch is reachable without any credential.
     console.log('[transaction] UNAUTHORIZED', JSON.stringify(tokenShape(token)))
     return refuse(db, 401, 'unauthorized', notifyOf(
       'לא נרשם: החיבור לחשבון אינו תקף',
       'צריך להעתיק קוד חיבור חדש מהעמוד app.orimipuy.com/connect ולהדביק אותו בקיצור.',
+    ), null)
+  }
+  const { uid, version } = verified
+
+  // Revoked by the advisor (typically a lost/stolen phone). The HMAC is valid,
+  // so this is a deliberate cut-off rather than a broken paste — say so, and
+  // point at the fix, exactly like the other refusals on this route.
+  if (await isDeviceTokenRevoked(uid, version)) {
+    return refuse(db, 401, 'token revoked', notifyOf(
+      'לא נרשם: החיבור בוטל',
+      'החיבור של המכשיר הזה בוטל. צריך להעתיק קוד חיבור חדש מהעמוד app.orimipuy.com/connect.',
     ), null)
   }
 
