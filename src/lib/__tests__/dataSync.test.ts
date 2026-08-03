@@ -86,6 +86,7 @@ function populateAllStores() {
     medium: [{ id: 'gm', name: 'car',    required: 50000,   current: 5000, monthly: 500, targetDate: '2028-06', product: 'fund' }],
     long:   [{ id: 'gl', name: 'house',  required: 1500000, current: 0,    monthly: 3000, targetDate: '2040-01', product: 'mortgage' }],
     liquidTotal: 20000,
+    liquidSources: ['sav:s1', 'bank:b2'],
   })
 
   useCreditStore.setState({

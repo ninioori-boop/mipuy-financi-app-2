@@ -61,7 +61,7 @@ function numInput(
 }
 
 export default function GoalsPage() {
-  const { short, medium, long, addGoal, updateGoal, deleteGoal, liquidTotal, setLiquidTotal } = useGoalsStore()
+  const { short, medium, long, addGoal, updateGoal, deleteGoal, liquidTotal, setLiquidTotal, liquidSources, setLiquidSources } = useGoalsStore()
   const mapping = useMappingStore()
   // The liquid-capital pool is lab-gated for now — advisors only, until it's
   // been tried on real data and released to clients (then drop this gate).
@@ -105,13 +105,24 @@ export default function GoalsPage() {
     const rows = [
       ...mapping.savings
         .filter(r => (r.accumulated || 0) > 0)
-        .map(r => ({ id: r.id, name: r.name || 'חיסכון', amount: r.accumulated })),
+        .map(r => ({ id: `sav:${r.id}`, name: r.name || 'חיסכון', amount: r.accumulated })),
       ...mapping.bankAccounts
         .filter(r => (r.balance || 0) > 0)
-        .map(r => ({ id: r.id, name: r.name ? `עו"ש · ${r.name}` : 'עו"ש', amount: r.balance })),
+        .map(r => ({ id: `bank:${r.id}`, name: r.name ? `עו"ש · ${r.name}` : 'עו"ש', amount: r.balance })),
     ]
     return { rows, total: rows.reduce((s, r) => s + r.amount, 0) }
   }, [mapping.savings, mapping.bankAccounts])
+
+  // Tapping a capital row counts it toward the liquid pool (tap again to undo).
+  // The pool is then re-summed from every selected row, so it always equals
+  // what's highlighted — and stays hand-editable afterwards.
+  function toggleSource(rowId: string) {
+    const next = liquidSources.includes(rowId)
+      ? liquidSources.filter(x => x !== rowId)
+      : [...liquidSources, rowId]
+    setLiquidSources(next)
+    setLiquidTotal(capital.rows.filter(r => next.includes(r.id)).reduce((s, r) => s + r.amount, 0))
+  }
 
   const liquidAllocatedTotal = allGoals.reduce((s, r) => s + (r.liquidAllocated || 0), 0)
   const liquidRemaining      = liquidTotal - liquidAllocatedTotal
@@ -264,20 +275,46 @@ export default function GoalsPage() {
         {/* Where the capital actually sits, per the mapping tab */}
         {capital.rows.length > 0 ? (
           <div className="mt-4 rounded-xl border border-line bg-surface/40 p-3">
-            <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-xs text-muted-txt">
                 ההון שלך · מטאב <Link href="/app/mapping" className="text-gold hover:underline">מיפוי</Link>
               </span>
               <span className="text-sm font-bold text-txt tabular-nums">{fmt(capital.total)}</span>
             </div>
+            <p className="text-xs text-muted-txt mb-2">לחץ על נכס כדי לספור אותו ככסף נזיל. לחיצה נוספת מבטלת.</p>
             <div className="space-y-1">
-              {capital.rows.map(r => (
-                <div key={r.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-txt truncate min-w-0">{r.name}</span>
-                  <span className="text-muted-txt tabular-nums shrink-0">{fmt(r.amount)}</span>
-                </div>
-              ))}
+              {capital.rows.map(r => {
+                const picked = liquidSources.includes(r.id)
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => toggleSource(r.id)}
+                    aria-pressed={picked}
+                    className={`w-full min-h-[44px] flex items-center justify-between gap-2 text-sm rounded-lg border px-2.5 py-2 text-start transition-colors ${
+                      picked
+                        ? 'border-gold/60 bg-gold/10 text-txt'
+                        : 'border-transparent hover:border-line hover:bg-surface3 text-txt'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className={`shrink-0 w-4 text-center ${picked ? 'text-gold' : 'text-muted-txt/40'}`}>
+                        {picked ? '✓' : '+'}
+                      </span>
+                      <span className="truncate min-w-0">{r.name}</span>
+                    </span>
+                    <span className={`tabular-nums shrink-0 ${picked ? 'text-gold font-bold' : 'text-muted-txt'}`}>{fmt(r.amount)}</span>
+                  </button>
+                )
+              })}
             </div>
+            {liquidSources.length > 0 && (
+              <button
+                onClick={() => { setLiquidSources([]); setLiquidTotal(0) }}
+                className="mt-2 text-xs text-muted-txt hover:text-expense transition-colors py-2 min-h-[44px] inline-flex items-center"
+              >
+                נקה את כל הבחירות
+              </button>
+            )}
           </div>
         ) : (
           <Link

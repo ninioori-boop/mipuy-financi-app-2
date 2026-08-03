@@ -48,6 +48,13 @@ interface GoalsState {
   liquidTotal: number
   setLiquidTotal: (v: number) => void
 
+  /** Which capital rows from the mapping tab the client tapped to count as
+   *  liquid. Namespaced ids ('sav:<id>' / 'bank:<id>') so the two mapping
+   *  sources can never collide. Purely a selection aid — liquidTotal stays
+   *  the single source of truth and remains hand-editable. */
+  liquidSources: string[]
+  setLiquidSources: (ids: string[]) => void
+
   addGoal:    (horizon: GoalHorizon) => void
   updateGoal: (horizon: GoalHorizon, id: string, field: keyof Omit<GoalRow, 'id'>, value: string | number) => void
   deleteGoal: (horizon: GoalHorizon, id: string) => void
@@ -67,6 +74,9 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
 
   liquidTotal: 0,
   setLiquidTotal: (v) => set({ liquidTotal: Math.max(0, v) }),
+
+  liquidSources: [],
+  setLiquidSources: (ids) => set({ liquidSources: ids }),
 
   addGoal: (horizon) =>
     set(s => ({ [horizon]: [...s[horizon], emptyRow()] })),

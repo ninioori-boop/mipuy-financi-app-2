@@ -70,6 +70,7 @@ export interface Snapshot {
     long:   ReturnType<typeof useGoalsStore.getState>['long']
     isUSCitizen: boolean | null
     liquidTotal: number
+    liquidSources: string[]
   }
   credit: {
     learnedDB:         Record<string, string>
@@ -167,7 +168,7 @@ export function collectSnapshot(): Snapshot {
       expensesOverride: p.expensesOverride,
       creditScore:      p.creditScore,
     },
-    goals: { short: g.short, medium: g.medium, long: g.long, isUSCitizen: g.isUSCitizen, liquidTotal: g.liquidTotal },
+    goals: { short: g.short, medium: g.medium, long: g.long, isUSCitizen: g.isUSCitizen, liquidTotal: g.liquidTotal, liquidSources: g.liquidSources },
     credit: {
       learnedDB:         c.learnedDB,
       reportMonths:      c.reportMonths,
@@ -328,6 +329,7 @@ export function applySnapshot(raw: unknown): void {
       // only apply a real boolean, otherwise leave the store's default (null).
       ...(typeof g.isUSCitizen === 'boolean' ? { isUSCitizen: g.isUSCitizen } : {}),
       ...(typeof g.liquidTotal === 'number' ? { liquidTotal: g.liquidTotal } : {}),
+      ...(Array.isArray(g.liquidSources) ? { liquidSources: g.liquidSources } : {}),
     })
   }
 
@@ -476,7 +478,7 @@ export function resetAllStores(): void {
     incomeOverride: null, expensesOverride: null,
     creditScore: 0,
   })
-  useGoalsStore.setState({ short: [], medium: [], long: [], isUSCitizen: null, liquidTotal: 0 })
+  useGoalsStore.setState({ short: [], medium: [], long: [], isUSCitizen: null, liquidTotal: 0, liquidSources: [] })
   useCreditStore.setState({
     transactions: [], uploadedFileNames: [],
     learnedDB: {}, sharedLearnedDB: {}, reportMonths: 3,
