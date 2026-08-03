@@ -36,6 +36,7 @@ import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize } from '@/lib/dataSync'
+import { heldEventBlocksSave } from '@/lib/heldEventConflict'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
 import { saveCreditSection } from '@/lib/creditSection'
 import { registerLiveRefresh } from '@/lib/liveRefresh'
@@ -227,6 +228,27 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (opts.skipOnce) return 'proceed'
     // An unresolved conflict prompt gates all writes — no re-probe, no stacking.
     if (conflictToastId.current != null) return 'blocked'
+
+    // Exact check before the clock-based one. When the listener is HOLDING a
+    // foreign event (it holds rather than applying while an input has focus) we
+    // already have the other side's document in memory, so we can compare
+    // content instead of timestamps. This matters because the timestamp
+    // comparison below tolerates CONFLICT_SKEW_MS (15s) of drift and therefore
+    // waves through exactly the case that loses data: the other side's write
+    // landing a few seconds after our baseline, while we type. Content has no
+    // tolerance to hide behind, costs no Firestore read, and self-excludes our
+    // own write echoing back.
+    const held = pendingRemote.current
+    if (held && heldEventBlocksSave({
+      heldData: held.data,
+      heldUpdatedAt: held.updatedAt,
+      lastSavedJson: lastSavedJson.current,
+      lastRemoteApplied: lastRemoteApplied.current,
+    })) {
+      openConflictChoice(opts)
+      return 'blocked'
+    }
+
     if (Date.now() - lastProbeAt.current < PROBE_MIN_INTERVAL_MS) return 'proceed'
 
     let remoteTs = 0
