@@ -34,10 +34,16 @@ export function parseAmount(val: unknown): number {
   if (typeof val === 'number') return val
   const str = String(val).trim()
   const hasParens = str.includes('(')
+  // Accounting-style negatives come in two forms and only one was handled.
+  // parseFloat('250.00-') stops at the sign and returns +250, so a refund row
+  // exported with a trailing minus was read as a charge — and extractTransactions
+  // derives isRefund from `amount < 0`, so the statement total moved by twice the
+  // refund, in the wrong direction.
+  const hasTrailingMinus = /-\s*$/.test(str)
   const cleaned = str.replace(/[(),\s₪]/g, '').replace(/,/g, '')
   const num = parseFloat(cleaned)
   if (isNaN(num)) return NaN
-  return hasParens ? -Math.abs(num) : num
+  return (hasParens || hasTrailingMinus) ? -Math.abs(num) : num
 }
 
 export function extractInstallmentInfo(notes: unknown): InstallmentInfo | null {
@@ -130,7 +136,13 @@ export function extractTransactions(
   if (descCol === -1 || amountCol === -1) return []
 
   const transactions: Transaction[] = []
-  const SKIP_PATTERNS = ['סה"כ', 'סהכ', 'לחיוב', '===', 'TOTAL FOR']
+  // Summary rows to drop. Hebrew writes סה״כ with gershayim (U+05F4), not the
+  // straight ASCII quote this list used to carry, and the match was
+  // case-sensitive — so a `סה״כ עסקאות` row was imported as a real transaction
+  // and the whole statement double-counted. Compare both sides with quotes
+  // removed and lower-cased so every spelling collapses to one form.
+  const foldQuotes = (s: string) => s.replace(/["'׳״]/g, '').toLowerCase()
+  const SKIP_PATTERNS = ['סה"כ', 'סהכ', 'לחיוב', '===', 'TOTAL FOR'].map(foldQuotes)
 
   // Current column map — re-synced whenever a new section header appears mid-sheet.
   // Multi-card statements stack "בארץ" then "בחו"ל" (the latter has an extra
@@ -153,7 +165,8 @@ export function extractTransactions(
     const desc   = String(row[curDesc] ?? '').trim()
     const amount = parseAmount(row[curAmount])
     if (!desc || isNaN(amount) || amount === 0) continue
-    if (SKIP_PATTERNS.some(p => desc.includes(p))) continue
+    const descFolded = foldQuotes(desc)
+    if (SKIP_PATTERNS.some(p => descFolded.includes(p))) continue
 
     const notes = curNotes !== -1 ? String(row[curNotes] ?? '').trim() : ''
     const dateRaw = curDate !== -1 ? row[curDate] : null

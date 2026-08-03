@@ -12,6 +12,19 @@ describe('categorize — payment-rail fallback', () => {
     expect(categorize('הפקדת מזומן')).toBe('מזומן ללא מעקב')
   })
 
+  // The regression this file previously missed: every case above and below used
+  // either a bare rail word or the LATIN token BIT, both of which resolve via a
+  // BUSINESS_DB key. A transfer written entirely in Hebrew took a different path
+  // — and landed in אוכל בחוץ ובילויים, because the 2-char key "בר" matches
+  // inside "העברה"/"העברת". These are the descriptors real statements contain.
+  it('a transfer written entirely in Hebrew resolves to the rail default', () => {
+    expect(categorize('העברת כסף בביט')).toBe('ביט ללא מעקב')
+    expect(categorize('העברה עצמית בביט')).toBe('ביט ללא מעקב')
+    expect(categorize('ביט העברת כסף')).toBe('ביט ללא מעקב')
+    expect(categorize('העברה בפייבוקס')).toBe('ביט ללא מעקב')
+    expect(categorize('משיכת מזומן בכספומט')).toBe('מזומן ללא מעקב')
+  })
+
   it('the classic Latin formats still resolve via BUSINESS_DB', () => {
     expect(categorize('BIT')).toBe('ביט ללא מעקב')
     expect(categorize('העברה ב BIT בנה"פ')).toBe('ביט ללא מעקב')
