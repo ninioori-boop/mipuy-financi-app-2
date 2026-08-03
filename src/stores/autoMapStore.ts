@@ -43,6 +43,14 @@ interface AutoMapState {
 
 const mkId = () => 'd' + Math.random().toString(36).slice(2, 11)
 
+/**
+ * localStorage key for the persisted lab session. Exported so dataSync's
+ * resetSessionStores() can clear it at an identity change — this store holds the
+ * free-text financial context pasted about a specific client, so it must never
+ * outlive the person who wrote it on a shared browser.
+ */
+export const AUTOMAP_STORAGE_KEY = 'automap-lab'
+
 export const useAutoMapStore = create<AutoMapState>()(
   persist(
     (set, get) => ({
@@ -86,6 +94,6 @@ export const useAutoMapStore = create<AutoMapState>()(
         drafts: s.drafts.map(d => d.id === id ? { ...d, name: name.trim() || d.name } : d),
       })),
     }),
-    { name: 'automap-lab' },
+    { name: AUTOMAP_STORAGE_KEY },
   ),
 )

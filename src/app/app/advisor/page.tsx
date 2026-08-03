@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
 import { toast } from 'sonner'
 import { db, callable } from '@/lib/firebase'
-import { applySnapshot, resetAllStores } from '@/lib/dataSync'
+import { applySnapshot, resetAllStores, resetSessionStores } from '@/lib/dataSync'
 import { useAuthStore } from '@/stores/authStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { AdvisorDashboard } from '@/components/advisor/AdvisorDashboard'
@@ -81,6 +81,10 @@ export default function AdvisorPage() {
       // client never filled, and without the reset those tabs would keep
       // showing the ADVISOR's numbers instead of the client's empty state.
       resetAllStores()
+      // ...and the ephemeral tabs too: this is an SPA navigation, so without it
+      // the advisor's own uploaded bank statement stays on screen under the
+      // client's name (see resetSessionStores).
+      resetSessionStores()
       applySnapshot(data)
       router.push('/app/home')
     } catch {
@@ -105,6 +109,10 @@ export default function AdvisorPage() {
       const data = raw?.data ?? null
       const updatedAt = typeof raw?.updatedAt?.toMillis === 'function' ? raw.updatedAt.toMillis() : 0
       resetAllStores()
+      // Same reason as view mode — and it matters more here, because in EDIT
+      // mode "send to section" from a leftover bank file would write the
+      // advisor's own transactions into the client's saved mapping.
+      resetSessionStores()
       // A brand-new client has no snapshot yet — the advisor starts from a
       // clean slate and the first save creates the client's file.
       if (data) applySnapshot(data)

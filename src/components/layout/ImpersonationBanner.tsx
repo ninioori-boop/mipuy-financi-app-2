@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { useSyncStore } from '@/stores/syncStore'
+import { resetSessionStores } from '@/lib/dataSync'
 import { requestLiveRefresh, liveRefreshReady } from '@/lib/liveRefresh'
 import { timeAgoCoarse } from '@/lib/timeAgo'
 import { PRESENCE_SHOW_MS } from './SaveStatusBar'
@@ -50,6 +51,15 @@ export function ImpersonationBanner() {
     // the in-memory store anyway, so navigating is all an exit needs.
     // In edit mode the same full-reload exit applies — the last debounced save
     // has its own client-targeted path; no special teardown here.
+    //
+    // The one thing the reload does NOT clear is the persisted auto-map lab: it
+    // rehydrates from localStorage on the way back, so the client's pasted
+    // financial context and generated mapping would reappear under the advisor's
+    // OWN identity, where "העתק למיפוי" saves them into the advisor's document.
+    // Safe to call here: neither store is in the snapshot or DataSync's
+    // subscription list, so this cannot feed the pagehide flush the comment above
+    // warns about, and it leaves the impersonation guard untouched.
+    resetSessionStores()
     window.location.assign('/app/advisor')
   }
 

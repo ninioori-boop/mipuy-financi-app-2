@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useAnnualStore } from '@/stores/annualStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
-import { resetAllStores } from '@/lib/dataSync'
+import { resetAllStores, resetSessionStores } from '@/lib/dataSync'
 import { downloadSnapshotJson, downloadAnnualXlsx, downloadDocumentsIndex } from '@/lib/exportMyData'
 import { useBrand } from '@/components/layout/BrandProvider'
 
@@ -109,6 +109,11 @@ export default function SettingsPage() {
       // flush could otherwise re-create the backup key during navigation.
       useSyncStore.getState().setDirty(false)
       resetAllStores()
+      // Ephemeral stores too — and here, uniquely, the auto-map lab's saved
+      // drafts and its localStorage key as well. Everywhere else that archive is
+      // preserved (it is the advisor's own work and has no other copy), but this
+      // flow promises to leave no local copy of the financial file behind.
+      resetSessionStores({ purgeArchive: true })
       await signOut(auth).catch(() => {})
       try {
         if (uid) {

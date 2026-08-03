@@ -27,6 +27,8 @@ import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useRecurringStore, type RecurringRule } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore, type DismissedSub } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
+import { useBankStore } from '@/stores/bankStore'
+import { useAutoMapStore, AUTOMAP_STORAGE_KEY } from '@/stores/autoMapStore'
 import type { Transaction } from '@/types/transaction'
 
 export const SCHEMA_VERSION = 1
@@ -508,6 +510,51 @@ export function resetAllStores(): void {
     companyTaxOverride: null,
     vatOverride: null,
   })
+}
+
+/**
+ * Reset the EPHEMERAL, per-person stores — the ones deliberately kept out of the
+ * snapshot, and therefore untouched by resetAllStores().
+ *
+ * Call this ONLY when the person behind the screen changes: sign-out, entering or
+ * leaving view/edit-as-client, account deletion. Leaving matters as much as
+ * entering — exit is a full page reload, which clears bankStore for free but
+ * REHYDRATES autoMapStore from localStorage, carrying the client's context back
+ * into the advisor's own identity where "העתק למיפוי" would save it to the
+ * advisor's own document. It must NOT be called from
+ * applyRemote(), because that runs on every live-sync event from the other side
+ * WITHIN one identity — clearing the bank tab there would delete a statement the
+ * user is in the middle of working through, with no way to get it back.
+ *
+ * Why this exists: both stores below survived resetAllStores(), and entering
+ * edit-as-client is an SPA navigation rather than a reload, so module-level
+ * zustand state carried across. The advisor's own uploaded bank statement stayed
+ * on screen under the CLIENT's name, and "send to section" pushed the advisor's
+ * transactions into the client's mapping. autoMapStore was worse: it persists to
+ * one un-scoped localStorage key holding the free-text financial context pasted
+ * about a client, so it outlived sign-out entirely on a shared browser.
+ */
+export function resetSessionStores(opts?: { purgeArchive?: boolean }): void {
+  useBankStore.setState({ rawRows: [], fileName: '', sentRows: [], reportMonths: 1 })
+
+  // Only the LIVE lab session. `drafts` is deliberately preserved: it is a
+  // durable archive of past AI generations (deleting a single one asks for
+  // confirmation in the UI), it is the advisor's OWN work, and localStorage is
+  // its only copy — it is in neither the snapshot nor the cloud backup. Wiping it
+  // on every sign-out and every "view as client" would be silent, permanent data
+  // loss on the most routine click in the app. contextText + result are what
+  // actually carried one person's financials onto the next person's screen and
+  // into "העתק למיפוי", so clearing those closes the leak.
+  useAutoMapStore.setState({ contextText: '', reportMonths: 1, result: null })
+
+  // Account deletion is the one boundary that must leave nothing behind at all —
+  // that flow's stated contract. Here the archive goes too.
+  if (opts?.purgeArchive) {
+    useAutoMapStore.setState({ drafts: [] })
+    try {
+      localStorage.removeItem(AUTOMAP_STORAGE_KEY)
+    } catch { /* private mode / SSR */ }
+  }
 }
 
 /** Quick byte-size estimate to enforce a sanity cap before saving. */

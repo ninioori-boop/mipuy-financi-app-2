@@ -35,7 +35,7 @@ import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
-import { collectSnapshot, applySnapshot, resetAllStores, snapshotSize } from '@/lib/dataSync'
+import { collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize } from '@/lib/dataSync'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
 import { saveCreditSection } from '@/lib/creditSection'
 import { registerLiveRefresh } from '@/lib/liveRefresh'
@@ -460,6 +460,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         saveTimer.current = null
       }
       resetAllStores()
+      // Ephemeral tabs too — sign-out is an identity boundary. Deliberately NOT
+      // done in applyRemote(), which resets stores within ONE identity and would
+      // otherwise wipe a bank statement mid-review.
+      resetSessionStores()
       setHydrated(false)
       setStatus('idle')
       lastSavedJson.current = ''
@@ -1064,7 +1068,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
             closeButton: true,
             action: {
               label: 'חזרה לחשבון שלי',
-              onClick: () => window.location.assign('/app/advisor'),
+              // Same exit boundary as the banner's — clear the persisted lab so
+              // the client's context does not rehydrate under the advisor.
+              onClick: () => { resetSessionStores(); window.location.assign('/app/advisor') },
             },
           })
         }
