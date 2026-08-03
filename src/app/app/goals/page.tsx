@@ -29,11 +29,15 @@ function monthsUntil(targetDate: string): number | null {
   return Math.max(0, (y - now.getFullYear()) * 12 + (m - now.getMonth() - 1))
 }
 
-function autoMonthly(row: GoalRow): number {
+function autoMonthly(row: GoalRow, includeLiquid: boolean): number {
   if (row.monthly > 0) return row.monthly
   // Liquid capital earmarked for this goal shrinks the gap that monthly
-  // savings still needs to cover.
-  const remaining = Math.max(0, row.required - row.current - (row.liquidAllocated || 0))
+  // savings still needs to cover — but ONLY for viewers who can see the
+  // liquid-capital UI (lab gate). A client without lab access must see the
+  // exact same numbers as before the feature existed, even if his advisor
+  // already stored allocations on his data.
+  const liquid    = includeLiquid ? (row.liquidAllocated || 0) : 0
+  const remaining = Math.max(0, row.required - row.current - liquid)
   const months    = monthsUntil(row.targetDate)
   if (months === null) return 0                 // no target date — can't auto-plan
   if (months <= 0) return Math.ceil(remaining)  // due this month / overdue — need the full remaining now
@@ -66,7 +70,7 @@ export default function GoalsPage() {
 
   const allGoals    = [...short, ...medium, ...long]
   const totalReq    = allGoals.reduce((s, r) => s + r.required, 0)
-  const totalMo     = allGoals.reduce((s, r) => s + autoMonthly(r), 0)
+  const totalMo     = allGoals.reduce((s, r) => s + autoMonthly(r, labAllowed), 0)
   const doneCount   = allGoals.filter(r => r.required > 0 && r.current >= r.required).length
   const activeGoals = allGoals.filter(r => r.name || r.required > 0)
 
@@ -112,20 +116,27 @@ export default function GoalsPage() {
   const liquidAllocatedTotal = allGoals.reduce((s, r) => s + (r.liquidAllocated || 0), 0)
   const liquidRemaining      = liquidTotal - liquidAllocatedTotal
   const liquidPct            = liquidTotal > 0 ? Math.min(100, (liquidAllocatedTotal / liquidTotal) * 100) : 0
-  const liquidOver           = liquidAllocatedTotal > liquidTotal && liquidTotal > 0
+  // Over also covers the orphan case (allocations exist but the pool was
+  // cleared back to 0) — those still shrink the monthly numbers, so they must
+  // stay visible and correctable, never silently active.
+  const liquidOver           = liquidAllocatedTotal > liquidTotal
 
   // Facts for the goal analysis — months derived from each goal's
   // target date; the analysis engine is pure and lives in lib/.
+  // `current` must include earmarked liquid capital for exactly the viewers
+  // whose autoMonthly includes it — otherwise the analysis says "you need
+  // ₪X/mo" while the row next to it shows a different number.
+  const factCurrent = (r: GoalRow) => r.current + (labAllowed ? (r.liquidAllocated || 0) : 0)
   const shortFacts: GoalFacts[] = short.map(r => ({
-    id: r.id, name: r.name, required: r.required, current: r.current,
+    id: r.id, name: r.name, required: r.required, current: factCurrent(r),
     months: monthsUntil(r.targetDate), liquidity: r.liquidity,
   }))
   const mediumFacts: GoalFacts[] = medium.map(r => ({
-    id: r.id, name: r.name, required: r.required, current: r.current,
+    id: r.id, name: r.name, required: r.required, current: factCurrent(r),
     months: monthsUntil(r.targetDate), riskLevel: r.riskLevel, investorType: r.investorType,
   }))
   const longFacts: GoalFacts[] = long.map(r => ({
-    id: r.id, name: r.name, required: r.required, current: r.current,
+    id: r.id, name: r.name, required: r.required, current: factCurrent(r),
     months: monthsUntil(r.targetDate), riskLevel: r.riskLevel, investorType: r.investorType,
   }))
 
@@ -248,8 +259,10 @@ export default function GoalsPage() {
           </div>
         </div>
 
-        {/* Allocation bar — appears once a pool exists */}
-        {liquidTotal > 0 && (
+        {/* Allocation bar — appears once a pool exists, and stays visible as
+            long as any allocation exists (even after the pool was cleared),
+            so orphaned allocations are always on screen and fixable. */}
+        {(liquidTotal > 0 || liquidAllocatedTotal > 0) && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs flex-wrap gap-1">
               <span className="text-muted-txt">
@@ -302,7 +315,7 @@ export default function GoalsPage() {
       {/* Horizon sections */}
       {HORIZONS.map(({ id, label, sub, accent, bar }) => {
         const rows: GoalRow[] = sections[id]
-        const secTotal = rows.reduce((s, r) => s + autoMonthly(r), 0)
+        const secTotal = rows.reduce((s, r) => s + autoMonthly(r, labAllowed), 0)
 
         return (
           <div key={id} className={`rounded-xl border p-4 sm:p-5 space-y-3 ${accent}`}>
@@ -322,7 +335,7 @@ export default function GoalsPage() {
               {rows.map(row => {
                 const pct      = row.required > 0 ? Math.min(100, Math.round((row.current / row.required) * 100)) : 0
                 const isDone   = pct >= 100
-                const moAuto   = autoMonthly(row)
+                const moAuto   = autoMonthly(row, labAllowed)
                 const moMonths = monthsUntil(row.targetDate)
 
                 return (
@@ -378,9 +391,11 @@ export default function GoalsPage() {
                       </div>
                     </div>
 
-                    {/* Liquid-capital allocation — visible only once the client
-                        defined a liquid pool in the card above. */}
-                    {labAllowed && liquidTotal > 0 && (
+                    {/* Liquid-capital allocation — visible once a liquid pool
+                        was defined in the card above, and always when this goal
+                        already carries an allocation (so it can be cleared even
+                        if the pool went back to 0). */}
+                    {labAllowed && (liquidTotal > 0 || (row.liquidAllocated || 0) > 0) && (
                       <div className="flex items-center gap-2 flex-wrap pt-0.5">
                         <span className="text-xs text-muted-txt">💰 מהכסף הנזיל:</span>
                         <div className="w-28">
