@@ -22,6 +22,11 @@ export interface GoalRow {
   /** Medium-term: managed product vs self-directed portfolio. Drives the
    *  concrete vehicles (provident fund vs DIY / US broker). */
   investorType?: 'managed' | 'diy'
+  /** How much of the client's liquid-capital pool (liquidTotal) is earmarked
+   *  for this goal. Shrinks the goal's remaining gap, and with it the
+   *  auto-computed monthly contribution. Undefined on goals created before
+   *  the field existed — treated as 0 everywhere. */
+  liquidAllocated?: number
 }
 
 export type GoalHorizon = 'short' | 'medium' | 'long'
@@ -35,6 +40,13 @@ interface GoalsState {
    *  so the goals analysis gates on this. Asked once before the first analysis. */
   isUSCitizen: boolean | null
   setIsUSCitizen: (v: boolean) => void
+
+  /** Client-level fact: how much liquid money is available to invest toward
+   *  goals right now. The capital picture (savings accumulations + positive
+   *  checking balances) is shown from the mapping tab, but the client decides
+   *  this number himself — not all capital is liquid or investable. */
+  liquidTotal: number
+  setLiquidTotal: (v: number) => void
 
   addGoal:    (horizon: GoalHorizon) => void
   updateGoal: (horizon: GoalHorizon, id: string, field: keyof Omit<GoalRow, 'id'>, value: string | number) => void
@@ -52,6 +64,9 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
 
   isUSCitizen: null,
   setIsUSCitizen: (v) => set({ isUSCitizen: v }),
+
+  liquidTotal: 0,
+  setLiquidTotal: (v) => set({ liquidTotal: Math.max(0, v) }),
 
   addGoal: (horizon) =>
     set(s => ({ [horizon]: [...s[horizon], emptyRow()] })),

@@ -82,9 +82,10 @@ function populateAllStores() {
   })
 
   useGoalsStore.setState({
-    short:  [{ id: 'gs', name: 'phone',  required: 3000,    current: 1000, monthly: 200, targetDate: '2026-12', product: 'savings' }],
+    short:  [{ id: 'gs', name: 'phone',  required: 3000,    current: 1000, monthly: 200, targetDate: '2026-12', product: 'savings', liquidAllocated: 500 }],
     medium: [{ id: 'gm', name: 'car',    required: 50000,   current: 5000, monthly: 500, targetDate: '2028-06', product: 'fund' }],
     long:   [{ id: 'gl', name: 'house',  required: 1500000, current: 0,    monthly: 3000, targetDate: '2040-01', product: 'mortgage' }],
+    liquidTotal: 20000,
   })
 
   useCreditStore.setState({

@@ -16,7 +16,9 @@ export default defineConfig({
     // picks the file up, fails to resolve its import, and every run ends "1
     // failed" — a permanently red suite that everyone learns to look past,
     // which is worse than no suite. tests/e2e/* are Playwright (npm run test:e2e).
-    exclude: ['**/node_modules/**', 'functions/**', 'tests/e2e/**'],
+    // .wt-ship/ is the ship-skill's deploy worktree — a full stale copy of the
+    // repo whose tests fail on React-copy mismatch when run from this tree.
+    exclude: ['**/node_modules/**', 'functions/**', 'tests/e2e/**', '**/.wt-ship/**'],
   },
   resolve: {
     alias: {

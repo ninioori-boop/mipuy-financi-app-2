@@ -30,7 +30,9 @@ function monthsUntil(targetDate: string): number | null {
 
 function autoMonthly(row: GoalRow): number {
   if (row.monthly > 0) return row.monthly
-  const remaining = Math.max(0, row.required - row.current)
+  // Liquid capital earmarked for this goal shrinks the gap that monthly
+  // savings still needs to cover.
+  const remaining = Math.max(0, row.required - row.current - (row.liquidAllocated || 0))
   const months    = monthsUntil(row.targetDate)
   if (months === null) return 0                 // no target date — can't auto-plan
   if (months <= 0) return Math.ceil(remaining)  // due this month / overdue — need the full remaining now
@@ -54,7 +56,7 @@ function numInput(
 }
 
 export default function GoalsPage() {
-  const { short, medium, long, addGoal, updateGoal, deleteGoal } = useGoalsStore()
+  const { short, medium, long, addGoal, updateGoal, deleteGoal, liquidTotal, setLiquidTotal } = useGoalsStore()
   const mapping = useMappingStore()
   const sections = { short, medium, long }
 
@@ -88,6 +90,26 @@ export default function GoalsPage() {
   const allocPct  = savingsBudget.budget > 0 ? Math.min(100, (allocated / savingsBudget.budget) * 100) : 0
   const isOver    = allocated > savingsBudget.budget && savingsBudget.budget > 0
 
+  // ── Liquid capital pool — the capital picture comes from the mapping tab
+  //    (savings accumulations + positive checking balances); the client decides
+  //    how much of it is actually liquid and investable. ──
+  const capital = useMemo(() => {
+    const rows = [
+      ...mapping.savings
+        .filter(r => (r.accumulated || 0) > 0)
+        .map(r => ({ id: r.id, name: r.name || 'חיסכון', amount: r.accumulated })),
+      ...mapping.bankAccounts
+        .filter(r => (r.balance || 0) > 0)
+        .map(r => ({ id: r.id, name: r.name ? `עו"ש · ${r.name}` : 'עו"ש', amount: r.balance })),
+    ]
+    return { rows, total: rows.reduce((s, r) => s + r.amount, 0) }
+  }, [mapping.savings, mapping.bankAccounts])
+
+  const liquidAllocatedTotal = allGoals.reduce((s, r) => s + (r.liquidAllocated || 0), 0)
+  const liquidRemaining      = liquidTotal - liquidAllocatedTotal
+  const liquidPct            = liquidTotal > 0 ? Math.min(100, (liquidAllocatedTotal / liquidTotal) * 100) : 0
+  const liquidOver           = liquidAllocatedTotal > liquidTotal && liquidTotal > 0
+
   // Facts for the goal analysis — months derived from each goal's
   // target date; the analysis engine is pure and lives in lib/.
   const shortFacts: GoalFacts[] = short.map(r => ({
@@ -109,7 +131,7 @@ export default function GoalsPage() {
       {/* Header */}
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5">
         <h1 className="text-xl sm:text-2xl font-bold text-gold mb-1">🎯 יעדים פיננסיים</h1>
-        <p className="hidden sm:block text-muted-txt text-sm">הגדר יעדים לפי טווח זמן — המערכת תחשב כמה לחסוך מדי חודש</p>
+        <p className="hidden sm:block text-muted-txt text-sm">הגדר יעדים לפי טווח זמן: המערכת תחשב כמה לחסוך מדי חודש</p>
       </div>
 
       {/* Savings budget bar — comes from /app/checking */}
@@ -170,6 +192,89 @@ export default function GoalsPage() {
           </div>
         </Link>
       )}
+
+      {/* Liquid capital to invest — capital breakdown from the mapping tab on
+          top, then the client's own "how much of it is liquid" decision, then
+          an allocation bar mirroring the monthly one above. */}
+      <div className={`rounded-2xl border-2 p-4 sm:p-5 space-y-4 ${
+        liquidOver ? 'border-expense/50 bg-expense/5' : 'border-line bg-surface2'
+      }`}>
+        <div>
+          <h2 className="font-bold text-txt">💰 כסף נזיל להשקעה</h2>
+          <p className="text-xs text-muted-txt mt-0.5">
+            למעלה: ההון שלך כפי שרשום במיפוי. למטה: אתה מחליט כמה מזה נזיל וזמין להשקעה, ומחלק בין היעדים.
+          </p>
+        </div>
+
+        {/* Where the capital sits, per the mapping tab */}
+        {capital.rows.length > 0 ? (
+          <div className="rounded-xl border border-line bg-surface/40 p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-xs text-muted-txt">
+                ההון שלך · מטאב <Link href="/app/mapping" className="text-gold hover:underline">מיפוי</Link>
+              </span>
+              <span className="text-sm font-bold text-txt tabular-nums">{fmt(capital.total)}</span>
+            </div>
+            <div className="space-y-1">
+              {capital.rows.map(r => (
+                <div key={r.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-txt truncate min-w-0">{r.name}</span>
+                  <span className="text-muted-txt tabular-nums shrink-0">{fmt(r.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <Link
+            href="/app/mapping"
+            className="block rounded-xl border border-dashed border-line bg-surface/40 p-3 hover:border-gold/60 transition-colors"
+          >
+            <span className="text-xs text-muted-txt">
+              עדיין אין נתוני הון במיפוי. מלא צבירות בחלק החסכונות בטאב המיפוי, והפירוט יופיע כאן.
+            </span>
+          </Link>
+        )}
+
+        {/* The client's call: how much of the capital is investable right now */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="text-sm font-semibold text-txt">כמה מזה נזיל וזמין להשקעה?</label>
+          <div className="w-36">
+            {numInput(liquidTotal, setLiquidTotal, '₪')}
+          </div>
+        </div>
+
+        {/* Allocation bar — appears once a pool exists */}
+        {liquidTotal > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs flex-wrap gap-1">
+              <span className="text-muted-txt">
+                שויך ליעדים: <span className={`font-bold tabular-nums ${liquidOver ? 'text-expense' : 'text-txt'}`}>{fmt(liquidAllocatedTotal)}</span>
+              </span>
+              <span className="text-muted-txt">
+                {liquidRemaining >= 0 ? 'נותר לשיוך: ' : 'חריגה: '}
+                <span className={`font-bold tabular-nums ${liquidRemaining >= 0 ? 'text-income' : 'text-expense'}`}>{fmt(Math.abs(liquidRemaining))}</span>
+              </span>
+            </div>
+            <div className="h-3 rounded-full bg-line overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  liquidOver ? 'bg-expense' : liquidPct > 85 ? 'bg-gold' : 'bg-income'
+                }`}
+                style={{ width: `${liquidPct}%` }}
+              />
+            </div>
+            {liquidOver ? (
+              <div className="text-xs text-expense">
+                ⚠️ סך השיוך ליעדים עולה על הכסף הנזיל בעוד <span className="tabular-nums">{fmt(Math.abs(liquidRemaining))}</span>. הקטן את הסכומים, או עדכן את הסכום הנזיל.
+              </div>
+            ) : liquidAllocatedTotal === 0 ? (
+              <div className="text-xs text-muted-txt">
+                חלק את הכסף בין היעדים בשדה &quot;💰 מהכסף הנזיל&quot; שמופיע בכל יעד למטה.
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
 
       {/* KPI cards */}
       {activeGoals.length > 0 && (
@@ -266,6 +371,25 @@ export default function GoalsPage() {
                         />
                       </div>
                     </div>
+
+                    {/* Liquid-capital allocation — visible only once the client
+                        defined a liquid pool in the card above. */}
+                    {liquidTotal > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                        <span className="text-xs text-muted-txt">💰 מהכסף הנזיל:</span>
+                        <div className="w-28">
+                          {numInput(row.liquidAllocated || 0, v => updateGoal(id, row.id, 'liquidAllocated', v), '₪')}
+                        </div>
+                        {(row.liquidAllocated || 0) > 0 && row.required > 0 && (
+                          <span className="text-xs text-muted-txt">
+                            נשאר להשלים ביעד:{' '}
+                            <span className="tabular-nums font-semibold text-txt">
+                              {fmt(Math.max(0, row.required - row.current - (row.liquidAllocated || 0)))}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Liquidity toggle — short-term goals. Feeds the
                         analysis (money-market vs deposit). */}

@@ -69,6 +69,7 @@ export interface Snapshot {
     medium: ReturnType<typeof useGoalsStore.getState>['medium']
     long:   ReturnType<typeof useGoalsStore.getState>['long']
     isUSCitizen: boolean | null
+    liquidTotal: number
   }
   credit: {
     learnedDB:         Record<string, string>
@@ -166,7 +167,7 @@ export function collectSnapshot(): Snapshot {
       expensesOverride: p.expensesOverride,
       creditScore:      p.creditScore,
     },
-    goals: { short: g.short, medium: g.medium, long: g.long, isUSCitizen: g.isUSCitizen },
+    goals: { short: g.short, medium: g.medium, long: g.long, isUSCitizen: g.isUSCitizen, liquidTotal: g.liquidTotal },
     credit: {
       learnedDB:         c.learnedDB,
       reportMonths:      c.reportMonths,
@@ -326,6 +327,7 @@ export function applySnapshot(raw: unknown): void {
       // Snapshots written before this field existed simply don't carry it —
       // only apply a real boolean, otherwise leave the store's default (null).
       ...(typeof g.isUSCitizen === 'boolean' ? { isUSCitizen: g.isUSCitizen } : {}),
+      ...(typeof g.liquidTotal === 'number' ? { liquidTotal: g.liquidTotal } : {}),
     })
   }
 
@@ -474,7 +476,7 @@ export function resetAllStores(): void {
     incomeOverride: null, expensesOverride: null,
     creditScore: 0,
   })
-  useGoalsStore.setState({ short: [], medium: [], long: [], isUSCitizen: null })
+  useGoalsStore.setState({ short: [], medium: [], long: [], isUSCitizen: null, liquidTotal: 0 })
   useCreditStore.setState({
     transactions: [], uploadedFileNames: [],
     learnedDB: {}, sharedLearnedDB: {}, reportMonths: 3,
