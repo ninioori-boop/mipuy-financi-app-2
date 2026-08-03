@@ -1,7 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
+# (/node_modules is root-anchored, so functions/node_modules needs its own line)
 /node_modules
+functions/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -45,7 +47,14 @@ advisor-*.png
 next-env.d.ts
 
 # firebase admin / client export script
+# Credentials are matched by PATTERN, not exact name: a key downloaded from the
+# Firebase console arrives as finance-machine-a36e9-firebase-adminsdk-xxxxx.json,
+# which the old exact-name rule did not cover.
 service-account-key.json
+*firebase-adminsdk*.json
+*service-account*.json
+*.key
+firebase-debug.log
 clients.md
 clients.html
 .export-clients.log

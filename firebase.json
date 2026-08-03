@@ -6,6 +6,9 @@
     "rules": "storage.rules"
   },
   "functions": {
-    "source": "functions"
+    "source": "functions",
+    "predeploy": [
+      "node scripts/check-functions-tree.js"
+    ]
   }
 }
