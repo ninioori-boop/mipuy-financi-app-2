@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import { useGoalsStore } from '@/stores/goalsStore'
 import { useMappingStore } from '@/stores/mappingStore'
+import { useLabAccess } from '@/hooks/useLabAccess'
 import { GoalsAnalysis } from '@/components/goals/GoalsAnalysis'
 import type { GoalFacts } from '@/lib/goalsAnalysis'
 import type { GoalHorizon, GoalRow } from '@/stores/goalsStore'
@@ -58,6 +59,9 @@ function numInput(
 export default function GoalsPage() {
   const { short, medium, long, addGoal, updateGoal, deleteGoal, liquidTotal, setLiquidTotal } = useGoalsStore()
   const mapping = useMappingStore()
+  // The liquid-capital pool is lab-gated for now — advisors only, until it's
+  // been tried on real data and released to clients (then drop this gate).
+  const { allowed: labAllowed } = useLabAccess()
   const sections = { short, medium, long }
 
   const allGoals    = [...short, ...medium, ...long]
@@ -196,6 +200,7 @@ export default function GoalsPage() {
       {/* Liquid capital to invest — capital breakdown from the mapping tab on
           top, then the client's own "how much of it is liquid" decision, then
           an allocation bar mirroring the monthly one above. */}
+      {labAllowed && (
       <div className={`rounded-2xl border-2 p-4 sm:p-5 space-y-4 ${
         liquidOver ? 'border-expense/50 bg-expense/5' : 'border-line bg-surface2'
       }`}>
@@ -275,6 +280,7 @@ export default function GoalsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* KPI cards */}
       {activeGoals.length > 0 && (
@@ -374,7 +380,7 @@ export default function GoalsPage() {
 
                     {/* Liquid-capital allocation — visible only once the client
                         defined a liquid pool in the card above. */}
-                    {liquidTotal > 0 && (
+                    {labAllowed && liquidTotal > 0 && (
                       <div className="flex items-center gap-2 flex-wrap pt-0.5">
                         <span className="text-xs text-muted-txt">💰 מהכסף הנזיל:</span>
                         <div className="w-28">
