@@ -212,19 +212,58 @@ export default function GoalsPage() {
           top, then the client's own "how much of it is liquid" decision, then
           an allocation bar mirroring the monthly one above. */}
       {labAllowed && (
-      <div className={`rounded-2xl border-2 p-4 sm:p-5 space-y-4 ${
-        liquidOver ? 'border-expense/50 bg-expense/5' : 'border-line bg-surface2'
+      <div className={`rounded-2xl border-2 p-4 sm:p-5 transition-colors ${
+        liquidOver
+          ? 'border-expense/50 bg-expense/5'
+          : 'border-gold/40 bg-gradient-to-br from-gold/10 to-transparent'
       }`}>
-        <div>
-          <h2 className="font-bold text-txt">💰 כסף נזיל להשקעה</h2>
-          <p className="text-xs text-muted-txt mt-0.5">
-            למעלה: ההון שלך כפי שרשום במיפוי. למטה: אתה מחליט כמה מזה נזיל וזמין להשקעה, ומחלק בין היעדים.
-          </p>
+        {/* Same head layout as the monthly savings-budget bar above: the pool
+            on one side (editable), what's already allocated on the other. */}
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <div className="text-xs text-muted-txt mb-1">💰 כסף נזיל להשקעה · אתה מחליט כמה מההון זמין</div>
+            <input
+              type="number" inputMode="decimal" value={liquidTotal || ''} min={0}
+              onChange={e => setLiquidTotal(Math.max(0, parseFloat(e.target.value) || 0))}
+              placeholder="0" style={{ direction: 'ltr' }}
+              className="w-40 bg-transparent border-b border-gold/40 focus:border-gold focus:outline-none text-3xl sm:text-4xl font-black text-gold tabular-nums text-left"
+            />
+          </div>
+          <div className="text-end space-y-0.5">
+            <div className="text-xs text-muted-txt">שויך ליעדים</div>
+            <div className={`text-xl font-bold tabular-nums ${liquidOver ? 'text-expense' : 'text-txt'}`}>{fmt(liquidAllocatedTotal)}</div>
+            <div className="text-xs text-muted-txt">
+              {liquidRemaining >= 0 ? 'נותר: ' : 'חריגה: '}
+              <span className={`tabular-nums font-bold ${liquidRemaining >= 0 ? 'text-income' : 'text-expense'}`}>
+                {fmt(Math.abs(liquidRemaining))}
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Where the capital sits, per the mapping tab */}
+        {/* Progress bar */}
+        <div className="h-3 rounded-full bg-line overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${
+              liquidOver ? 'bg-expense' : liquidPct > 85 ? 'bg-gold' : 'bg-income'
+            }`}
+            style={{ width: `${liquidPct}%` }}
+          />
+        </div>
+
+        {liquidOver ? (
+          <div className="mt-3 text-xs text-expense">
+            ⚠️ סך השיוך ליעדים עולה על הכסף הנזיל בעוד <span className="tabular-nums">{fmt(Math.abs(liquidRemaining))}</span>. הקטן את הסכומים, או עדכן את הסכום הנזיל.
+          </div>
+        ) : liquidTotal > 0 && liquidAllocatedTotal === 0 ? (
+          <div className="mt-3 text-xs text-muted-txt">
+            חלק את הכסף בין היעדים בשדה &quot;💰 מהכסף הנזיל&quot; שמופיע בכל יעד למטה. כל סכום שתקליד יירד מהיתרה כאן.
+          </div>
+        ) : null}
+
+        {/* Where the capital actually sits, per the mapping tab */}
         {capital.rows.length > 0 ? (
-          <div className="rounded-xl border border-line bg-surface/40 p-3">
+          <div className="mt-4 rounded-xl border border-line bg-surface/40 p-3">
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-xs text-muted-txt">
                 ההון שלך · מטאב <Link href="/app/mapping" className="text-gold hover:underline">מיפוי</Link>
@@ -243,54 +282,12 @@ export default function GoalsPage() {
         ) : (
           <Link
             href="/app/mapping"
-            className="block rounded-xl border border-dashed border-line bg-surface/40 p-3 hover:border-gold/60 transition-colors"
+            className="mt-4 block rounded-xl border border-dashed border-line bg-surface/40 p-3 hover:border-gold/60 transition-colors"
           >
             <span className="text-xs text-muted-txt">
               עדיין אין נתוני הון במיפוי. מלא צבירות בחלק החסכונות בטאב המיפוי, והפירוט יופיע כאן.
             </span>
           </Link>
-        )}
-
-        {/* The client's call: how much of the capital is investable right now */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <label className="text-sm font-semibold text-txt">כמה מזה נזיל וזמין להשקעה?</label>
-          <div className="w-36">
-            {numInput(liquidTotal, setLiquidTotal, '₪')}
-          </div>
-        </div>
-
-        {/* Allocation bar — appears once a pool exists, and stays visible as
-            long as any allocation exists (even after the pool was cleared),
-            so orphaned allocations are always on screen and fixable. */}
-        {(liquidTotal > 0 || liquidAllocatedTotal > 0) && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs flex-wrap gap-1">
-              <span className="text-muted-txt">
-                שויך ליעדים: <span className={`font-bold tabular-nums ${liquidOver ? 'text-expense' : 'text-txt'}`}>{fmt(liquidAllocatedTotal)}</span>
-              </span>
-              <span className="text-muted-txt">
-                {liquidRemaining >= 0 ? 'נותר לשיוך: ' : 'חריגה: '}
-                <span className={`font-bold tabular-nums ${liquidRemaining >= 0 ? 'text-income' : 'text-expense'}`}>{fmt(Math.abs(liquidRemaining))}</span>
-              </span>
-            </div>
-            <div className="h-3 rounded-full bg-line overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  liquidOver ? 'bg-expense' : liquidPct > 85 ? 'bg-gold' : 'bg-income'
-                }`}
-                style={{ width: `${liquidPct}%` }}
-              />
-            </div>
-            {liquidOver ? (
-              <div className="text-xs text-expense">
-                ⚠️ סך השיוך ליעדים עולה על הכסף הנזיל בעוד <span className="tabular-nums">{fmt(Math.abs(liquidRemaining))}</span>. הקטן את הסכומים, או עדכן את הסכום הנזיל.
-              </div>
-            ) : liquidAllocatedTotal === 0 ? (
-              <div className="text-xs text-muted-txt">
-                חלק את הכסף בין היעדים בשדה &quot;💰 מהכסף הנזיל&quot; שמופיע בכל יעד למטה.
-              </div>
-            ) : null}
-          </div>
         )}
       </div>
       )}
