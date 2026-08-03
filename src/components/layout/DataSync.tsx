@@ -37,6 +37,7 @@ import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize } from '@/lib/dataSync'
 import { heldEventBlocksSave } from '@/lib/heldEventConflict'
+import { needsIdentityTeardown } from '@/lib/identitySwitch'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
 import { saveCreditSection } from '@/lib/creditSection'
 import { registerLiveRefresh } from '@/lib/liveRefresh'
@@ -150,6 +151,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const backupTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedJson   = useRef<string>('')
   const lastBackupJson  = useRef<string>('')
+  // Whose data is currently in the stores. Set when a load completes, cleared on
+  // sign-out. Lets the signed-in branch below tell a genuine person-to-person
+  // switch (which must tear everything down) from Firebase merely re-emitting
+  // the same user, which happens on every navigation.
+  const hydratedUid     = useRef<string>('')
   const lastVersionAt   = useRef<number>(0)
   // Cached Firebase ID token — needed by the beacon-save handler at tab close
   // (sendBeacon runs synchronously; we can't await getIdToken() there).
@@ -488,6 +494,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       resetSessionStores()
       setHydrated(false)
       setStatus('idle')
+      hydratedUid.current   = ''
       lastSavedJson.current = ''
       // Anti-clobber state must not leak into the next session/user:
       selfDocBaseline.current  = 0
@@ -516,6 +523,43 @@ export function DataSync({ children }: { children: React.ReactNode }) {
 
     let cancelled = false
     setStatus('loading')
+
+    // A DIFFERENT person just signed in without the previous one signing out —
+    // reachable because /connect and /connect/expenses call signIn* directly, so
+    // Firebase emits user B with no null in between and the sign-out teardown
+    // above never runs. Everything below this block resets only the anti-clobber
+    // and live-sync refs; without the full teardown the stores still hold person
+    // A's portfolio while `hydrated` is still true, so the 500ms backup timer
+    // mirrors A's data into B's backup key and the 2s save writes it into B's
+    // document. A failed load would not even show the blocking overlay, because
+    // that is gated on `!hydrated`.
+    //
+    // Safe to clear stores here: React runs every effect CLEANUP before any
+    // effect body, so effect 2 has already unsubscribed the stores and cleared
+    // its timers by the time this runs — the resets cannot trigger a save. The
+    // timer cancellations below mirror the sign-out branch's own belt-and-braces.
+    if (needsIdentityTeardown({ hydratedUid: hydratedUid.current, incomingUid: user.uid })) {
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+      if (backupTimer.current) { clearTimeout(backupTimer.current); backupTimer.current = null }
+      resetAllStores()
+      resetSessionStores()
+      setHydrated(false)
+      hydratedUid.current      = ''
+      lastSavedJson.current    = ''
+      lastBackupJson.current   = ''
+      selfDocBaseline.current  = 0
+      clientDocBaseline.current = 0
+      viewNotifyTs.current     = 0
+      syncBusyAt.current       = 0
+      syncDepth.current        = 0
+      useSyncStore.getState().setDirty(false)
+      useSyncStore.getState().setRemoteActivity(null)
+      // NOTE: impersonationStore is deliberately NOT cleared here. It has no
+      // stop() by design — clearing the flag in place is what let the pagehide
+      // flush persist a client's data into the advisor's account (2026-07-21).
+      // An act-as-client session surviving an identity switch is a real and
+      // separate defect; fixing it safely needs its own review, not a rider.
+    }
 
     // Fresh identity ⇒ fresh anti-clobber state (covers direct userA→userB
     // switches that never pass through the null branch above).
@@ -556,6 +600,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // already consumed so it can never be treated as a foreign change.
         lastRemoteApplied.current = result?.updatedAt ?? 0
         setHydrated(true)
+        // Record WHOSE data is now in the stores, so a later sign-in by someone
+        // else is recognised as a switch. Set only on success: after a failed
+        // load nothing is hydrated, and claiming otherwise would suppress the
+        // teardown for the next person.
+        hydratedUid.current = user.uid
         setStatus('idle')
 
         // Safety-net restore: if there's a localStorage backup that's newer
@@ -698,6 +747,11 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           beginSync()
           try {
             await saveClientDataAsAdvisor(clientUid, snap, advisorUid)
+            // Same reason as the self path below: these refs are shared session
+            // state, and restamping them after an identity switch corrupts the
+            // new person's baselines.
+            const t = saveTarget()
+            if (!t.editMode || t.uid !== clientUid) return
             lastSavedJson.current      = json
             clientDocBaseline.current  = Date.now()
             lastProbeAt.current        = Date.now()
@@ -775,6 +829,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         beginSync()
         try {
           await saveUserData(user.uid, snap)
+          // The write targeted the right document, but these refs are SHARED
+          // session state. If someone else signed in while it was in flight,
+          // the identity teardown has already zeroed them — restamping now
+          // would hand the new person our JSON as their "last saved" baseline,
+          // producing a spurious conflict prompt and a 10s probe blackout on
+          // their first seconds.
+          if (useAuthStore.getState().user?.uid !== user.uid) return
           lastSavedJson.current = json
           selfDocBaseline.current = Date.now()
           lastProbeAt.current     = Date.now()
