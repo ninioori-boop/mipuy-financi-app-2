@@ -507,12 +507,16 @@ function IosWizard({
           <br />
           עכשיו מוסיפים שתי פעולות (דרך «חיפוש פעולות» <Bi en="Search for actions" /> למטה):
           <br />
-          <span className="text-txt font-semibold">① «מלל»</span> <Bi en="Text" /> — הקש בתיבה →
-          «בחירת משתנה» <Bi en="Select Variable" /> →{' '}
-          <span className="text-txt font-semibold">«קלט של קיצור»</span> <Bi en="Shortcut Input" /> →
-          הקש על המילה הכחולה שנוספה → בחר <span className="text-txt font-semibold">«כמות»</span>{' '}
-          <Bi en="Amount" /> → הקש רווח → שוב «בחירת משתנה» → «קלט של קיצור» → הקש עליה →
-          בחר <span className="text-txt font-semibold">«בית עסק»</span> <Bi en="Merchant" />.
+          <span className="text-txt font-semibold">① «מלל»</span> <Bi en="Text" /> — ובתוך התיבה שלה,
+          לפי הסדר: הקש בתיבה כדי לפתוח את המקלדת → מעל המקלדת «בחירת משתנה»{' '}
+          <Bi en="Select Variable" /> → <span className="text-txt font-semibold">«קלט של קיצור»</span>{' '}
+          <Bi en="Shortcut Input" /> → ייכנס <span className="text-txt font-semibold">שבב כחול</span>,
+          הקש עליו ובחר <span className="text-txt font-semibold">«כמות»</span> <Bi en="Amount" /> →{' '}
+          <span className="text-txt font-semibold">לחץ פעם אחת על מקש הרווח</span> (בלי הרווח הסכום
+          ושם החנות נדבקים ואי אפשר להפריד ביניהם) → שוב «בחירת משתנה» → «קלט של קיצור» → הקש על
+          השבב החדש → בחר <span className="text-txt font-semibold">«בית עסק»</span> <Bi en="Merchant" />.
+          <br />
+          בסוף התיבה מכילה <span className="text-txt font-semibold">שני שבבים ורווח ביניהם</span>.
           <br />
           <span className="text-txt font-semibold">② «הפעל קיצור דרך»</span> <Bi en="Run Shortcut" /> —
           הקש על «קיצור דרך» → בחר{' '}
