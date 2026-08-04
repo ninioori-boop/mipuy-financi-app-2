@@ -30,6 +30,7 @@ import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
+import { useBusinessRosterStore } from '@/stores/businessRosterStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
@@ -897,6 +898,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useRecurringStore.subscribe(triggerSave),
       useBusinessStore.subscribe(triggerSave),
       useBusinessAnnualStore.subscribe(triggerSave),
+      useBusinessRosterStore.subscribe(triggerSave),
       useSubscriptionPrefsStore.subscribe(triggerSave),
       useBudgetReminderStore.subscribe(triggerSave),
     ]

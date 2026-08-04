@@ -3,7 +3,9 @@
 import { useMemo } from 'react'
 import { toast } from 'sonner'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
-import { useBusinessStore, type BizSection, type BizRow, type BusinessType } from '@/stores/businessStore'
+import { useBusinessStore, bizDataOf, type BizSection, type BizRow, type BusinessType } from '@/stores/businessStore'
+import { useBusinessRosterStore } from '@/stores/businessRosterStore'
+import { BusinessSwitcher } from '@/components/business/BusinessSwitcher'
 import { calcIncomeTaxAnnual, calcBituachLeumiMonthly, calcVat, COMPANY_TAX_RATE } from '@/lib/businessTax'
 
 function uid() { return Math.random().toString(36).slice(2) }
@@ -123,47 +125,52 @@ function TaxLine({ label, hint, value, overridden, onOverride, onReset }: {
 
 export default function BusinessAnnualPage() {
   const store = useBusinessAnnualStore()
+  const activeId = useBusinessRosterStore(s => s.activeId)
 
-  const isPatur = store.businessType === 'osek_patur'
-  const isCompany = store.businessType === 'company'
+  // The active business is shared with the monthly tab (same roster, same id).
+  const biz = bizDataOf(store.byId, activeId)
+
+  const isPatur = biz.businessType === 'osek_patur'
+  const isCompany = biz.businessType === 'company'
 
   const totals = useMemo(() => {
-    const revenue = store.revenue.reduce((s, r) => s + (r.amount || 0), 0)
-    const cogs = store.cogs.reduce((s, r) => s + (r.amount || 0), 0)
-    const opex = store.opex.reduce((s, r) => s + (r.amount || 0), 0)
-    const deductible = [...store.cogs, ...store.opex]
+    const revenue = biz.revenue.reduce((s, r) => s + (r.amount || 0), 0)
+    const cogs = biz.cogs.reduce((s, r) => s + (r.amount || 0), 0)
+    const opex = biz.opex.reduce((s, r) => s + (r.amount || 0), 0)
+    const deductible = [...biz.cogs, ...biz.opex]
       .filter(r => r.vatDeductible)
       .reduce((s, r) => s + (r.amount || 0), 0)
     return { revenue, cogs, opex, deductible }
-  }, [store.revenue, store.cogs, store.opex])
+  }, [biz.revenue, biz.cogs, biz.opex])
 
   const grossProfit = totals.revenue - totals.cogs
   const preTaxProfit = grossProfit - totals.opex
 
-  const vatCalc = calcVat(totals.revenue, totals.deductible, store.vatRate)
-  const vatPayable = store.vatOverride ?? vatCalc.payable
+  const vatCalc = calcVat(totals.revenue, totals.deductible, biz.vatRate)
+  const vatPayable = biz.vatOverride ?? vatCalc.payable
 
   // income tax — exact on the full annual taxable income (brackets are annual)
-  const incomeTaxAuto = calcIncomeTaxAnnual(preTaxProfit, store.taxPoints)
-  const incomeTax = isCompany ? 0 : (store.incomeTaxOverride ?? incomeTaxAuto)
+  const incomeTaxAuto = calcIncomeTaxAnnual(preTaxProfit, biz.taxPoints)
+  const incomeTax = isCompany ? 0 : (biz.incomeTaxOverride ?? incomeTaxAuto)
 
   // national insurance — monthly-tiered, so compute on the monthly-equivalent ×12
   const blAuto = calcBituachLeumiMonthly(preTaxProfit / 12) * 12
-  const bituachLeumi = isCompany ? 0 : (store.bituachLeumiOverride ?? blAuto)
+  const bituachLeumi = isCompany ? 0 : (biz.bituachLeumiOverride ?? blAuto)
 
   const companyTaxAuto = Math.max(0, preTaxProfit) * COMPANY_TAX_RATE
-  const companyTax = isCompany ? (store.companyTaxOverride ?? companyTaxAuto) : 0
+  const companyTax = isCompany ? (biz.companyTaxOverride ?? companyTaxAuto) : 0
 
   const totalTax = incomeTax + bituachLeumi + companyTax
   const netProfit = preTaxProfit - totalTax
-  const leftInBusiness = netProfit - store.ownerSalary
+  const leftInBusiness = netProfit - biz.ownerSalary
 
   function seedFromMonthly() {
-    const b = useBusinessStore.getState()
+    // reads the SAME business from the monthly tab, one-way, deep-copied
+    const b = bizDataOf(useBusinessStore.getState().byId, activeId)
     if (!confirm('לאתחל את התכנון השנתי מהממוצע החודשי (×12)? פעולה זו תחליף את הנתונים הקיימים כאן.')) return
     const x12 = (rows: BizRow[]): BizRow[] =>
       rows.map(r => ({ id: uid(), name: r.name, amount: Math.round((r.amount || 0) * 12), vatDeductible: r.vatDeductible }))
-    store.seed({
+    store.seed(activeId, {
       businessType: b.businessType,
       revenue: x12(b.revenue),
       cogs: x12(b.cogs),
@@ -176,10 +183,10 @@ export default function BusinessAnnualPage() {
   }
 
   const bind = (section: BizSection) => ({
-    onAdd: () => store.addRow(section),
+    onAdd: () => store.addRow(activeId, section),
     onUpdate: (id: string, field: 'name' | 'amount' | 'vatDeductible', value: string | number | boolean) =>
-      store.updateRow(section, id, field, value),
-    onDelete: (id: string) => store.deleteRow(section, id),
+      store.updateRow(activeId, section, id, field, value),
+    onDelete: (id: string) => store.deleteRow(activeId, section, id),
   })
 
   const yearNow = new Date().getFullYear()
@@ -210,16 +217,19 @@ export default function BusinessAnnualPage() {
           </div>
         </div>
 
+        {/* Businesses — pick / duplicate / add (shared with the monthly tab) */}
+        <BusinessSwitcher />
+
         {/* Business type selector */}
         <div>
           <div className="text-xs font-semibold text-muted-txt mb-1.5">סוג העסק</div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {TYPES.map(t => {
-              const active = store.businessType === t.id
+              const active = biz.businessType === t.id
               return (
                 <button
                   key={t.id}
-                  onClick={() => store.setBusinessType(t.id)}
+                  onClick={() => store.setBusinessType(activeId, t.id)}
                   className={[
                     'text-start rounded-xl border p-3 transition-all',
                     active ? 'border-gold bg-gold/15 ring-2 ring-gold/30' : 'border-line bg-surface hover:bg-surface3',
@@ -244,13 +254,13 @@ export default function BusinessAnnualPage() {
 
       {/* Revenue */}
       <SectionPanel
-        title="מחזור / הכנסות" icon="💰" rows={store.revenue} total={totals.revenue}
+        title="מחזור / הכנסות" icon="💰" rows={biz.revenue} total={totals.revenue}
         color="text-income" colName="מקור הכנסה" showVat={false} {...bind('revenue')}
       />
 
       {/* COGS */}
       <SectionPanel
-        title="הוצאות גולמיות (עלות המכר)" icon="📦" rows={store.cogs} total={totals.cogs}
+        title="הוצאות גולמיות (עלות המכר)" icon="📦" rows={biz.cogs} total={totals.cogs}
         color="text-expense" colName="סוג הוצאה" showVat={!isPatur} {...bind('cogs')}
       />
 
@@ -264,7 +274,7 @@ export default function BusinessAnnualPage() {
 
       {/* OpEx */}
       <SectionPanel
-        title="הוצאות תפעוליות" icon="🧾" rows={store.opex} total={totals.opex}
+        title="הוצאות תפעוליות" icon="🧾" rows={biz.opex} total={totals.opex}
         color="text-expense" colName="סוג הוצאה" showVat={!isPatur} {...bind('opex')}
       />
 
@@ -276,8 +286,8 @@ export default function BusinessAnnualPage() {
             <div className="space-y-1">
               <label className="text-xs text-muted-txt">נקודות זיכוי</label>
               <input
-                type="number" inputMode="decimal" value={store.taxPoints || ''} min={0} step={0.25}
-                onChange={e => store.setTaxPoints(parseFloat(e.target.value) || 0)}
+                type="number" inputMode="decimal" value={biz.taxPoints || ''} min={0} step={0.25}
+                onChange={e => store.setTaxPoints(activeId, parseFloat(e.target.value) || 0)}
                 style={{ direction: 'ltr' }}
                 className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
@@ -287,8 +297,8 @@ export default function BusinessAnnualPage() {
             <div className="space-y-1">
               <label className="text-xs text-muted-txt">שיעור מע&quot;מ %</label>
               <input
-                type="number" inputMode="decimal" value={Math.round(store.vatRate * 100) || ''} min={0} step={1}
-                onChange={e => store.setVatRate((parseFloat(e.target.value) || 0) / 100)}
+                type="number" inputMode="decimal" value={Math.round(biz.vatRate * 100) || ''} min={0} step={1}
+                onChange={e => store.setVatRate(activeId, (parseFloat(e.target.value) || 0) / 100)}
                 style={{ direction: 'ltr' }}
                 className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
@@ -310,9 +320,9 @@ export default function BusinessAnnualPage() {
           <TaxLine
             label="מס חברות (23%)"
             value={companyTax}
-            overridden={store.companyTaxOverride !== null}
-            onOverride={store.setCompanyTaxOverride}
-            onReset={() => store.setCompanyTaxOverride(null)}
+            overridden={biz.companyTaxOverride !== null}
+            onOverride={v => store.setCompanyTaxOverride(activeId, v)}
+            onReset={() => store.setCompanyTaxOverride(activeId, null)}
           />
         ) : (
           <>
@@ -320,17 +330,17 @@ export default function BusinessAnnualPage() {
               label="מס הכנסה"
               hint="מדרגות שנתיות − נקודות זיכוי"
               value={incomeTax}
-              overridden={store.incomeTaxOverride !== null}
-              onOverride={store.setIncomeTaxOverride}
-              onReset={() => store.setIncomeTaxOverride(null)}
+              overridden={biz.incomeTaxOverride !== null}
+              onOverride={v => store.setIncomeTaxOverride(activeId, v)}
+              onReset={() => store.setIncomeTaxOverride(activeId, null)}
             />
             <TaxLine
               label="ביטוח לאומי + מס בריאות"
               hint="עצמאי — מדורג"
               value={bituachLeumi}
-              overridden={store.bituachLeumiOverride !== null}
-              onOverride={store.setBituachLeumiOverride}
-              onReset={() => store.setBituachLeumiOverride(null)}
+              overridden={biz.bituachLeumiOverride !== null}
+              onOverride={v => store.setBituachLeumiOverride(activeId, v)}
+              onReset={() => store.setBituachLeumiOverride(activeId, null)}
             />
           </>
         )}
@@ -366,13 +376,13 @@ export default function BusinessAnnualPage() {
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-muted-txt">₪</span>
               <input
-                type="number" inputMode="numeric" value={store.vatOverride ?? ''} placeholder={String(Math.round(vatCalc.payable))}
-                onChange={e => store.setVatOverride(e.target.value === '' ? null : (parseFloat(e.target.value) || 0))}
+                type="number" inputMode="numeric" value={biz.vatOverride ?? ''} placeholder={String(Math.round(vatCalc.payable))}
+                onChange={e => store.setVatOverride(activeId, e.target.value === '' ? null : (parseFloat(e.target.value) || 0))}
                 style={{ direction: 'ltr' }}
                 className="w-24 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
-              {store.vatOverride !== null && (
-                <button onClick={() => store.setVatOverride(null)} className="px-2 py-2 text-base leading-none text-gold hover:text-gold-light" title="אפס">↺</button>
+              {biz.vatOverride !== null && (
+                <button onClick={() => store.setVatOverride(activeId, null)} className="px-2 py-2 text-base leading-none text-gold hover:text-gold-light" title="אפס">↺</button>
               )}
             </div>
           </div>
@@ -390,15 +400,15 @@ export default function BusinessAnnualPage() {
           <div className="flex items-center gap-1.5">
             <span className="text-base">₪</span>
             <input
-              type="number" inputMode="numeric" value={store.ownerSalary || ''} min={0}
-              onChange={e => store.setOwnerSalary(parseFloat(e.target.value) || 0)}
+              type="number" inputMode="numeric" value={biz.ownerSalary || ''} min={0}
+              onChange={e => store.setOwnerSalary(activeId, parseFloat(e.target.value) || 0)}
               placeholder="0" style={{ direction: 'ltr' }}
               className="w-28 sm:w-32 rounded-lg border border-line bg-surface px-3 py-2 text-base font-bold text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
             />
           </div>
         </div>
         <p className="text-[11px] text-muted-txt">
-          {fmt(store.ownerSalary)} לשנה · {perMo(store.ownerSalary)} לחודש
+          {fmt(biz.ownerSalary)} לשנה · {perMo(biz.ownerSalary)} לחודש
           {!isCompany && ' — משיכת בעלים (לא הוצאה מוכרת; כל הרווח חייב במס).'}
         </p>
       </div>
@@ -427,7 +437,7 @@ export default function BusinessAnnualPage() {
         </div>
         <div className="flex items-center justify-between text-sm py-0.5">
           <span className="text-muted-txt">משכורת אישית (משיכה לבית)</span>
-          <span className="tabular-nums text-expense">{fmt(-store.ownerSalary)}</span>
+          <span className="tabular-nums text-expense">{fmt(-biz.ownerSalary)}</span>
         </div>
         <div className="flex items-center justify-between pt-2 mt-1 border-t-2 border-gold/30 flex-wrap gap-1">
           <span className="text-sm font-bold text-gold">יתרת מזומן שנשארת בעסק</span>

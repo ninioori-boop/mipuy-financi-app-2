@@ -3,15 +3,16 @@
 import { useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { useBusinessStore, type BizSection, type BizRow, type BusinessType } from '@/stores/businessStore'
+import { useBusinessStore, bizDataOf, type BizSection, type BizRow, type BusinessType } from '@/stores/businessStore'
+import { useBusinessRosterStore } from '@/stores/businessRosterStore'
+import { salaryRowLabel } from '@/lib/businessProfiles'
+import { BusinessSwitcher } from '@/components/business/BusinessSwitcher'
 import { useClientMode } from '@/hooks/useClientMode'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import {
   calcIncomeTaxMonthly, calcBituachLeumiMonthly, calcCompanyTaxMonthly, calcVat,
 } from '@/lib/businessTax'
-
-const SALARY_LABEL = 'משכורת מהעסק'
 
 function fmt(n: number) {
   const sign = n < 0 ? '-' : ''
@@ -133,64 +134,73 @@ function TaxLine({ label, hint, value, overridden, onOverride, onReset }: {
 
 export default function BusinessPage() {
   const store = useBusinessStore()
+  const activeId = useBusinessRosterStore(s => s.activeId)
+  const roster = useBusinessRosterStore(s => s.list)
   const [salaryMonth, setSalaryMonth] = useState('')
 
-  const isPatur = store.businessType === 'osek_patur'
-  const isCompany = store.businessType === 'company'
+  // Everything below reads the ACTIVE business; the switcher above picks it.
+  const biz = bizDataOf(store.byId, activeId)
+  const activeName = roster.find(p => p.id === activeId)?.name ?? ''
+  const salaryLabel = salaryRowLabel(activeId, activeName)
+
+  const isPatur = biz.businessType === 'osek_patur'
+  const isCompany = biz.businessType === 'company'
 
   const totals = useMemo(() => {
-    const revenue = store.revenue.reduce((s, r) => s + (r.amount || 0), 0)
-    const cogs = store.cogs.reduce((s, r) => s + (r.amount || 0), 0)
-    const opex = store.opex.reduce((s, r) => s + (r.amount || 0), 0)
-    const deductible = [...store.cogs, ...store.opex]
+    const revenue = biz.revenue.reduce((s, r) => s + (r.amount || 0), 0)
+    const cogs = biz.cogs.reduce((s, r) => s + (r.amount || 0), 0)
+    const opex = biz.opex.reduce((s, r) => s + (r.amount || 0), 0)
+    const deductible = [...biz.cogs, ...biz.opex]
       .filter(r => r.vatDeductible)
       .reduce((s, r) => s + (r.amount || 0), 0)
     return { revenue, cogs, opex, deductible }
-  }, [store.revenue, store.cogs, store.opex])
+  }, [biz.revenue, biz.cogs, biz.opex])
 
   const grossProfit = totals.revenue - totals.cogs
   const preTaxProfit = grossProfit - totals.opex
 
   // ── VAT (hidden for עוסק פטור) ──
-  const vatCalc = calcVat(totals.revenue, totals.deductible, store.vatRate)
-  const vatPayable = store.vatOverride ?? vatCalc.payable
+  const vatCalc = calcVat(totals.revenue, totals.deductible, biz.vatRate)
+  const vatPayable = biz.vatOverride ?? vatCalc.payable
 
   // ── taxes ──
-  const incomeTaxAuto = calcIncomeTaxMonthly(preTaxProfit, store.taxPoints)
-  const incomeTax = isCompany ? 0 : (store.incomeTaxOverride ?? incomeTaxAuto)
+  const incomeTaxAuto = calcIncomeTaxMonthly(preTaxProfit, biz.taxPoints)
+  const incomeTax = isCompany ? 0 : (biz.incomeTaxOverride ?? incomeTaxAuto)
 
   const blAuto = calcBituachLeumiMonthly(preTaxProfit)
-  const bituachLeumi = isCompany ? 0 : (store.bituachLeumiOverride ?? blAuto)
+  const bituachLeumi = isCompany ? 0 : (biz.bituachLeumiOverride ?? blAuto)
 
   const companyTaxAuto = calcCompanyTaxMonthly(preTaxProfit)
-  const companyTax = isCompany ? (store.companyTaxOverride ?? companyTaxAuto) : 0
+  const companyTax = isCompany ? (biz.companyTaxOverride ?? companyTaxAuto) : 0
 
   const totalTax = incomeTax + bituachLeumi + companyTax
   const netProfit = preTaxProfit - totalTax
-  const leftInBusiness = netProfit - store.ownerSalary
+  const leftInBusiness = netProfit - biz.ownerSalary
 
   function pushSalaryToMonth() {
     if (!salaryMonth) { toast.error('בחר חודש יעד'); return }
+    // Each business writes to its OWN income row, so two spouses' salaries
+    // add up in the household budget instead of overwriting each other.
     const ms = useMonthlyStore.getState()
     ms.initMonth(salaryMonth)
     const income = useMonthlyStore.getState().months[salaryMonth].income
-    const existing = income.find(r => r.name === SALARY_LABEL)
+    const existing = income.find(r => r.name === salaryLabel)
     if (existing) {
-      ms.updateRow(salaryMonth, 'income', existing.id, 'plan', Math.round(store.ownerSalary))
+      ms.updateRow(salaryMonth, 'income', existing.id, 'plan', Math.round(biz.ownerSalary))
     } else {
-      ms.addRow(salaryMonth, 'income', SALARY_LABEL)
-      const added = useMonthlyStore.getState().months[salaryMonth].income.find(r => r.name === SALARY_LABEL)
-      if (added) ms.updateRow(salaryMonth, 'income', added.id, 'plan', Math.round(store.ownerSalary))
+      ms.addRow(salaryMonth, 'income', salaryLabel)
+      const added = useMonthlyStore.getState().months[salaryMonth].income.find(r => r.name === salaryLabel)
+      if (added) ms.updateRow(salaryMonth, 'income', added.id, 'plan', Math.round(biz.ownerSalary))
     }
     const monthName = MONTHS_LIST.find(m => m.id === salaryMonth)?.name
-    toast.success(`✅ ${fmt(store.ownerSalary)} נשלחו כהכנסה לתקציב ${monthName}`)
+    toast.success(`✅ ${fmt(biz.ownerSalary)} נשלחו כהכנסה לתקציב ${monthName}`)
   }
 
   const bind = (section: BizSection) => ({
-    onAdd: () => store.addRow(section),
+    onAdd: () => store.addRow(activeId, section),
     onUpdate: (id: string, field: 'name' | 'amount' | 'vatDeductible', value: string | number | boolean) =>
-      store.updateRow(section, id, field, value),
-    onDelete: (id: string) => store.deleteRow(section, id),
+      store.updateRow(activeId, section, id, field, value),
+    onDelete: (id: string) => store.deleteRow(activeId, section, id),
   })
 
   return (
@@ -205,16 +215,19 @@ export default function BusinessPage() {
           </p>
         </div>
 
+        {/* Businesses — pick / duplicate / add (shared with the annual tab) */}
+        <BusinessSwitcher />
+
         {/* Business type selector */}
         <div>
           <div className="text-xs font-semibold text-muted-txt mb-1.5">סוג העסק</div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {TYPES.map(t => {
-              const active = store.businessType === t.id
+              const active = biz.businessType === t.id
               return (
                 <button
                   key={t.id}
-                  onClick={() => store.setBusinessType(t.id)}
+                  onClick={() => store.setBusinessType(activeId, t.id)}
                   className={[
                     'text-start rounded-xl border p-3 transition-all',
                     active ? 'border-gold bg-gold/15 ring-2 ring-gold/30' : 'border-line bg-surface hover:bg-surface3',
@@ -231,13 +244,13 @@ export default function BusinessPage() {
 
       {/* Revenue */}
       <SectionPanel
-        title="מחזור / הכנסות" icon="💰" rows={store.revenue} total={totals.revenue}
+        title="מחזור / הכנסות" icon="💰" rows={biz.revenue} total={totals.revenue}
         color="text-income" colName="מקור הכנסה" showVat={false} {...bind('revenue')}
       />
 
       {/* COGS */}
       <SectionPanel
-        title="הוצאות גולמיות (עלות המכר)" icon="📦" rows={store.cogs} total={totals.cogs}
+        title="הוצאות גולמיות (עלות המכר)" icon="📦" rows={biz.cogs} total={totals.cogs}
         color="text-expense" colName="סוג הוצאה" showVat={!isPatur} {...bind('cogs')}
       />
 
@@ -249,7 +262,7 @@ export default function BusinessPage() {
 
       {/* OpEx */}
       <SectionPanel
-        title="הוצאות תפעוליות" icon="🧾" rows={store.opex} total={totals.opex}
+        title="הוצאות תפעוליות" icon="🧾" rows={biz.opex} total={totals.opex}
         color="text-expense" colName="סוג הוצאה" showVat={!isPatur} {...bind('opex')}
       />
 
@@ -261,8 +274,8 @@ export default function BusinessPage() {
             <div className="space-y-1">
               <label className="text-xs text-muted-txt">נקודות זיכוי</label>
               <input
-                type="number" inputMode="decimal" value={store.taxPoints || ''} min={0} step={0.25}
-                onChange={e => store.setTaxPoints(parseFloat(e.target.value) || 0)}
+                type="number" inputMode="decimal" value={biz.taxPoints || ''} min={0} step={0.25}
+                onChange={e => store.setTaxPoints(activeId, parseFloat(e.target.value) || 0)}
                 style={{ direction: 'ltr' }}
                 className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
@@ -272,8 +285,8 @@ export default function BusinessPage() {
             <div className="space-y-1">
               <label className="text-xs text-muted-txt">שיעור מע"מ %</label>
               <input
-                type="number" inputMode="decimal" value={Math.round(store.vatRate * 100) || ''} min={0} step={1}
-                onChange={e => store.setVatRate((parseFloat(e.target.value) || 0) / 100)}
+                type="number" inputMode="decimal" value={Math.round(biz.vatRate * 100) || ''} min={0} step={1}
+                onChange={e => store.setVatRate(activeId, (parseFloat(e.target.value) || 0) / 100)}
                 style={{ direction: 'ltr' }}
                 className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
@@ -293,9 +306,9 @@ export default function BusinessPage() {
           <TaxLine
             label="מס חברות (23%)"
             value={companyTax}
-            overridden={store.companyTaxOverride !== null}
-            onOverride={store.setCompanyTaxOverride}
-            onReset={() => store.setCompanyTaxOverride(null)}
+            overridden={biz.companyTaxOverride !== null}
+            onOverride={v => store.setCompanyTaxOverride(activeId, v)}
+            onReset={() => store.setCompanyTaxOverride(activeId, null)}
           />
         ) : (
           <>
@@ -303,17 +316,17 @@ export default function BusinessPage() {
               label="מס הכנסה"
               hint="מדרגות מס − נקודות זיכוי"
               value={incomeTax}
-              overridden={store.incomeTaxOverride !== null}
-              onOverride={store.setIncomeTaxOverride}
-              onReset={() => store.setIncomeTaxOverride(null)}
+              overridden={biz.incomeTaxOverride !== null}
+              onOverride={v => store.setIncomeTaxOverride(activeId, v)}
+              onReset={() => store.setIncomeTaxOverride(activeId, null)}
             />
             <TaxLine
               label="ביטוח לאומי + מס בריאות"
               hint="עצמאי — מדורג"
               value={bituachLeumi}
-              overridden={store.bituachLeumiOverride !== null}
-              onOverride={store.setBituachLeumiOverride}
-              onReset={() => store.setBituachLeumiOverride(null)}
+              overridden={biz.bituachLeumiOverride !== null}
+              onOverride={v => store.setBituachLeumiOverride(activeId, v)}
+              onReset={() => store.setBituachLeumiOverride(activeId, null)}
             />
           </>
         )}
@@ -347,13 +360,13 @@ export default function BusinessPage() {
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-muted-txt">₪</span>
               <input
-                type="number" inputMode="numeric" value={store.vatOverride ?? ''} placeholder={String(Math.round(vatCalc.payable))}
-                onChange={e => store.setVatOverride(e.target.value === '' ? null : (parseFloat(e.target.value) || 0))}
+                type="number" inputMode="numeric" value={biz.vatOverride ?? ''} placeholder={String(Math.round(vatCalc.payable))}
+                onChange={e => store.setVatOverride(activeId, e.target.value === '' ? null : (parseFloat(e.target.value) || 0))}
                 style={{ direction: 'ltr' }}
                 className="w-24 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
               />
-              {store.vatOverride !== null && (
-                <button onClick={() => store.setVatOverride(null)} className="px-2 py-2 text-base leading-none text-gold hover:text-gold-light" title="אפס">↺</button>
+              {biz.vatOverride !== null && (
+                <button onClick={() => store.setVatOverride(activeId, null)} className="px-2 py-2 text-base leading-none text-gold hover:text-gold-light" title="אפס">↺</button>
               )}
             </div>
           </div>
@@ -371,8 +384,8 @@ export default function BusinessPage() {
           <div className="flex items-center gap-1.5">
             <span className="text-base">₪</span>
             <input
-              type="number" inputMode="numeric" value={store.ownerSalary || ''} min={0}
-              onChange={e => store.setOwnerSalary(parseFloat(e.target.value) || 0)}
+              type="number" inputMode="numeric" value={biz.ownerSalary || ''} min={0}
+              onChange={e => store.setOwnerSalary(activeId, parseFloat(e.target.value) || 0)}
               placeholder="0" style={{ direction: 'ltr' }}
               className="w-28 sm:w-32 rounded-lg border border-line bg-surface px-3 py-2 text-base font-bold text-gold focus:outline-none focus:border-gold/60 text-left tabular-nums"
             />
@@ -406,13 +419,13 @@ export default function BusinessPage() {
           </div>
           <button
             onClick={pushSalaryToMonth}
-            disabled={!salaryMonth || store.ownerSalary <= 0}
+            disabled={!salaryMonth || biz.ownerSalary <= 0}
             className="w-full py-2.5 rounded-lg bg-gold/20 border border-gold/40 text-gold font-bold text-sm tabular-nums hover:bg-gold/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            📤 שלח {fmt(store.ownerSalary)} ל{MONTHS_LIST.find(m => m.id === salaryMonth)?.name ?? 'חודש שתבחר'}
+            📤 שלח {fmt(biz.ownerSalary)} ל{MONTHS_LIST.find(m => m.id === salaryMonth)?.name ?? 'חודש שתבחר'}
           </button>
           <p className="text-[10px] text-muted-txt text-center">
-            מעדכן שורת הכנסה &quot;{SALARY_LABEL}&quot; בעמודת התכנון. אפשר לעבור ל<Link href="/app/monthly/jan" className="text-gold hover:underline">טאב החודשי</Link>.
+            מעדכן שורת הכנסה &quot;{salaryLabel}&quot; בעמודת התכנון. אפשר לעבור ל<Link href="/app/monthly/jan" className="text-gold hover:underline">טאב החודשי</Link>.
           </p>
         </div>
       </div>
@@ -441,7 +454,7 @@ export default function BusinessPage() {
         </div>
         <div className="flex items-center justify-between text-sm py-0.5">
           <span className="text-muted-txt">משכורת אישית (משיכה לבית)</span>
-          <span className="tabular-nums text-expense">{fmt(-store.ownerSalary)}</span>
+          <span className="tabular-nums text-expense">{fmt(-biz.ownerSalary)}</span>
         </div>
         <div className="flex items-center justify-between pt-2 mt-1 border-t-2 border-gold/30">
           <span className="text-sm font-bold text-gold">יתרת מזומן שנשארת בעסק</span>

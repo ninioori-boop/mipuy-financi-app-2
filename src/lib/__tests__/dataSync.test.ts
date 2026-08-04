@@ -21,6 +21,8 @@ import { useClientProfileStore } from '@/stores/clientProfileStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
+import { useBusinessRosterStore, PRIMARY_BUSINESS_ID } from '@/stores/businessRosterStore'
+import { duplicateBusiness, addBusiness, removeBusiness } from '@/lib/businessProfiles'
 
 // Regression net for the bug-family the user has been hit by twice
 // (חופשה drop, fromCredit wipe). If any persisted store field is
@@ -137,33 +139,76 @@ function populateAllStores() {
     posted: { rec1: '2026-06' },
   })
 
+  // Two businesses — the "both spouses are עצמאים" case.
+  useBusinessRosterStore.setState({
+    list: [
+      { id: PRIMARY_BUSINESS_ID, name: 'העסק שלי' },
+      { id: 'biz_spouse',        name: 'העסק של רותי' },
+    ],
+    activeId: 'biz_spouse',
+  })
+
   useBusinessStore.setState({
-    businessType: 'osek_murshe',
-    revenue: [{ id: 'r1',  name: 'consulting', amount: 20000, vatDeductible: false }],
-    cogs:    [{ id: 'cg1', name: 'tools',      amount: 500,   vatDeductible: true }],
-    opex:    [{ id: 'op1', name: 'office',     amount: 2000,  vatDeductible: true }],
-    ownerSalary: 12000,
-    taxPoints: 2.25,
-    vatRate: 0.17,
-    incomeTaxOverride: 5000,
-    bituachLeumiOverride: 700,
-    companyTaxOverride: null,
-    vatOverride: 0,
+    byId: {
+      [PRIMARY_BUSINESS_ID]: {
+        businessType: 'osek_murshe',
+        revenue: [{ id: 'r1',  name: 'consulting', amount: 20000, vatDeductible: false }],
+        cogs:    [{ id: 'cg1', name: 'tools',      amount: 500,   vatDeductible: true }],
+        opex:    [{ id: 'op1', name: 'office',     amount: 2000,  vatDeductible: true }],
+        ownerSalary: 12000,
+        taxPoints: 2.25,
+        vatRate: 0.17,
+        incomeTaxOverride: 5000,
+        bituachLeumiOverride: 700,
+        companyTaxOverride: null,
+        vatOverride: 0,
+      },
+      biz_spouse: {
+        businessType: 'osek_patur',
+        revenue: [{ id: 'r2',  name: 'studio', amount: 6000, vatDeductible: false }],
+        cogs:    [],
+        opex:    [{ id: 'op2', name: 'חומרים', amount: 900, vatDeductible: false }],
+        ownerSalary: 4000,
+        taxPoints: 2.75,
+        vatRate: 0.18,
+        incomeTaxOverride: null,
+        bituachLeumiOverride: null,
+        companyTaxOverride: null,
+        vatOverride: null,
+      },
+    },
   })
 
   useBusinessAnnualStore.setState({
-    businessType: 'company',
     year: 2026,
-    revenue: [{ id: 'ar1', name: 'main', amount: 240000, vatDeductible: false }],
-    cogs:    [{ id: 'acg1', name: 'cogs', amount: 6000, vatDeductible: true }],
-    opex:    [{ id: 'aop1', name: 'rent', amount: 24000, vatDeductible: true }],
-    ownerSalary: 144000,
-    taxPoints: 2.25,
-    vatRate: 0.17,
-    incomeTaxOverride: null,
-    bituachLeumiOverride: null,
-    companyTaxOverride: 28000,
-    vatOverride: null,
+    byId: {
+      [PRIMARY_BUSINESS_ID]: {
+        businessType: 'company',
+        revenue: [{ id: 'ar1', name: 'main', amount: 240000, vatDeductible: false }],
+        cogs:    [{ id: 'acg1', name: 'cogs', amount: 6000, vatDeductible: true }],
+        opex:    [{ id: 'aop1', name: 'rent', amount: 24000, vatDeductible: true }],
+        ownerSalary: 144000,
+        taxPoints: 2.25,
+        vatRate: 0.17,
+        incomeTaxOverride: null,
+        bituachLeumiOverride: null,
+        companyTaxOverride: 28000,
+        vatOverride: null,
+      },
+      biz_spouse: {
+        businessType: 'osek_patur',
+        revenue: [{ id: 'ar2', name: 'studio', amount: 72000, vatDeductible: false }],
+        cogs:    [],
+        opex:    [{ id: 'aop2', name: 'חומרים', amount: 10800, vatDeductible: false }],
+        ownerSalary: 48000,
+        taxPoints: 2.75,
+        vatRate: 0.18,
+        incomeTaxOverride: null,
+        bituachLeumiOverride: null,
+        companyTaxOverride: null,
+        vatOverride: null,
+      },
+    },
   })
 }
 
@@ -256,5 +301,177 @@ describe('DataSync — snapshot round-trip', () => {
     expect(snap.mapping.fixed).toHaveLength(2)
     expect(snap.mapping.variable.find(r => r.name === 'food')?.amount).toBe(1000)
     expect(snap.mapping.variable.find(r => r.name === 'transit')?.amount).toBe(500)
+  })
+})
+
+describe('Businesses — multi-business roster', () => {
+  beforeEach(() => resetAllStores())
+
+  it('migrates a pre-multi-business snapshot into the primary business', () => {
+    // Exactly what a client who used the business tab before this feature has
+    // stored: flat fields, no byId, no roster.
+    applySnapshot({
+      business: {
+        businessType: 'osek_murshe',
+        revenue: [{ id: 'r1', name: 'consulting', amount: 20000, vatDeductible: false }],
+        cogs: [], opex: [{ id: 'op1', name: 'office', amount: 2000, vatDeductible: true }],
+        ownerSalary: 12000, taxPoints: 2.25, vatRate: 0.17,
+        incomeTaxOverride: 5000, bituachLeumiOverride: null,
+        companyTaxOverride: null, vatOverride: null,
+      },
+      businessAnnual: {
+        businessType: 'company', year: 2026,
+        revenue: [{ id: 'ar1', name: 'main', amount: 240000, vatDeductible: false }],
+        cogs: [], opex: [],
+        ownerSalary: 144000, taxPoints: 2.25, vatRate: 0.17,
+        incomeTaxOverride: null, bituachLeumiOverride: null,
+        companyTaxOverride: 28000, vatOverride: null,
+      },
+    })
+
+    const roster = useBusinessRosterStore.getState()
+    expect(roster.list).toHaveLength(1)
+    expect(roster.list[0].id).toBe(PRIMARY_BUSINESS_ID)
+    expect(roster.activeId).toBe(PRIMARY_BUSINESS_ID)
+
+    const monthly = useBusinessStore.getState().byId[PRIMARY_BUSINESS_ID]
+    expect(monthly.ownerSalary).toBe(12000)
+    expect(monthly.incomeTaxOverride).toBe(5000)
+    expect(monthly.revenue[0].amount).toBe(20000)
+
+    const annual = useBusinessAnnualStore.getState().byId[PRIMARY_BUSINESS_ID]
+    expect(annual.businessType).toBe('company')
+    expect(annual.companyTaxOverride).toBe(28000)
+    expect(useBusinessAnnualStore.getState().year).toBe(2026)
+  })
+
+  it('still writes the legacy flat mirror so an older open tab is not blanked', () => {
+    populateAllStores()
+    const snap = collectSnapshot()
+    // Mirror = the PRIMARY business, even though 'biz_spouse' is the active one.
+    expect(snap.business.ownerSalary).toBe(12000)
+    expect(snap.business.revenue[0].name).toBe('consulting')
+    expect(snap.businessAnnual.companyTaxOverride).toBe(28000)
+  })
+
+  it('duplicate copies the numbers but shares no row identity with the source', () => {
+    populateAllStores()
+    const newId = duplicateBusiness(PRIMARY_BUSINESS_ID)
+
+    const monthly = useBusinessStore.getState().byId
+    const copy = monthly[newId]
+    const src = monthly[PRIMARY_BUSINESS_ID]
+
+    expect(copy.ownerSalary).toBe(src.ownerSalary)
+    expect(copy.revenue.map(r => r.name)).toEqual(src.revenue.map(r => r.name))
+    // fresh row ids — the aliasing bug the v1 app was full of
+    expect(copy.revenue[0].id).not.toBe(src.revenue[0].id)
+    expect(copy.revenue).not.toBe(src.revenue)
+
+    // editing the copy must not touch the source
+    useBusinessStore.getState().updateRow(newId, 'revenue', copy.revenue[0].id, 'amount', 999)
+    expect(useBusinessStore.getState().byId[PRIMARY_BUSINESS_ID].revenue[0].amount).toBe(20000)
+
+    // and the annual plan got its own copy too
+    expect(useBusinessAnnualStore.getState().byId[newId]).toBeTruthy()
+    expect(useBusinessRosterStore.getState().activeId).toBe(newId)
+  })
+
+  it('removing a business clears it from both tabs, and the last one can never go', () => {
+    populateAllStores()
+    expect(removeBusiness('biz_spouse')).toBe(true)
+    expect(useBusinessStore.getState().byId.biz_spouse).toBeUndefined()
+    expect(useBusinessAnnualStore.getState().byId.biz_spouse).toBeUndefined()
+    expect(useBusinessRosterStore.getState().activeId).toBe(PRIMARY_BUSINESS_ID)
+
+    expect(removeBusiness(PRIMARY_BUSINESS_ID)).toBe(false)
+    expect(useBusinessRosterStore.getState().list).toHaveLength(1)
+  })
+
+  it('adopts business data whose roster entry went missing instead of hiding it', () => {
+    applySnapshot({
+      businessRoster: { list: [{ id: PRIMARY_BUSINESS_ID, name: 'העסק שלי' }], activeId: PRIMARY_BUSINESS_ID },
+      business: {
+        byId: {
+          [PRIMARY_BUSINESS_ID]: { revenue: [], cogs: [], opex: [], ownerSalary: 1000 },
+          orphan: { revenue: [{ id: 'x', name: 'lost', amount: 500, vatDeductible: true }], cogs: [], opex: [], ownerSalary: 0 },
+        },
+      },
+    })
+
+    const roster = useBusinessRosterStore.getState()
+    expect(roster.list.map(p => p.id)).toContain('orphan')
+    expect(useBusinessStore.getState().byId.orphan.revenue[0].amount).toBe(500)
+    // and the annual side got a slot for it, so the tab renders
+    expect(useBusinessAnnualStore.getState().byId.orphan).toBeTruthy()
+  })
+
+  it('NO DATA LOSS: an existing client\'s stored business survives load → save untouched', () => {
+    // The exact document an existing business-tab client has in Firestore today.
+    const legacyBusiness = {
+      businessType: 'osek_murshe',
+      revenue: [{ id: 'r1', name: 'ייעוץ', amount: 32000, vatDeductible: false }],
+      cogs:    [{ id: 'c1', name: 'קבלני משנה', amount: 4000, vatDeductible: true }],
+      opex:    [{ id: 'o1', name: 'שכירות', amount: 3500, vatDeductible: true },
+                { id: 'o2', name: 'משכורות עובדים', amount: 9000, vatDeductible: false }],
+      ownerSalary: 14000,
+      taxPoints: 2.25,
+      vatRate: 0.18,
+      incomeTaxOverride: 4100,
+      bituachLeumiOverride: null,
+      companyTaxOverride: null,
+      vatOverride: 250,
+    }
+    const legacyAnnual = {
+      businessType: 'osek_patur',
+      year: 2027,
+      revenue: [{ id: 'ar1', name: 'ייעוץ', amount: 384000, vatDeductible: false }],
+      cogs: [], opex: [{ id: 'ao1', name: 'שכירות', amount: 42000, vatDeductible: true }],
+      ownerSalary: 168000,
+      taxPoints: 2.25,
+      vatRate: 0.18,
+      incomeTaxOverride: null,
+      bituachLeumiOverride: 9000,
+      companyTaxOverride: null,
+      vatOverride: null,
+    }
+
+    applySnapshot({ business: legacyBusiness, businessAnnual: legacyAnnual })
+    const saved = collectSnapshot()
+
+    // 1. What we write back still contains the OLD flat shape, field for field.
+    //    An old open tab reading this document sees exactly what it wrote.
+    const { byId: _b, ...flatBusiness } = saved.business
+    expect(flatBusiness).toEqual(legacyBusiness)
+    const { byId: _a, ...flatAnnual } = saved.businessAnnual
+    expect(flatAnnual).toEqual(legacyAnnual)
+
+    // 2. And the new keyed shape carries the same values.
+    expect(saved.business.byId[PRIMARY_BUSINESS_ID]).toEqual(legacyBusiness)
+    const { year: _y, ...annualNoYear } = legacyAnnual
+    expect(saved.businessAnnual.byId[PRIMARY_BUSINESS_ID]).toEqual(annualNoYear)
+
+    // 3. Re-loading what we just saved changes nothing (idempotent).
+    applySnapshot(JSON.parse(JSON.stringify(saved)))
+    expect(collectSnapshot()).toEqual(saved)
+  })
+
+  it('a snapshot with no business key at all leaves the stores alone', () => {
+    populateAllStores()
+    const before = collectSnapshot()
+    applySnapshot({ mapping: { variable: [] } })   // unrelated partial snapshot
+    const after = collectSnapshot()
+    expect(after.business).toEqual(before.business)
+    expect(after.businessAnnual).toEqual(before.businessAnnual)
+    expect(after.businessRoster).toEqual(before.businessRoster)
+  })
+
+  it('a new business starts from the default rows, not a copy', () => {
+    populateAllStores()
+    const id = addBusiness('עסק שני')
+    const fresh = useBusinessStore.getState().byId[id]
+    expect(fresh.revenue.every(r => r.amount === 0)).toBe(true)
+    expect(fresh.ownerSalary).toBe(0)
+    expect(useBusinessRosterStore.getState().list.find(p => p.id === id)?.name).toBe('עסק שני')
   })
 })

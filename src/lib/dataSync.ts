@@ -19,8 +19,16 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore }   from '@/stores/goalsStore'
 import { useCreditStore }  from '@/stores/creditStore'
 import { useMeetingsStore } from '@/stores/meetingsStore'
-import { useBusinessStore, DEFAULT_BUSINESS } from '@/stores/businessStore'
-import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL } from '@/stores/businessAnnualStore'
+import {
+  useBusinessStore, DEFAULT_BUSINESS, makeEmptyBizData,
+  type BizData, type BizRow, type BusinessType,
+} from '@/stores/businessStore'
+import { useBusinessAnnualStore, DEFAULT_BUSINESS_ANNUAL, makeEmptyAnnualData } from '@/stores/businessAnnualStore'
+import {
+  useBusinessRosterStore, DEFAULT_ROSTER, PRIMARY_BUSINESS_ID,
+  type BizProfile,
+} from '@/stores/businessRosterStore'
+import { reconcileBusinessProfiles } from '@/lib/businessProfiles'
 import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useClientProfileStore } from '@/stores/clientProfileStore'
@@ -100,32 +108,23 @@ export interface Snapshot {
   budgetReminder: {
     dismissed: ReturnType<typeof useBudgetReminderStore.getState>['dismissed']
   }
-  business: {
-    businessType:         ReturnType<typeof useBusinessStore.getState>['businessType']
-    revenue:              ReturnType<typeof useBusinessStore.getState>['revenue']
-    cogs:                 ReturnType<typeof useBusinessStore.getState>['cogs']
-    opex:                 ReturnType<typeof useBusinessStore.getState>['opex']
-    ownerSalary:          number
-    taxPoints:            number
-    vatRate:              number
-    incomeTaxOverride:    number | null
-    bituachLeumiOverride: number | null
-    companyTaxOverride:   number | null
-    vatOverride:          number | null
+  /** Identity of every business the household runs — shared by both business tabs. */
+  businessRoster: {
+    list:     BizProfile[]
+    activeId: string
   }
-  businessAnnual: {
-    businessType:         ReturnType<typeof useBusinessAnnualStore.getState>['businessType']
-    year:                 number
-    revenue:              ReturnType<typeof useBusinessAnnualStore.getState>['revenue']
-    cogs:                 ReturnType<typeof useBusinessAnnualStore.getState>['cogs']
-    opex:                 ReturnType<typeof useBusinessAnnualStore.getState>['opex']
-    ownerSalary:          number
-    taxPoints:            number
-    vatRate:              number
-    incomeTaxOverride:    number | null
-    bituachLeumiOverride: number | null
-    companyTaxOverride:   number | null
-    vatOverride:          number | null
+  /**
+   * `byId` is the real data (one entry per business). The flat fields alongside
+   * it are a LEGACY MIRROR of the primary business only: a bundle from before
+   * multi-business shipped reads those, so an old open tab still sees the main
+   * business instead of a blank one.
+   */
+  business: BizData & {
+    byId: Record<string, BizData>
+  }
+  businessAnnual: BizData & {
+    year: number
+    byId: Record<string, BizData>
   }
 }
 
@@ -149,6 +148,12 @@ export function collectSnapshot(): Snapshot {
   const br = useBudgetReminderStore.getState()
   const b = useBusinessStore.getState()
   const ba = useBusinessAnnualStore.getState()
+  const roster = useBusinessRosterStore.getState()
+
+  // Legacy mirror source: the primary business, or the first one if it's gone.
+  const primaryId = b.byId[PRIMARY_BUSINESS_ID] ? PRIMARY_BUSINESS_ID : (roster.list[0]?.id ?? PRIMARY_BUSINESS_ID)
+  const bPrimary = b.byId[primaryId] ?? makeEmptyBizData()
+  const baPrimary = ba.byId[primaryId] ?? makeEmptyBizData()
 
   return {
     version: SCHEMA_VERSION,
@@ -182,26 +187,15 @@ export function collectSnapshot(): Snapshot {
     recurring: { rules: rc.rules, posted: rc.posted },
     subscriptionPrefs: { dismissed: sp.dismissed },
     budgetReminder: { dismissed: br.dismissed },
+    businessRoster: { list: roster.list, activeId: roster.activeId },
     business: {
-      businessType: b.businessType,
-      revenue: b.revenue, cogs: b.cogs, opex: b.opex,
-      ownerSalary: b.ownerSalary,
-      taxPoints: b.taxPoints, vatRate: b.vatRate,
-      incomeTaxOverride: b.incomeTaxOverride,
-      bituachLeumiOverride: b.bituachLeumiOverride,
-      companyTaxOverride: b.companyTaxOverride,
-      vatOverride: b.vatOverride,
+      byId: b.byId,
+      ...bPrimary,   // legacy mirror — see the Snapshot type
     },
     businessAnnual: {
-      businessType: ba.businessType,
+      byId: ba.byId,
       year: ba.year,
-      revenue: ba.revenue, cogs: ba.cogs, opex: ba.opex,
-      ownerSalary: ba.ownerSalary,
-      taxPoints: ba.taxPoints, vatRate: ba.vatRate,
-      incomeTaxOverride: ba.incomeTaxOverride,
-      bituachLeumiOverride: ba.bituachLeumiOverride,
-      companyTaxOverride: ba.companyTaxOverride,
-      vatOverride: ba.vatOverride,
+      ...baPrimary,  // legacy mirror
     },
   }
 }
@@ -418,44 +412,84 @@ export function applySnapshot(raw: unknown): void {
     useBudgetReminderStore.setState({ dismissed })
   }
 
-  // business
+  // ── businesses ──
+  // Two shapes exist in the wild: the current one (`byId` keyed by business id,
+  // plus a `businessRoster`) and the original single-business one (flat fields).
+  // A snapshot without `byId` is migrated into a single business under the
+  // primary id, so nothing a client already entered is lost.
+
   if (isObject(raw.business)) {
-    const b = raw.business as Partial<Snapshot['business']>
-    const validType = b.businessType === 'osek_murshe' || b.businessType === 'osek_patur' || b.businessType === 'company'
+    const b = raw.business as Record<string, unknown>
+    const byId = readBizMap(b.byId, DEFAULT_BUSINESS)
     useBusinessStore.setState({
-      ...(validType ? { businessType: b.businessType } : {}),
-      ...(Array.isArray(b.revenue) ? { revenue: b.revenue } : {}),
-      ...(Array.isArray(b.cogs)    ? { cogs: b.cogs }       : {}),
-      ...(Array.isArray(b.opex)    ? { opex: b.opex }       : {}),
-      ...(typeof b.ownerSalary === 'number' ? { ownerSalary: b.ownerSalary } : {}),
-      ...(typeof b.taxPoints   === 'number' ? { taxPoints: b.taxPoints }     : {}),
-      ...(typeof b.vatRate     === 'number' ? { vatRate: b.vatRate }         : {}),
-      ...(typeof b.incomeTaxOverride    === 'number' || b.incomeTaxOverride    === null ? { incomeTaxOverride: b.incomeTaxOverride }       : {}),
-      ...(typeof b.bituachLeumiOverride === 'number' || b.bituachLeumiOverride === null ? { bituachLeumiOverride: b.bituachLeumiOverride } : {}),
-      ...(typeof b.companyTaxOverride   === 'number' || b.companyTaxOverride   === null ? { companyTaxOverride: b.companyTaxOverride }     : {}),
-      ...(typeof b.vatOverride          === 'number' || b.vatOverride          === null ? { vatOverride: b.vatOverride }                   : {}),
+      byId: byId ?? { [PRIMARY_BUSINESS_ID]: readBizData(b, DEFAULT_BUSINESS) },
     })
   }
 
-  // businessAnnual
   if (isObject(raw.businessAnnual)) {
-    const ba = raw.businessAnnual as Partial<Snapshot['businessAnnual']>
-    const validType = ba.businessType === 'osek_murshe' || ba.businessType === 'osek_patur' || ba.businessType === 'company'
+    const ba = raw.businessAnnual as Record<string, unknown>
+    const byId = readBizMap(ba.byId, DEFAULT_BUSINESS_ANNUAL)
     useBusinessAnnualStore.setState({
-      ...(validType ? { businessType: ba.businessType } : {}),
       ...(typeof ba.year === 'number' ? { year: ba.year } : {}),
-      ...(Array.isArray(ba.revenue) ? { revenue: ba.revenue } : {}),
-      ...(Array.isArray(ba.cogs)    ? { cogs: ba.cogs }       : {}),
-      ...(Array.isArray(ba.opex)    ? { opex: ba.opex }       : {}),
-      ...(typeof ba.ownerSalary === 'number' ? { ownerSalary: ba.ownerSalary } : {}),
-      ...(typeof ba.taxPoints   === 'number' ? { taxPoints: ba.taxPoints }     : {}),
-      ...(typeof ba.vatRate     === 'number' ? { vatRate: ba.vatRate }         : {}),
-      ...(typeof ba.incomeTaxOverride    === 'number' || ba.incomeTaxOverride    === null ? { incomeTaxOverride: ba.incomeTaxOverride }       : {}),
-      ...(typeof ba.bituachLeumiOverride === 'number' || ba.bituachLeumiOverride === null ? { bituachLeumiOverride: ba.bituachLeumiOverride } : {}),
-      ...(typeof ba.companyTaxOverride   === 'number' || ba.companyTaxOverride   === null ? { companyTaxOverride: ba.companyTaxOverride }     : {}),
-      ...(typeof ba.vatOverride          === 'number' || ba.vatOverride          === null ? { vatOverride: ba.vatOverride }                   : {}),
+      byId: byId ?? { [PRIMARY_BUSINESS_ID]: readBizData(ba, DEFAULT_BUSINESS_ANNUAL) },
     })
   }
+
+  if (isObject(raw.businessRoster)) {
+    const r = raw.businessRoster as Record<string, unknown>
+    const list = Array.isArray(r.list)
+      ? (r.list as unknown[])
+          .filter((p): p is BizProfile =>
+            isObject(p) && typeof p.id === 'string' && !!p.id && typeof p.name === 'string')
+          .map(p => ({ id: p.id, name: p.name }))
+      : []
+    if (list.length) {
+      useBusinessRosterStore.setState({
+        list,
+        activeId: typeof r.activeId === 'string' && list.some(p => p.id === r.activeId)
+          ? r.activeId
+          : list[0].id,
+      })
+    }
+  }
+
+  // Roster ↔ data must agree: fills gaps, adopts orphans, fixes a dangling activeId.
+  reconcileBusinessProfiles()
+}
+
+/** Read one business's fields off a raw object, falling back to defaults. */
+function readBizData(raw: Record<string, unknown>, defaults: Omit<BizData, 'revenue' | 'cogs' | 'opex'>): BizData {
+  const rows = (v: unknown): BizRow[] => (Array.isArray(v) ? v as BizRow[] : [])
+  const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
+  const numOrNull = (v: unknown) => (typeof v === 'number' ? v : null)
+  const validType = raw.businessType === 'osek_murshe' || raw.businessType === 'osek_patur' || raw.businessType === 'company'
+  return {
+    businessType: validType ? raw.businessType as BusinessType : defaults.businessType,
+    revenue: rows(raw.revenue),
+    cogs:    rows(raw.cogs),
+    opex:    rows(raw.opex),
+    ownerSalary: num(raw.ownerSalary, defaults.ownerSalary),
+    taxPoints:   num(raw.taxPoints, defaults.taxPoints),
+    vatRate:     num(raw.vatRate, defaults.vatRate),
+    incomeTaxOverride:    numOrNull(raw.incomeTaxOverride),
+    bituachLeumiOverride: numOrNull(raw.bituachLeumiOverride),
+    companyTaxOverride:   numOrNull(raw.companyTaxOverride),
+    vatOverride:          numOrNull(raw.vatOverride),
+  }
+}
+
+/** Read a `byId` map, or undefined when the snapshot predates multi-business. */
+function readBizMap(
+  raw: unknown,
+  defaults: Omit<BizData, 'revenue' | 'cogs' | 'opex'>,
+): Record<string, BizData> | undefined {
+  if (!isObject(raw)) return undefined
+  const out: Record<string, BizData> = {}
+  for (const [id, v] of Object.entries(raw)) {
+    if (!id || !isObject(v)) continue
+    out[id] = readBizData(v, defaults)
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 /**
@@ -491,28 +525,15 @@ export function resetAllStores(): void {
   useRecurringStore.setState({ rules: [], posted: {} })
   useSubscriptionPrefsStore.setState({ dismissed: {} })
   useBudgetReminderStore.setState({ dismissed: {} })
-  useBusinessStore.setState({
-    businessType: DEFAULT_BUSINESS.businessType,
-    revenue: [], cogs: [], opex: [],
-    ownerSalary: 0,
-    taxPoints: DEFAULT_BUSINESS.taxPoints,
-    vatRate: DEFAULT_BUSINESS.vatRate,
-    incomeTaxOverride: null,
-    bituachLeumiOverride: null,
-    companyTaxOverride: null,
-    vatOverride: null,
+  // Businesses: back to a single, empty primary business.
+  useBusinessRosterStore.setState({
+    list: DEFAULT_ROSTER.map(p => ({ ...p })),
+    activeId: PRIMARY_BUSINESS_ID,
   })
+  useBusinessStore.setState({ byId: { [PRIMARY_BUSINESS_ID]: makeEmptyBizData() } })
   useBusinessAnnualStore.setState({
-    businessType: DEFAULT_BUSINESS_ANNUAL.businessType,
     year: new Date().getFullYear(),
-    revenue: [], cogs: [], opex: [],
-    ownerSalary: 0,
-    taxPoints: DEFAULT_BUSINESS_ANNUAL.taxPoints,
-    vatRate: DEFAULT_BUSINESS_ANNUAL.vatRate,
-    incomeTaxOverride: null,
-    bituachLeumiOverride: null,
-    companyTaxOverride: null,
-    vatOverride: null,
+    byId: { [PRIMARY_BUSINESS_ID]: makeEmptyAnnualData() },
   })
 }
 
