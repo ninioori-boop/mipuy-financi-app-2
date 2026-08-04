@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { useBusinessRosterStore } from '@/stores/businessRosterStore'
 import { addBusiness, duplicateBusiness, removeBusiness } from '@/lib/businessProfiles'
-import { useLabAccess } from '@/hooks/useLabAccess'
 
 /**
  * The businesses bar — shown identically at the top of both business tabs.
@@ -13,14 +12,11 @@ import { useLabAccess } from '@/hooks/useLabAccess'
  * Used when a household runs more than one business (e.g. both spouses are
  * עצמאים): שכפל copies the whole budget of the current business into a new one.
  *
- * LAB-GATED (visibility only). A client without lab access sees the two business
- * tabs exactly as before and always works on the single primary business — the
- * only way to get a second business is through this bar. Storage is NOT gated:
- * everyone's snapshot uses the keyed shape, which round-trips the old one
- * losslessly and still carries the legacy flat copy (see lib/dataSync).
+ * Live for every client since 2026-08-04 (was lab-gated for one release while
+ * Ori tested it). A household that never adds a second business sees a single
+ * name and the buttons, and nothing else about the tabs changes.
  */
 export function BusinessSwitcher() {
-  const { allowed } = useLabAccess()
   const list = useBusinessRosterStore(s => s.list)
   const activeId = useBusinessRosterStore(s => s.activeId)
   const setActive = useBusinessRosterStore(s => s.setActive)
@@ -72,11 +68,6 @@ export function BusinessSwitcher() {
     const name = active.name
     if (removeBusiness(active.id)) toast.success(`"${name}" נמחק`)
   }
-
-  // Hidden outside the lab — but ONLY while there is nothing to strand. If a
-  // household somehow already has a second business, the bar stays visible
-  // whatever the gate says; hiding it would make that data unreachable.
-  if (!allowed && single) return null
 
   return (
     <div className="rounded-xl border border-line bg-surface p-3 space-y-2.5">
