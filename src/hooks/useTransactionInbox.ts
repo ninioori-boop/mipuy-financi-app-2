@@ -14,6 +14,7 @@ import { saveUserData } from '@/lib/firestoreService'
 import { collectSnapshot } from '@/lib/dataSync'
 import { bumpSaveBaseline } from '@/lib/saveBaseline'
 import { computeBudgetStatus } from '@/lib/budgetStatus'
+import { formatMoneyLoose } from '@/lib/currency'
 
 function today() {
   const d = new Date()
@@ -22,10 +23,23 @@ function today() {
 
 const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 
+type Charge = {
+  merchant: string; amount: number; category: string; date: string
+  foreignAmount?: number; foreignCurrency?: string
+}
+
+// A charge made abroad reads "~₪212 (£45)": the shekel figure is our own
+// conversion, and the card issuer's rate plus its fee will differ slightly.
+function money(c: Charge): string {
+  return c.foreignCurrency && typeof c.foreignAmount === 'number'
+    ? `~${nis(c.amount)} (${formatMoneyLoose(c.foreignAmount, c.foreignCurrency)})`
+    : nis(c.amount)
+}
+
 // The drain is otherwise silent — tell the client a charge arrived, budget-aware,
 // with a one-tap jump to the expenses tab (where the review banner categorizes it).
 function notifyCaptured(
-  charges: { merchant: string; amount: number; category: string; date: string }[],
+  charges: Charge[],
   router: ReturnType<typeof useRouter>,
 ) {
   const view = { label: 'צפה', onClick: () => router.push('/app/expenses') }
@@ -42,7 +56,7 @@ function notifyCaptured(
     addedAmount: 0,
     ym:          c.date.slice(0, 7),
   })
-  const base = `💳 נקלט: ${c.merchant} · ${nis(c.amount)} → ${c.category}`
+  const base = `💳 נקלט: ${c.merchant} · ${money(c)} → ${c.category}`
   if (status.level === 'over') {
     toast.error(`${base} · ⚠️ חריגה מתקציב ${c.category}`, { action: view })
   } else if (status.level === 'near') {
@@ -95,16 +109,30 @@ export function useTransactionInbox() {
 
         const dropNow: string[] = []        // dup / malformed — nothing to persist, safe to delete
         const dropAfterSave: string[] = []  // newly added — delete ONLY after a confirmed save
-        const newCharges: { merchant: string; amount: number; category: string; date: string }[] = []
+        const newCharges: Charge[] = []
 
         for (const change of added) {
           const id = change.doc.id
           const d  = change.doc.data() as {
             merchant?: unknown; amount?: unknown; date?: unknown; category?: unknown; ref?: unknown
+            foreignAmount?: unknown; foreignCurrency?: unknown; fxRate?: unknown
           }
 
           const merchant = typeof d.merchant === 'string' ? d.merchant.trim() : ''
           const amount   = typeof d.amount === 'number' ? d.amount : NaN
+
+          // Charge made abroad: `amount` is already the converted shekel figure
+          // (the server converts at ingest), and these carry what was actually
+          // paid. Both must be present and sane, or the entry stays plain ILS.
+          const foreignAmount   = typeof d.foreignAmount === 'number' && d.foreignAmount > 0
+            ? d.foreignAmount : undefined
+          const foreignCurrency = typeof d.foreignCurrency === 'string' && d.foreignCurrency
+            ? d.foreignCurrency : undefined
+          const fxRate          = typeof d.fxRate === 'number' && d.fxRate > 0
+            ? d.fxRate : undefined
+          const foreign = foreignAmount !== undefined && foreignCurrency !== undefined
+            ? { foreignAmount, foreignCurrency, fxRate }
+            : {}
 
           if (!(merchant && Number.isFinite(amount) && amount > 0)) {
             dropNow.push(id)   // malformed — discard
@@ -122,9 +150,9 @@ export function useTransactionInbox() {
 
           const chargeDate = typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : today()
           const category   = typeof d.category === 'string' && d.category ? d.category : 'שונות'
-          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note })
+          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note, ...foreign })
           dropAfterSave.push(id)
-          newCharges.push({ merchant, amount, category, date: chargeDate })
+          newCharges.push({ merchant, amount, category, date: chargeDate, foreignAmount, foreignCurrency })
         }
 
         // Dup/malformed: delete immediately — there's nothing to persist for them.

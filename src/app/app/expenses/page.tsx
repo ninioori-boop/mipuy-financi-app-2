@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
+import { formatMoneyLoose } from '@/lib/currency'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
 import { useCreditStore } from '@/stores/creditStore'
@@ -46,6 +47,18 @@ function dayLabel(iso: string): string {
 
 const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
+
+// What a row shows in the amount column. A charge captured abroad reads
+// "~₪212 (£45)": entry.amount is always shekels (every total in this file sums
+// it), and the original is kept beside it. The "~" is not decoration — the card
+// issuer converts at its own rate and adds a foreign-transaction fee, so our
+// figure is an estimate until the statement arrives.
+function money(e: ExpenseEntry): string {
+  const orig = e.foreignCurrency && typeof e.foreignAmount === 'number'
+    ? formatMoneyLoose(e.foreignAmount, e.foreignCurrency)
+    : null
+  return orig ? `~${fmt(e.amount)} (${orig})` : fmt(e.amount)
+}
 
 // Entries sitting on these payment-method placeholders carry a generic string
 // ("העברה בביט", "משיכת מזומן") as their "merchant" — not a real business.
@@ -393,7 +406,7 @@ export default function ExpensesPage() {
                 <div key={e.id} className="space-y-1.5 border-t border-line/60 pt-2.5 first:border-t-0 first:pt-0">
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <span className="text-txt truncate">{merchant || 'ללא שם'}</span>
-                    <span className="font-semibold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                    <span className="font-semibold text-txt tabular-nums shrink-0">{money(e)}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 items-center">
                     {suggestedCats.map(cat => (
@@ -673,7 +686,7 @@ export default function ExpensesPage() {
                         />
                         {e.note && <div className="text-sm text-muted-txt truncate">{e.note}</div>}
                       </div>
-                      <span className="text-lg font-bold text-txt tabular-nums shrink-0">{fmt(e.amount)}</span>
+                      <span className="text-lg font-bold text-txt tabular-nums shrink-0">{money(e)}</span>
                       <button
                         onClick={() => setEditingId(e.id)}
                         className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-muted-txt/70 hover:text-gold active:text-gold sm:opacity-0 sm:group-hover:opacity-100 transition-colors text-lg leading-none"
@@ -689,7 +702,13 @@ export default function ExpensesPage() {
                           toast.success('ההוצאה נמחקה', {
                             action: {
                               label: 'ביטול',
-                              onClick: () => add({ date: gone.date, amount: gone.amount, category: gone.category, note: gone.note }),
+                              // Restore the foreign original too — undo must give
+                              // back the row that was deleted, not a shekel-only
+                              // copy of it.
+                              onClick: () => add({
+                                date: gone.date, amount: gone.amount, category: gone.category, note: gone.note,
+                                foreignAmount: gone.foreignAmount, foreignCurrency: gone.foreignCurrency, fxRate: gone.fxRate,
+                              }),
                             },
                           })
                         }}

@@ -11,6 +11,10 @@ import { logAiSuggestion } from '@/lib/aiSuggestions'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota } from '@/lib/aiQuota'
 import { ALL_CATEGORIES } from '@/lib/constants'
+import {
+  normalizeCurrency, detectCurrency, extractMoney, formatMoney, type CurrencyCode,
+} from '@/lib/currency'
+import { getIlsRate, toIls, type Foreign } from '@/lib/fxRates'
 
 // firebase-admin needs the Node runtime (not Edge).
 export const runtime = 'nodejs'
@@ -133,7 +137,7 @@ export async function POST(req: NextRequest) {
       'צריך להתקין מחדש את הקיצור מהעמוד app.orimipuy.com/connect.',
     ), null)
   }
-  const { token, merchant, amount, date, ref, category: catOverride, source } = body as Record<string, unknown>
+  const { token, merchant, amount, date, ref, category: catOverride, source, currency } = body as Record<string, unknown>
 
   // Loop-breaker FIRST, before auth: a self-calling shortcut whose token is also
   // dead would otherwise bounce off the 401 (which now carries notify) forever,
@@ -199,6 +203,20 @@ export async function POST(req: NextRequest) {
   // regexes below and pollute the merchant name for categorization.
   let cleanMerchant = stripInvisible(merchant).trim()
 
+  // Which currency this charge is denominated in.
+  //
+  // Charges made abroad used to be recorded at face value — a £45 purchase
+  // landed as ₪45, because every parser threw the symbol away and kept the
+  // digits. An explicit `currency` field (sent by the Android tracker from
+  // 3.16, and by anything else that wants to be unambiguous) always wins;
+  // failing that we read it off the text, since a currency-formatted iOS
+  // amount ("£45.00") carries it inline. No currency stated anywhere = ILS,
+  // which is exactly the behaviour every existing client already gets.
+  const statedCurrency = normalizeCurrency(currency)
+  let curr: CurrencyCode = statedCurrency
+    ?? (typeof amount === 'string' ? detectCurrency(stripInvisible(amount)) : null)
+    ?? 'ILS'
+
   // Echo/loop guard: a miswired iOS Shortcut can call ITSELF and feed our own
   // notification text back as the "merchant" ("נרשם: נרשם: … קוטלג ל…"),
   // creating an infinite capture loop that only died on MAX_MERCHANT (seen in
@@ -216,14 +234,45 @@ export async function POST(req: NextRequest) {
   // in `merchant` with no amount. Pull the first money-looking number out and
   // treat the rest as the merchant name.
   if (!Number.isFinite(amt) || amt <= 0) {
-    const ext = extractFromRaw(cleanMerchant)
+    const ext = extractMoney(cleanMerchant)
     if (ext) {
       amt = ext.amount
-      cleanMerchant = ext.merchant
+      // An explicit field still outranks whatever the free text looks like.
+      if (!statedCurrency) curr = ext.currency
+      cleanMerchant = merchantFromRaw(cleanMerchant, ext.matched)
     }
   }
 
-  if (!Number.isFinite(amt) || amt <= 0 || amt > MAX_AMOUNT) {
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return refuse(db, 400, 'bad amount', notifyOf(
+      'לא נרשם: לא זוהה סכום בקנייה',
+      'הקנייה הגיעה בלי סכום קריא. אפשר לרשום אותה ידנית באפליקציה.',
+    ), uid, { merchantLen: cleanMerchant.length })
+  }
+
+  // Foreign charge → shekels. Budgets, category totals and the monthly tabs are
+  // all ILS-only, so the conversion happens once, here, and the original is
+  // stored beside it — for display, and for reconciling against the card
+  // statement later (the issuer's own rate differs and adds a fee, so this is
+  // always an estimate and the UI says so with "~").
+  //
+  // A charge we cannot price is NOT dropped: we keep the number as-is rather
+  // than lose the capture. Under-reporting one charge beats silently missing it.
+  let foreignAmount:   number | null = null
+  let foreignCurrency: Foreign | null = null
+  let fxRate:          number | null = null
+  if (curr !== 'ILS') {
+    const { rate } = await getIlsRate(db, curr)
+    const ils = toIls(amt, rate)
+    if (ils !== null) {
+      foreignAmount   = Math.round(amt * 100) / 100
+      foreignCurrency = curr
+      fxRate          = rate
+      amt             = ils
+    }
+  }
+
+  if (amt > MAX_AMOUNT) {
     return refuse(db, 400, 'bad amount', notifyOf(
       'לא נרשם: לא זוהה סכום בקנייה',
       'הקנייה הגיעה בלי סכום קריא. אפשר לרשום אותה ידנית באפליקציה.',
@@ -268,7 +317,8 @@ export async function POST(req: NextRequest) {
     ) {
       console.log(`[transaction] DUPLICATE_SKIPPED uid=${uid}`)
       const category = typeof last.cat === 'string' ? last.cat : 'שונות'
-      const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+      const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7),
+    foreignCurrency ? { amount: foreignAmount!, currency: foreignCurrency } : null)
       return NextResponse.json({ ok: true, duplicate: true, category, notify })
     }
   } catch { /* guard is best-effort — never blocks a capture */ }
@@ -313,6 +363,11 @@ export async function POST(req: NextRequest) {
     category,
     ref:       refStr,
     createdAt: FieldValue.serverTimestamp(),
+    // Foreign charge: keep what was actually paid, so the expenses tab can show
+    // "₪212 (£45)" and a later reconciliation against the card statement has the
+    // original to match on. Omitted entirely for shekel charges, so the common
+    // case writes exactly the same document it always has.
+    ...(foreignCurrency ? { foreignAmount, foreignCurrency, fxRate } : {}),
   })
   // Fingerprint for the duplicate-fire guard above (best-effort).
   await inboxRef
@@ -337,7 +392,8 @@ export async function POST(req: NextRequest) {
   // (no FCM). Best-effort — ingest already succeeded; never fails the request.
   // NOTE: `category` must stay the FIRST "category" key in the JSON — old APKs
   // extract it by scanning for the first occurrence.
-  const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7))
+  const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7),
+    foreignCurrency ? { amount: foreignAmount!, currency: foreignCurrency } : null)
 
   // Branded Web-Push to the user's installed apps (iOS PWA / browsers) — the
   // app-name-and-icon notification. Best-effort like notify itself: never
@@ -362,9 +418,15 @@ export async function POST(req: NextRequest) {
  */
 async function buildNotify(
   db: Firestore, uid: string, category: string, amount: number, merchant: string, ym: string,
+  foreign?: { amount: number; currency: Foreign } | null,
 ): Promise<{ title: string; body: string; text: string; warn: boolean }> {
   const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
-  const title = `נרשם: ${merchant} · ${nis(amount)}`
+  // A charge made abroad shows both figures, with "~" on the shekel one: the
+  // card issuer converts at its own rate and adds a fee, so our number will not
+  // match the statement to the agora and must not pretend to.
+  const title = foreign
+    ? `נרשם: ${merchant} · ~${nis(amount)} (${formatMoney(foreign.amount, foreign.currency)})`
+    : `נרשם: ${merchant} · ${nis(amount)}`
   // Categories that beg for a human to pick the right one → invite a tap.
   const NEEDS_REVIEW = new Set(['שונות', 'ביט ללא מעקב', 'מזומן ללא מעקב'])
   let body = NEEDS_REVIEW.has(category)
@@ -401,12 +463,6 @@ async function buildNotify(
   return { title, body, text: `${title}\n${body}`, warn }
 }
 
-/**
- * Extracts amount + merchant from a raw transaction text (Apple Pay via the
- * shared iOS Shortcut). Currency-anchored patterns first (₪/$/€/ש"ח, before or
- * after the number), then a bare first-number as last resort. The remainder of
- * the string, cleaned of separators, becomes the merchant.
- */
 // Strips invisible bidi/zero-width control chars iOS embeds in transaction
 // text (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, BOM).
 function stripInvisible(s: string): string {
@@ -425,21 +481,24 @@ function parseAmountLoose(v: unknown): number {
   return m ? parseFloat(m[0].replace(/,/g, '')) : NaN
 }
 
-function extractFromRaw(raw: string): { merchant: string; amount: number } | null {
-  const m =
-    raw.match(/(?:₪|\$|€)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/)
-    ?? raw.match(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:₪|ש["”״]?ח|\$|€|ILS|NIS)/i)
-    ?? raw.match(/([0-9][0-9,]*(?:\.[0-9]+)?)/)
-  if (!m) return null
-  const amount = parseFloat(m[1].replace(/,/g, ''))
-  if (!Number.isFinite(amount) || amount <= 0) return null
+/**
+ * The merchant name left over once the money has been removed from a raw
+ * transaction text. The shared iOS Shortcut cannot read the Apple Pay
+ * transaction's Merchant/Amount properties separately, so it sends the WHOLE
+ * transaction as one string in `merchant`; extractMoney() takes the amount out
+ * and this turns the remainder into a business name.
+ *
+ * `matched` is the span extractMoney() consumed — the number together with its
+ * currency symbol — so "£45.00 Tesco" leaves "Tesco", not "£ Tesco".
+ */
+function merchantFromRaw(raw: string, matched: string): string {
   const merchant = raw
-    .replace(m[0], ' ')
+    .replace(matched, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^[\s\-–—·,.:;]+|[\s\-–—·,.:;]+$/g, '')
     .trim()
-    .slice(0, 200)
-  return { merchant: merchant || 'Apple Pay', amount }
+    .slice(0, MAX_MERCHANT)
+  return merchant || 'Apple Pay'
 }
 
 // Reads the shared merchant→category corrections (admin SDK) so a fix made once
