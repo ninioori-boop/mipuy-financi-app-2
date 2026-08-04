@@ -31,7 +31,7 @@
 2. **הקפאת כתיבות חירום** — אם צריך לעצור הכל בזמן חקירה, פרוס כללי "read-only" זמניים (ראה §6).
 3. App Check enforcement — **לא** פתרון מהיר כאן: זה ישבור גם את `orimipuy.com`. ראה §7.
 
-**שחזור:** אין גיבוי אוטומטי של Firestore. שקול ייצוא ידני תקופתי (`gcloud firestore export`) כרשת ביטחון — ראה §8.
+**שחזור:** יש גיבוי אוטומטי (יומי + שבועי + PITR) ו-dump מקומי — ראה §8.
 
 ---
 
@@ -94,10 +94,11 @@ service cloud.firestore {
 
 ---
 
-## 8. 🛟 גיבוי (מומלץ — לא קיים כרגע)
-אין גיבוי אוטומטי. לרשת ביטחון, שקול ייצוא תקופתי:
-- `gcloud firestore export gs://<bucket>` (דורש bucket ב-GCS), או
-- סקריפט `npm run export:clients` כבר מושך snapshot של כל המשתמשים ל-`clients.md`/`.html` (לא גיבוי מלא, אבל תיעוד מצב).
+## 8. 🛟 גיבוי (פעיל מ-04/08/2026)
+שלוש שכבות:
+1. **גיבוי מתוזמן של Google** (הוגדר בקונסולה ע"י אורי): יומי עם שמירה של 14 יום + שבועי (ימי ראשון) עם שמירה של 98 יום, ו-Point-in-time recovery (7 ימים). ניהול: [Disaster Recovery](https://console.cloud.google.com/firestore/databases/-default-/disaster-recovery?project=finance-machine-a36e9). **שחזור מגיבוי כזה יוצר מסד חדש** — מתאים לאסון, לא לתיקון נקודתי. לחשבון השירות אין הרשאת backupSchedules (403) — בדיקת מצב הגיבויים היא דרך הקונסולה בלבד.
+2. **dump מקומי מלא:** `npx tsx scripts/backup-firestore.ts` (קריאה בלבד) — כל האוספים כולל תתי-אוספים ל-`..\firestore-backups\<תאריך>` מחוץ ל-git, עם אימות עצמי. **להריץ לפני כל פעולה מסוכנת.** ממנו משחזרים מסמך בודד (שחזור כירורגי).
+3. סקריפט `npm run export:clients` — snapshot של המשתמשים ל-`clients.md`/`.html` (תיעוד מצב, לא גיבוי).
 
 ---
 
