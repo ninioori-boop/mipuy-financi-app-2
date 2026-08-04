@@ -29,7 +29,10 @@ const EXEMPT = [
   'authStore',          // mirrors Firebase Auth; cleared by Firebase itself
   'syncStore',          // save status / dirty flag — UI only
   'impersonationStore', // exit is a full page reload BY DESIGN; a soft reset here
-                        // was the 2026-07-21 view-as-client data leak
+                        // was the 2026-07-21 view-as-client data leak. The ONE
+                        // exception is clearOnIdentityTeardown(), called by
+                        // DataSync's two identity-boundary branches AFTER
+                        // resetAllStores() — covered by identityTeardown.test.tsx
 ]
 
 // Match only inside the resetAllStores() BODY, and only on whole identifiers.

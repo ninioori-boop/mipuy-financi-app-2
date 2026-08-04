@@ -25,12 +25,25 @@ interface ImpersonationState {
    *  the entry itself (reset + applySnapshot) when deciding warnings/saves. */
   startedAt: number
   start: (client: ImpersonatedClient, mode: 'view' | 'edit', clientUpdatedAt?: number) => void
-  // There is deliberately NO stop(): the only safe exit from act-as-client is a
-  // full page navigation (window.location.assign), which wipes this in-memory
-  // store while the DataSync guards stay up through the unload. Clearing the
-  // flag in-place would let the pagehide flush persist the client's data into
-  // the advisor's account (real bug caught 2026-07-21) — and in edit mode it
-  // would flush with the advisor's token/uid. Full reload is the only exit.
+  // There is deliberately NO general stop(): the only safe exit from
+  // act-as-client is a full page navigation (window.location.assign), which
+  // wipes this in-memory store while the DataSync guards stay up through the
+  // unload. Clearing the flag in-place would let the pagehide flush persist the
+  // client's data into the advisor's account (real bug caught 2026-07-21) — and
+  // in edit mode it would flush with the advisor's token/uid.
+  //
+  // The ONE exception is below, and it is named after the only place allowed to
+  // call it.
+  /** TEARDOWN-ONLY — never a user-facing exit. Clears the act-as-client flag
+   *  at an IDENTITY BOUNDARY: DataSync's sign-out branch and its userA→userB
+   *  teardown branch. Without this the flag outlives a sign-out, and when the
+   *  advisor signs back in, saveTarget() redirects their OWN portfolio into
+   *  the CLIENT's document (the security rules permit that write). It is safe
+   *  there and ONLY there because both branches run after resetAllStores() —
+   *  the stores are already empty, so no flush has anything left to leak —
+   *  and after React has detached the previous session's save/pagehide
+   *  effects. Everywhere else the full-reload rule above stands. */
+  clearOnIdentityTeardown: () => void
 }
 
 export const useImpersonationStore = create<ImpersonationState>(set => ({
@@ -40,4 +53,6 @@ export const useImpersonationStore = create<ImpersonationState>(set => ({
   startedAt: 0,
   start: (client, mode, clientUpdatedAt = 0) =>
     set({ client, mode, clientUpdatedAt, startedAt: Date.now() }),
+  clearOnIdentityTeardown: () =>
+    set({ client: null, mode: 'view', clientUpdatedAt: 0, startedAt: 0 }),
 }))

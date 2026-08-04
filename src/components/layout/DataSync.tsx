@@ -493,6 +493,16 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       // done in applyRemote(), which resets stores within ONE identity and would
       // otherwise wipe a bank statement mid-review.
       resetSessionStores()
+      // Act-as-client must not survive the identity boundary either: a surviving
+      // flag makes saveTarget() redirect the NEXT sign-in's own portfolio into
+      // the OLD client's document. Safe ONLY here, after resetAllStores() — the
+      // stores are empty, so no flush has anything left to leak — and the
+      // previous session's save/pagehide effects were detached in React's
+      // cleanup phase before this body ran. (The in-place-clear hazard this
+      // ordering avoids is the 2026-07-21 pagehide leak.)
+      if (useImpersonationStore.getState().client) {
+        useImpersonationStore.getState().clearOnIdentityTeardown()
+      }
       setHydrated(false)
       setStatus('idle')
       hydratedUid.current   = ''
@@ -544,6 +554,14 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       if (backupTimer.current) { clearTimeout(backupTimer.current); backupTimer.current = null }
       resetAllStores()
       resetSessionStores()
+      // Same reasoning as the sign-out branch above: an act-as-client session
+      // belongs to the OLD identity. Cleared after resetAllStores() (stores are
+      // empty ⇒ nothing to leak) and after React's cleanup phase detached the
+      // previous session's save/pagehide effects — the ordering that makes this
+      // safe where an in-place clear was not (2026-07-21).
+      if (useImpersonationStore.getState().client) {
+        useImpersonationStore.getState().clearOnIdentityTeardown()
+      }
       setHydrated(false)
       hydratedUid.current      = ''
       lastSavedJson.current    = ''
@@ -555,11 +573,6 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       syncDepth.current        = 0
       useSyncStore.getState().setDirty(false)
       useSyncStore.getState().setRemoteActivity(null)
-      // NOTE: impersonationStore is deliberately NOT cleared here. It has no
-      // stop() by design — clearing the flag in place is what let the pagehide
-      // flush persist a client's data into the advisor's account (2026-07-21).
-      // An act-as-client session surviving an identity switch is a real and
-      // separate defect; fixing it safely needs its own review, not a rider.
     }
 
     // Fresh identity ⇒ fresh anti-clobber state (covers direct userA→userB
