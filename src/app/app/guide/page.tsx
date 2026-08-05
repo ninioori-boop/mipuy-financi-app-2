@@ -142,6 +142,26 @@ export default function GuidePage() {
         </div>
       </div>
 
+      {/* Mobile expense capture */}
+      <div>
+        <h2 className="text-xl font-bold text-txt mb-4">📱 תיעוד הוצאות בנייד</h2>
+        <div className="rounded-xl border border-gold/30 bg-gold/5 p-5 space-y-3">
+          <div className="flex items-center gap-2 font-bold text-txt"><span className="text-xl">🧾</span> אפליקציית תיעוד הוצאות לאייפון ולאנדרואיד</div>
+          <p className="text-sm text-muted-txt leading-relaxed">
+            לצד המערכת פועלת אפליקציית תיעוד הוצאות לנייד, לאייפון ולאנדרואיד.
+            אחרי חיבור חד-פעמי שנעשה יחד עם היועץ, תשלומים בנייד נקלטים ונרשמים אוטומטית
+            בטאב תיעוד ההוצאות, וכך ההוצאות היומיומיות מתועדות באופן שוטף לאורך החודש.
+          </p>
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface2 p-3">
+            <span className="text-xl">💬</span>
+            <p className="text-sm text-muted-txt">
+              <span className="text-xs px-2 py-0.5 rounded-full bg-gold/20 text-gold font-semibold me-2">בקרוב</span>
+              בוט בוואטסאפ: תיעוד הוצאות ישירות מהצ&apos;אט.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Calculators */}
       <div>
         <h2 className="text-xl font-bold text-txt mb-4">🧮 מחשבונים</h2>
