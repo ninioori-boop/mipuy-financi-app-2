@@ -106,10 +106,15 @@ service cloud.firestore {
         && request.auth.uid == userId
         && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
 
-      // NEW (additive): a WRITE-tier consented advisor may read + write version
-      // snapshots in the CLIENT's history — full transparency, the client can
-      // rewind advisor edits. `write` covers create/delete (trimVersions caps at 20).
-      allow read, write: if request.auth != null
+      // A WRITE-tier consented advisor may read + CREATE version snapshots in
+      // the CLIENT's history — full transparency, the client can rewind
+      // advisor edits. create only, never update/delete: version history is
+      // the client's undo of advisor edits, so an advisor able to delete it
+      // could wipe the very record that protects the client. Cost of the
+      // restriction: the advisor-side trimVersions() now fails silently
+      // (fire-and-forget by design), so the collection can briefly exceed 20
+      // entries until the client's own next save trims it — bounded, harmless.
+      allow read, create: if request.auth != null
         && exists(/databases/$(database)/documents/clientLinks/$(userId))
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.status == 'active'
         && get(/databases/$(database)/documents/clientLinks/$(userId)).data.invitedByUid == request.auth.uid
@@ -117,20 +122,19 @@ service cloud.firestore {
     }
 
     // ── Shared category-learning DB ───────────────────────────────────
-    // Cross-account merchant→category memory. Reads open to any signed-in user;
-    // writes can only add/update keys inside `db`, never remove keys or replace
-    // the doc with an arbitrary shape (blocks full-wipe and key-deletion attacks).
+    // Cross-account merchant→category memory. Reads: invited (allowlisted)
+    // accounts only — the pool is part of the product, and a revoked client
+    // must be cut off from it like from everything else. Writes: CLOSED to
+    // browsers entirely. The old shape-guard rules still let any signed-in
+    // user overwrite every VALUE, and hasAll meant the doc could never shrink
+    // (poison + permanent-growth DoS). All writes now go through /api/learn
+    // (admin SDK), which validates the category, drops payment rails,
+    // rate-limits per user and enforces the key ceiling.
+    // The old live app never touches this doc (its learnedDB is per-user).
     match /shared/learnedDB {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['db'])
-        && request.resource.data.db is map
-        && request.resource.data.db.keys().size() <= 20000;
-      allow update: if request.auth != null
-        && request.resource.data.keys().hasOnly(['db'])
-        && request.resource.data.db is map
-        && request.resource.data.db.keys().size() <= 20000
-        && request.resource.data.db.keys().hasAll(resource.data.db.keys());
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
+      allow write: if false;
     }
 
     // ── Auto-pushed transaction inbox ─────────────────────────────────
@@ -149,13 +153,24 @@ service cloud.firestore {
     // lives here. A client reads/writes only their own intake; the advisor may
     // read everyone's to triage. Additive collection — the old live app never
     // touches it, so this is zero-risk to it.
+    // The client clause is allowlist-gated like users/{userId}: /revoke must
+    // cut a client off from EVERYTHING, and intake was one of two collections
+    // (with shared/) that a revoked account could still reach.
     match /intake/{userId} {
-      allow read:  if request.auth != null && (request.auth.uid == userId || ownsClient(userId));
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read:  if request.auth != null && (
+           (request.auth.uid == userId
+             && exists(/databases/$(database)/documents/allowlist/$(callerEmail())))
+        || ownsClient(userId));
+      allow write: if request.auth != null && request.auth.uid == userId
+        && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
 
       match /files/{fileId} {
-        allow read:  if request.auth != null && (request.auth.uid == userId || ownsClient(userId));
-        allow write: if request.auth != null && request.auth.uid == userId;
+        allow read:  if request.auth != null && (
+             (request.auth.uid == userId
+               && exists(/databases/$(database)/documents/allowlist/$(callerEmail())))
+          || ownsClient(userId));
+        allow write: if request.auth != null && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/allowlist/$(callerEmail()));
       }
     }
 
@@ -167,10 +182,18 @@ service cloud.firestore {
     //  • the invited client pre-registration (invitedEmail == own email) — to drive consent
     //  • the platform owner — the oversight ledger across all practices
     match /clientLinks/{linkId} {
+      // The invitedEmail clause additionally requires a VERIFIED email: it is
+      // the only clause here that trusts the email claim alone (pre-registration,
+      // before any uid is on the link), and an unverified email/password account
+      // could otherwise read the invite sent to someone else's address. Google
+      // sign-ins are always verified; the `in` guard keeps a token without the
+      // field from erroring the whole expression.
       allow read: if request.auth != null && (
            resource.data.invitedByUid == request.auth.uid
         || resource.data.clientUid   == request.auth.uid
-        || resource.data.invitedEmail == callerEmail()
+        || (resource.data.invitedEmail == callerEmail()
+             && 'email_verified' in request.auth.token
+             && request.auth.token.email_verified == true)
         || isOwner()
       );
       allow write: if false;

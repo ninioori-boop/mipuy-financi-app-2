@@ -514,11 +514,27 @@ exports.setClientSharing = onCall(async (request) => {
     // Source of the link facts: a FRESH pending invite wins over a stale
     // uid-keyed link — otherwise a client moving firms (revoke → new invite)
     // would see firm B's consent screen but re-bind to firm A's old link.
-    const source = (pendingSnap.exists && pendingSnap.data().status === "pending") ? pendingSnap.data()
+    const claimingPending = pendingSnap.exists && pendingSnap.data().status === "pending";
+    const source = claimingPending ? pendingSnap.data()
       : linkSnap.exists ? linkSnap.data()
       : null;
     if (!source) {
       throw new HttpsError("failed-precondition", "לא נמצאה הזמנה פעילה.");
+    }
+
+    // Claiming a PENDING invite binds this auth account to the invited EMAIL —
+    // and the email claim is only trustworthy once Firebase verified it.
+    // Without this gate, anyone could register an unverified email/password
+    // account with the invited address and receive the link; the advisor,
+    // believing the squatter is the client, would then file the real client's
+    // finances into the squatter's account. Google sign-ins are always
+    // verified, so no legitimate client is affected. Mirrors the
+    // email_verified gate the advisor-claim path (claimAdvisorRole) already
+    // has. Changes to an EXISTING uid-keyed link don't depend on the email
+    // claim, so they are deliberately not gated.
+    if (claimingPending && request.auth.token.email_verified !== true) {
+      throw new HttpsError("failed-precondition",
+        "כדי לאשר את השיתוף יש לאמת קודם את כתובת המייל של החשבון.");
     }
 
     // Activating requires matching the invite's consent version.
