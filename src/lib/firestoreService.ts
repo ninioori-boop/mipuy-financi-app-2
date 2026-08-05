@@ -2,7 +2,7 @@ import {
   doc, getDoc, setDoc, serverTimestamp,
   addDoc, collection, query, orderBy, limit, getDocs, deleteDoc,
 } from 'firebase/firestore'
-import { db } from './firebase'
+import { auth, db } from './firebase'
 
 /* ── User data ──────────────────────────────────────────────────── */
 
@@ -118,6 +118,19 @@ export async function loadSharedLearnedDB(): Promise<Record<string, string>> {
 }
 
 export async function saveLearnedEntry(key: string, category: string): Promise<void> {
-  // Single-field merge — only adds/updates this one key, never replaces the doc.
-  await setDoc(doc(db, 'shared', 'learnedDB'), { db: { [key]: category } }, { merge: true })
+  // Browser writes to shared/learnedDB are CLOSED at the rules layer (any
+  // signed-in user could overwrite every value, and the hasAll guard meant the
+  // doc could never shrink). The pool accepts writes only through /api/learn,
+  // which validates the category, drops payment rails, rate-limits per user
+  // and enforces the key ceiling — for the web session, authed by the Firebase
+  // ID token. Callers treat this as fire-and-forget (.catch), same as before.
+  const user = auth.currentUser
+  if (!user) return
+  const idToken = await user.getIdToken()
+  const res = await fetch('/api/learn', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ merchant: key, category }),
+  })
+  if (!res.ok) throw new Error(`learn failed: ${res.status}`)
 }

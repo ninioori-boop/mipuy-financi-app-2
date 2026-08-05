@@ -6,6 +6,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { ConsentScreen, type PendingInvite } from '@/components/auth/ConsentScreen'
+import { VerifyEmailScreen } from '@/components/auth/VerifyEmailScreen'
 import { refreshBrand } from '@/components/layout/BrandProvider'
 import { raceWithTimeout, TIMED_OUT } from '@/lib/promiseTimeout'
 
@@ -81,6 +82,17 @@ export function ConsentGate({ children }: { children: ReactNode }) {
 
   // No user or a public route → app renders normally (AuthProvider owns /auth redirects).
   if (!user || isPublic) return <>{children}</>
+
+  // An unverified PASSWORD account stops here, before the app. Without this the
+  // invite-squatting fix (clientLinks/setClientSharing trust only a VERIFIED
+  // email claim) would break silently for them: the pending-invite read below
+  // is denied, the .catch turns that into "no invite", and the consent screen
+  // simply never appears. All pre-gate password accounts were migrated to
+  // verified, so only new password sign-ups ever see this screen. Google and
+  // custom-token sessions carry no 'password' provider and pass straight through.
+  if (user.providerData.some(p => p.providerId === 'password') && !user.emailVerified) {
+    return <VerifyEmailScreen user={user} />
+  }
 
   if (status === 'checking') {
     return <div className="min-h-[100dvh] grid place-items-center text-muted-txt">טוען…</div>

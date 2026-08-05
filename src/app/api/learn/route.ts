@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
+import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { isAccountDeleted } from '@/lib/deletionTombstone'
 import { checkRateLimit } from '@/lib/rateLimit'
@@ -38,20 +39,54 @@ export async function POST(req: NextRequest) {
   }
   const { token, merchant, category } = body as Record<string, unknown>
 
-  const verified = typeof token === 'string' ? verifyDeviceToken(token, secret) : null
-  if (!verified) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  }
-  const { uid, version } = verified
+  // Two callers, two credentials:
+  //  • Android tracker app — per-user HMAC device token in the body (original path).
+  //  • Web app — the signed-in session's Firebase ID token as a Bearer header.
+  //    This became the browser's ONLY path when firestore.rules closed direct
+  //    writes to shared/learnedDB (any signed-in user could overwrite every
+  //    value, and hasAll meant the doc could never shrink).
+  let uid: string
+  if (typeof token === 'string') {
+    const verified = verifyDeviceToken(token, secret)
+    if (!verified) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    }
+    uid = verified.uid
 
-  if (await isDeviceTokenRevoked(uid, version)) {
-    return NextResponse.json({ error: 'token revoked' }, { status: 401 })
-  }
-  // This was the one device-token route that never checked the tombstone: a
-  // deleted account's still-installed tracker app kept writing into the SHARED
-  // pool — the collection with the widest blast radius — indefinitely.
-  if (await isAccountDeleted(uid)) {
-    return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+    if (await isDeviceTokenRevoked(uid, verified.version)) {
+      return NextResponse.json({ error: 'token revoked' }, { status: 401 })
+    }
+    // This was the one device-token route that never checked the tombstone: a
+    // deleted account's still-installed tracker app kept writing into the SHARED
+    // pool — the collection with the widest blast radius — indefinitely.
+    if (await isAccountDeleted(uid)) {
+      return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+    }
+  } else {
+    const authHeader = req.headers.get('authorization') ?? ''
+    if (!authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    }
+    let email: string | undefined
+    try {
+      const v = await verifyFirebaseToken(authHeader.slice(7))
+      uid = v.uid
+      email = v.email
+    } catch {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    }
+    // An ID token stays valid up to an hour after account deletion — same
+    // reason /api/save-snapshot checks the tombstone on this credential type.
+    if (await isAccountDeleted(uid)) {
+      return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+    }
+    // Same bar the browser write cleared at the rules layer before it closed:
+    // the session must belong to an invited (allowlisted) account. A revoked
+    // client must not keep teaching the pool that applies to every account.
+    const emailKey = email?.toLowerCase().trim()
+    if (!emailKey || !(await db.collection('allowlist').doc(emailKey).get()).exists) {
+      return NextResponse.json({ error: 'not allowed' }, { status: 403 })
+    }
   }
   // Unlike the AI routes this had no limiter at all, so one leaked token could
   // grow shared/learnedDB toward the 1MB document ceiling — at which point
