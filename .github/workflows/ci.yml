@@ -1,0 +1,55 @@
+# CI — the same gate the ship skill runs by hand, on every push.
+# Until 2026-08-05 NOTHING ran tests before code reached paying clients
+# (Vercel builds, but never runs tsc/vitest). This is advisory (no branch
+# protection), but a red X on main is a stop-everything signal.
+#
+# NOT here yet, deliberately:
+#  - Firestore rules tests (@firebase/rules-unit-testing is not a dependency
+#    and needs the emulator; own round)
+#  - Playwright E2E (day-17 scope; specs preserved in archive/businessdb-growth)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Functions syntax
+        run: node --check functions/index.js
+
+      - name: Functions tree guard
+        run: node scripts/check-functions-tree.js
+
+      - name: Build
+        run: npm run build
+        env:
+          # Dummy values — without them the prerender fails on
+          # auth/invalid-api-key (see the ship skill). Real values are never
+          # needed to prove the build compiles.
+          NEXT_PUBLIC_FIREBASE_API_KEY: dummy-key-for-build
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: dummy.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: dummy
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: dummy.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '000000000000'
+          NEXT_PUBLIC_FIREBASE_APP_ID: '1:000000000000:web:0'
