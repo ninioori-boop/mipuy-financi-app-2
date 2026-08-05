@@ -967,6 +967,15 @@ async function sendAdvisorDigest(advisorUid, advisorEmail, advisorName, practice
   const linksSnap = await db.collection("clientLinks")
     .where("invitedByUid", "==", advisorUid).where("status", "==", "active").get();
 
+  // AI cost guards — the digest fires one model call PER CLIENT, and until
+  // 2026-08-05 it was the only AI surface that honoured none of the controls
+  // (kill switch, firm ceiling, usage rollup). The digest itself still goes
+  // out when AI is off/over-budget: cards fall back to the rule-based flags.
+  // Same helpers, same Firestore counters as the WhatsApp bot and web routes.
+  const aiCfg = await clientBot.practiceAiConfig(practiceId);
+  const aiAllowed = !aiCfg.disabled && !(await clientBot.aiKillSwitchOn());
+  const aiQuotaKey = practiceId ? `ai:practice:${practiceId}` : `ai:advisor:${advisorUid}`;
+
   const clients = [];
   for (const linkDoc of linksSnap.docs) {
     const link = linkDoc.data();
@@ -984,7 +993,12 @@ async function sendAdvisorDigest(advisorUid, advisorEmail, advisorName, practice
       const flags = actionFlags(data, totals, ba, updatedMs, tstats, since);
       const attention = totals.cashflow < 0 || ba.overCats.length > 0 || flags.some((f) => f.tone === "red");
       const c = { name: nameFromEmail(link.invitedEmail), stage: link.stage || STAGE_DEFAULT, totals, ba, tasks: tstats, since, flags, attention };
-      c.aiSuggestions = await aiActionSuggestions(c, data);   // null → card falls back to flags
+      // Quota consumed per call, from the SAME daily pool as every other AI
+      // surface of the firm; denied/off → null → card falls back to flags.
+      c.aiSuggestions = (aiAllowed && await clientBot.consumeBotQuota(aiQuotaKey, aiCfg.dailyLimit, 86_400_000))
+        ? await aiActionSuggestions(c, data)
+        : null;
+      if (c.aiSuggestions) await clientBot.recordBotUsage(practiceId, "digest");
       clients.push(c);
     } catch (e) { console.warn("digest: client load failed", clientUid, e && e.message ? e.message : e); }
   }
@@ -1032,6 +1046,12 @@ exports.sendDigestNow = onCall({ secrets: [RESEND_API_KEY, ANTHROPIC_API_KEY] },
   if (!adv.exists) throw new HttpsError("permission-denied", "רק יועץ יכול לשלוח סיכום.");
   const email = adv.data().email;
   if (!email) throw new HttpsError("failed-precondition", "אין כתובת מייל ליועץ.");
+  // Each on-demand digest is N model calls (one per client) plus an email —
+  // an unlimited button invites a runaway. 4/hour covers any legitimate
+  // "send me now, tweak, send again" session.
+  if (!(await clientBot.consumeBotQuota(`digest-now:${uid}`, 4, 3_600_000))) {
+    throw new HttpsError("resource-exhausted", "נשלחו כבר כמה סיכומים בשעה האחרונה. אפשר לנסות שוב בעוד שעה.");
+  }
   const { sent, clientCount } = await sendAdvisorDigest(uid, email, advisorDisplayName(adv.data()), adv.data().practiceId);
   return { ok: true, sent, clientCount, email };
 });

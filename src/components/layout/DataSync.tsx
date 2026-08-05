@@ -610,7 +610,18 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         // this unreachable in normal flow; this is the belt-and-braces layer.
         // Status returns to idle so the pill doesn't show a perpetual "טוען"
         // over the act-as-client session (view mode has no save to clear it).
-        if (useImpersonationStore.getState().client) { setStatus('idle'); return }
+        // hydratedUid IS stamped on this early return: the session's in-memory
+        // state (the client snapshot under an active impersonation flag)
+        // belongs to THIS auth uid's session, and a later sign-in by a
+        // different uid must be recognised as a switch and torn down.
+        // Leaving it '' makes needsIdentityTeardown() return false, so the
+        // impersonation flag would survive the identity boundary and person B
+        // would see (and locally back up) the client's portfolio.
+        if (useImpersonationStore.getState().client) {
+          hydratedUid.current = user.uid
+          setStatus('idle')
+          return
+        }
         if (result?.data) applySnapshot(result.data)
         // baseline snapshot prevents an immediate auto-save right after load
         lastSavedJson.current = JSON.stringify(collectSnapshot())
@@ -664,8 +675,15 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       .catch(err => {
         if (cancelled) return
         // Same guard as the success path: a late failure must not raise the
-        // blocking error overlay over a live act-as-client session.
-        if (useImpersonationStore.getState().client) { setStatus('idle'); return }
+        // blocking error overlay over a live act-as-client session. And the
+        // same hydratedUid stamp: even on a failed own-load, the client
+        // snapshot in memory belongs to this uid's session — a different
+        // incoming uid must still trigger the full teardown.
+        if (useImpersonationStore.getState().client) {
+          hydratedUid.current = user.uid
+          setStatus('idle')
+          return
+        }
         setStatus('error', (err as Error)?.message ?? 'שגיאה בטעינת נתונים')
         // Intentionally do NOT setHydrated(true) on load failure.
         // The save effect below is gated on `hydrated`, so leaving it false

@@ -192,7 +192,7 @@ async function consumeBotQuota(key, limit, windowMs) {
 }
 
 /** Per-practice daily usage rollup — the same shape the web routes write. */
-async function recordBotUsage(practiceId) {
+async function recordBotUsage(practiceId, route = "whatsapp") {
   try {
     const day = todayKey();
     await db().collection("aiUsage").doc(`${practiceId || "_none"}_${day}`).set({
@@ -201,11 +201,21 @@ async function recordBotUsage(practiceId) {
       total: FieldValue.increment(1),
       // Nested map, not a dotted key — set({merge:true}) would store the dot
       // as part of the field NAME and the usage report would read zeros.
-      byRoute: { whatsapp: FieldValue.increment(1) },
+      byRoute: { [route]: FieldValue.increment(1) },
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
   } catch { /* accounting never blocks a reply */ }
 }
+
+// Shared with index.js's advisor digest: the digest fires one model call PER
+// CLIENT and must honour the same kill switch / practice ceiling / usage
+// rollup as every other AI surface. Exported so the guard trio has exactly
+// ONE implementation — a ceiling raised (or a firm switched off) in Firestore
+// applies everywhere at once.
+exports.aiKillSwitchOn = aiKillSwitchOn;
+exports.consumeBotQuota = consumeBotQuota;
+exports.practiceAiConfig = practiceAiConfig;
+exports.recordBotUsage = recordBotUsage;
 
 async function resolveTenancy(uid) {
   try {

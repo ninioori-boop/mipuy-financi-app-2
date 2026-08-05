@@ -120,7 +120,32 @@ function detectPatterns(txs: Transaction[]) {
   }
   insurances.sort((a, b) => b.total - a.total)
 
-  return { standingOrders, installments, refunds, recurring, subscriptions, insurances }
+  // Standing orders grouped per merchant, like the sections above. A
+  // multi-month statement carries the same הו"ק once per month; ungrouped,
+  // each appearance became a separate count:1 item with no period total, so
+  // the carve-out subtracted a single charge scaled down by varMonths while
+  // adding a full charge as the monthly row — inflating expenses.
+  const standingGroupsMap: Record<string, Transaction[]> = {}
+  for (const t of standingOrders) {
+    const key = t.desc.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!standingGroupsMap[key]) standingGroupsMap[key] = []
+    standingGroupsMap[key].push(t)
+  }
+  const standingGrouped: { desc: string; amount: number; count: number; total: number; category: string; date: string }[] = []
+  for (const [, group] of Object.entries(standingGroupsMap)) {
+    const total = group.reduce((s, t) => s + t.amount, 0)
+    standingGrouped.push({
+      desc:     group[0].desc,
+      amount:   Math.round(total / group.length),
+      count:    group.length,
+      total:    Math.round(total),
+      category: group[0].category,
+      date:     group[0].date,
+    })
+  }
+  standingGrouped.sort((a, b) => b.total - a.total)
+
+  return { standingGrouped, installments, refunds, recurring, subscriptions, insurances }
 }
 
 function fmt(n: number) {
@@ -224,12 +249,18 @@ export function SmartPatterns({ transactions, showSend = true }: { transactions:
   }, [mFixed, mVariable, mSub, mIns, mAnnual])
 
   function handleSend(item: PatternItem, target: MappingSection, targetLabel: string) {
-    const amount = Math.round(item.amount)
-    // Prefer the exact period total when detectPatterns supplied one (variable-
-    // amount merchants like Apple iTunes). Fall back to amount × count for
-    // standing orders where the single-charge amount IS monthly and count=1.
+    // Both halves of the carve MUST speak the same "monthly" language. The
+    // period total is divided by the SAME varMonths (same rounding) that
+    // importFromBank applies to the subtraction, so the row added to the
+    // target section and the amount removed from the source category row are
+    // equal — the client's expense total is preserved exactly. The previous
+    // add-side used the per-charge average (total/count), which silently
+    // skewed the total for any merchant that doesn't charge exactly once a
+    // month (a gym billing twice monthly, a הו"ק in a 3-month statement).
     const subtractTotal = item.total
-      ?? (item.count ? Math.round(item.amount * item.count) : amount)
+      ?? (item.count ? Math.round(item.amount * item.count) : Math.round(item.amount))
+    const m = Math.max(1, useMappingStore.getState().varMonths)
+    const amount = Math.round(subtractTotal / m)
     const subtractFrom  = item.category
       ? { category: item.category, amount: subtractTotal }
       : undefined
@@ -302,12 +333,13 @@ export function SmartPatterns({ transactions, showSend = true }: { transactions:
       icon: '📌',
       title: 'הוראות קבע',
       color: 'bg-surface3 text-txt',
-      items: p.standingOrders.map(t => ({
+      items: p.standingGrouped.map(t => ({
         desc: t.desc, amount: t.amount,
-        meta: t.date,
+        meta: t.count === 1 ? t.date : `${t.count} חיובים · סה"כ ${fmt(t.total)}`,
         tag: 'הו"ק', tagColor: 'border-line text-muted-txt',
         category: t.category,
-        count: 1,                                     // standing orders are typically one charge per month
+        count: t.count,
+        total: t.total,
       })),
       sendActions: [
         { label: 'קבועות', target: 'fixed' as const, buttonClass: fixedBtn },

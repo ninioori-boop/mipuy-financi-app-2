@@ -223,6 +223,55 @@ describe('DataSync — act-as-client must not survive an identity boundary', () 
       'the dropped result must not mark the session hydrated').toBe(false)
   })
 
+  // The last remnant of this family (2026-08-05 audit): a DataSync REMOUNT
+  // (ConsentGate renders a spinner INSTEAD of its children while re-checking
+  // consent, so DataSync unmounts) resets the hydratedUid ref to ''. The
+  // remounted instance's own load is then DISCARDED because act-as-client is
+  // active — and before the fix that early-return skipped the hydratedUid
+  // stamp, so a later direct sign-in by a different person compared '' vs
+  // their uid, decided "nothing hydrated, nothing to tear down", and inherited
+  // the advisor's act-as-client session — client portfolio on screen included.
+  it('clears act-as-client for person B even after a remount discarded the advisor\'s load', async () => {
+    const first = render(<DataSync><div /></DataSync>)
+    await signIn('advisor')
+    enterEditAsClient()
+
+    // The ConsentGate flicker: DataSync unmounts and remounts mid-session.
+    first.unmount()
+    render(<DataSync><div /></DataSync>)
+    // The remounted instance re-fires the advisor's own load; the result is
+    // discarded because the impersonation flag is up.
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+    // Direct switch, no null in between — the /connect path.
+    loadUserData.mockReturnValue(new Promise(() => {}))
+    await signIn('personB')
+
+    expect(useImpersonationStore.getState().client,
+      'a remount + discarded load must not disarm the identity teardown').toBeNull()
+  })
+
+  // Same hole through the ERROR branch: the remounted instance's own load
+  // FAILS while act-as-client is active. The .catch guard also early-returns,
+  // and without its hydratedUid stamp the teardown for the next person is
+  // disarmed exactly as in the success-path test above.
+  it('clears act-as-client for person B even after a remount load FAILED during impersonation', async () => {
+    const first = render(<DataSync><div /></DataSync>)
+    await signIn('advisor')
+    enterEditAsClient()
+
+    first.unmount()
+    loadUserData.mockRejectedValue(new Error('offline'))
+    render(<DataSync><div /></DataSync>)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+    loadUserData.mockReturnValue(new Promise(() => {}))
+    await signIn('personB')
+
+    expect(useImpersonationStore.getState().client,
+      'a remount + failed load must not disarm the identity teardown').toBeNull()
+  })
+
   // The money test — the defect the grill reproduced, end to end: edit-as-client,
   // sign out, sign back in, make an edit. Before the fix the surviving flag made
   // saveTarget() redirect the advisor's OWN portfolio into the CLIENT's document.
