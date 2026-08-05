@@ -87,7 +87,7 @@ function refuse(
 // crashed. Now that rejections DO carry notify, that brake is gone, so the text
 // must be recognized explicitly — including the "לא נרשם:" failure titles, which
 // the original `^נרשם:` guard does not match.
-const OUR_OWN_TEXT = /^(לא )?נרשם:|קוטלג ל/
+const OUR_OWN_TEXT = /^(לא )?נרשם:|^כבר נרשם|קוטלג ל/
 
 // What the caller's token LOOKS like — never the signature itself. `uidPart` is
 // logged only when it decodes to something shaped like a Firebase uid, so a
@@ -317,8 +317,18 @@ export async function POST(req: NextRequest) {
     ) {
       console.log(`[transaction] DUPLICATE_SKIPPED uid=${uid}`)
       const category = typeof last.cat === 'string' ? last.cat : 'שונות'
-      const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7),
-    foreignCurrency ? { amount: foreignAmount!, currency: foreignCurrency } : null)
+      // An honest notify for the swallowed write: the FIRST capture was
+      // recorded, this one was NOT. buildNotify's "נרשם" title here would
+      // confirm an action that never happened — and when the burst is really
+      // two identical genuine payments (two bus tickets, a bill split into
+      // two equal transfers), the user must know to add the second by hand.
+      const nis = '₪' + Math.round(amt).toLocaleString('he-IL')
+      const title = `כבר נרשם לפני רגע: ${cleanMerchant} · ${nis}`
+      const body = 'זיהינו חיוב כפול מהארנק, ולכן לא נרשם שוב. אם היו באמת שתי קניות זהות, אפשר להוסיף את השנייה ידנית באפליקציה.'
+      // text = title+body in ONE field — the iOS Shortcut shows ONLY
+      // notify.text, and the "add the second one by hand" instruction is the
+      // whole point of this notify.
+      const notify = { title, body, text: `${title}\n${body}`, warn: false }
       return NextResponse.json({ ok: true, duplicate: true, category, notify })
     }
   } catch { /* guard is best-effort — never blocks a capture */ }

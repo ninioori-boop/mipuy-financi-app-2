@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSyncStore } from '@/stores/syncStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
+import { alreadyDrained } from '@/lib/inboxDedup'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { saveUserData } from '@/lib/firestoreService'
 import { collectSnapshot } from '@/lib/dataSync'
@@ -141,16 +142,14 @@ export function useTransactionInbox() {
 
           const ref = typeof d.ref === 'string' && d.ref ? d.ref : ''
           const note = merchant + (ref ? ` #${ref}` : '')
-          const dup  = !!ref
-            && useExpenseLogStore.getState().entries.some(e => e.note.endsWith(` #${ref}`))
-          if (dup) {
+          if (alreadyDrained(useExpenseLogStore.getState().entries, id, ref)) {
             dropNow.push(id)   // already logged — safe to drop
             continue
           }
 
           const chargeDate = typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : today()
           const category   = typeof d.category === 'string' && d.category ? d.category : 'שונות'
-          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note, ...foreign })
+          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note, src: id, ...foreign })
           dropAfterSave.push(id)
           newCharges.push({ merchant, amount, category, date: chargeDate, foreignAmount, foreignCurrency })
         }

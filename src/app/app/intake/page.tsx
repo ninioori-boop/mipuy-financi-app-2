@@ -28,6 +28,10 @@ export default function IntakePage() {
   const [busyQ, setBusyQ]     = useState<string | null>(null)
   const [dragQ, setDragQ]     = useState<string | null>(null)  // question being dragged over
   const [saved, setSaved]     = useState(false)
+  // A save that FAILED (revoked mid-session, offline) must flip the footer:
+  // "הכול נשמר אוטומטית" while nothing is being saved is a false claim, and
+  // the client would close the tab and lose their answers.
+  const [saveFailed, setSaveFailed] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const reloadFiles = useCallback(async () => {
@@ -51,7 +55,8 @@ export default function IntakePage() {
       setSaved(false)
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
-        try { await saveAnswers(next); setSaved(true) } catch { /* ignore */ }
+        try { await saveAnswers(next); setSaved(true); setSaveFailed(false) }
+        catch { setSaveFailed(true) }
       }, 800)
       return next
     })
@@ -199,11 +204,15 @@ export default function IntakePage() {
         })
       )}
 
-      {!loading && (
+      {!loading && (saveFailed ? (
+        <div className="rounded-xl border border-expense/40 bg-expense/10 p-4 text-center text-sm text-txt">
+          ⚠️ השמירה לא מצליחה כרגע, והתשובות האחרונות עדיין לא נשמרו. כדאי לבדוק את החיבור לאינטרנט או לפנות ליועץ לפני שסוגרים את הדף.
+        </div>
+      ) : (
         <div className="rounded-xl border border-income/30 bg-income/5 p-4 text-center text-sm text-txt">
           ✓ הכול נשמר אוטומטית. סיימתם? אפשר לסגור — היועץ יראה את מה שמילאתם והעליתם.
         </div>
-      )}
+      ))}
     </div>
   )
 }

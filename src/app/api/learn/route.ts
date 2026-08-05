@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminDb } from '@/lib/firebaseAdmin'
+import { getAdminDb, getAdminAuth } from '@/lib/firebaseAdmin'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
@@ -27,9 +27,8 @@ const MAX_SHARED_KEYS = 20_000
 // ingested charges from that merchant categorize correctly. Additive + isolated:
 // 503 until the backend is configured; never touches existing data/routes.
 export async function POST(req: NextRequest) {
-  const secret = process.env.TRANSACTION_SECRET
   const db = getAdminDb()
-  if (!secret || !db) {
+  if (!db) {
     return NextResponse.json({ error: 'service not configured' }, { status: 503 })
   }
 
@@ -47,6 +46,13 @@ export async function POST(req: NextRequest) {
   //    value, and hasAll meant the doc could never shrink).
   let uid: string
   if (typeof token === 'string') {
+    // The HMAC secret is only needed on THIS branch — gating the whole route
+    // on it meant rotating/removing the Android secret silently killed every
+    // browser Bearer learn too (fire-and-forget, no error surfaced anywhere).
+    const secret = process.env.TRANSACTION_SECRET
+    if (!secret) {
+      return NextResponse.json({ error: 'service not configured' }, { status: 503 })
+    }
     const verified = verifyDeviceToken(token, secret)
     if (!verified) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -61,6 +67,26 @@ export async function POST(req: NextRequest) {
     // pool — the collection with the widest blast radius — indefinitely.
     if (await isAccountDeleted(uid)) {
       return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+    }
+    // Same allowlist bar as the Bearer branch below. The documented removal
+    // flow (/revoke) deletes the allowlist doc but does NOT bump the device
+    // token's minVersion — so without this check, a removed client with the
+    // tracker still installed kept teaching the pool that applies to every
+    // account. Fail closed: losing a learn write is harmless, an unauthorized
+    // one is not.
+    const adminAuth = getAdminAuth()
+    if (!adminAuth) {
+      return NextResponse.json({ error: 'service not configured' }, { status: 503 })
+    }
+    let deviceEmail: string | undefined
+    try {
+      deviceEmail = (await adminAuth.getUser(uid)).email
+    } catch {
+      return NextResponse.json({ error: 'not allowed' }, { status: 403 })
+    }
+    const deviceEmailKey = deviceEmail?.toLowerCase().trim()
+    if (!deviceEmailKey || !(await db.collection('allowlist').doc(deviceEmailKey).get()).exists) {
+      return NextResponse.json({ error: 'not allowed' }, { status: 403 })
     }
   } else {
     const authHeader = req.headers.get('authorization') ?? ''
@@ -91,7 +117,11 @@ export async function POST(req: NextRequest) {
   // Unlike the AI routes this had no limiter at all, so one leaked token could
   // grow shared/learnedDB toward the 1MB document ceiling — at which point
   // legitimate learn writes start failing for EVERY client.
-  const rl = await checkRateLimit({ key: 'learn:' + uid, limit: 100, windowMs: 3_600_000 })
+  // 250/hr, not 100: the key is the SIGNED-IN uid, which for an advisor doing
+  // an initial-mapping marathon is shared across every client they correct in
+  // that hour — 100 was reachable by honest work, and the 429 is swallowed
+  // client-side so the pool silently stopped learning mid-session.
+  const rl = await checkRateLimit({ key: 'learn:' + uid, limit: 250, windowMs: 3_600_000 })
   if (!rl.allowed) {
     return NextResponse.json({ error: 'rate limited' }, { status: 429 })
   }

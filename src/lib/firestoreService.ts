@@ -73,18 +73,25 @@ export interface VersionSummary {
 export async function createVersion(uid: string, snapshot: unknown, size: number): Promise<void> {
   const col = collection(db, 'users', uid, 'versions')
   await addDoc(col, { savedAt: serverTimestamp(), snapshot, size })
-  // Trim asynchronously — creation succeeds even if trim fails. A stray extra
-  // version is harmless; the next createVersion will trim it.
-  trimVersions(uid).catch(() => {})
+  // Trim asynchronously, SERVER-SIDE — creation succeeds even if trim fails;
+  // a stray extra version is harmless and the next save retries. Server-side
+  // because the browser cannot do this correctly from either seat: an advisor
+  // session may only CREATE versions (rules), so a client-side trim failed
+  // silently for advisor-managed clients and the backlog grew ~12/editing
+  // hour; and the web SDK has no field masks, so trimming from the browser
+  // downloaded every full snapshot just to learn the ids.
+  trimVersionsServerSide(uid).catch(() => {})
 }
 
-async function trimVersions(uid: string): Promise<void> {
-  const col  = collection(db, 'users', uid, 'versions')
-  // Fetch id + savedAt for ALL versions (no limit) so we can drop everything
-  // beyond MAX_VERSIONS in one pass. In practice this is ≤ 21 docs.
-  const snap = await getDocs(query(col, orderBy('savedAt', 'desc')))
-  const excess = snap.docs.slice(MAX_VERSIONS)
-  await Promise.all(excess.map(d => deleteDoc(d.ref)))
+async function trimVersionsServerSide(uid: string): Promise<void> {
+  const user = auth.currentUser
+  if (!user) return
+  const idToken = await user.getIdToken()
+  await fetch('/api/trim-versions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ uid }),
+  })
 }
 
 export async function listVersions(uid: string): Promise<VersionSummary[]> {
@@ -132,5 +139,11 @@ export async function saveLearnedEntry(key: string, category: string): Promise<v
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ merchant: key, category }),
   })
-  if (!res.ok) throw new Error(`learn failed: ${res.status}`)
+  if (!res.ok) {
+    // Callers swallow this rejection by design (learning must never block the
+    // UI) — so leave at least a console trace. Without it, a 429/403 streak
+    // means the shared pool silently stops learning and nobody can tell.
+    console.warn(`shared-pool learn failed: ${res.status} for "${key}"`)
+    throw new Error(`learn failed: ${res.status}`)
+  }
 }

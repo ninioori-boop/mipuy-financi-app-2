@@ -170,13 +170,23 @@ export function extractTransactions(
 
     const notes = curNotes !== -1 ? String(row[curNotes] ?? '').trim() : ''
     const dateRaw = curDate !== -1 ? row[curDate] : null
-    const dateStr = dateRaw ? String(dateRaw).substring(0, 10) : ''
+    // parseExcel opens workbooks with cellDates:true, so a real date cell
+    // arrives as a JS Date — String(date).substring(0,10) turned that into
+    // "Tue Aug 05" (English, no year) on the client's screen. Local getters,
+    // not toISOString: Israel is UTC+3, so a local-midnight Date serialized
+    // via ISO lands on the previous day.
+    const dateStr = dateRaw instanceof Date
+      ? `${dateRaw.getFullYear()}-${String(dateRaw.getMonth() + 1).padStart(2, '0')}-${String(dateRaw.getDate()).padStart(2, '0')}`
+      : dateRaw ? String(dateRaw).substring(0, 10) : ''
     const installment = extractInstallmentInfo(notes)
     const standingOrder = isStandingOrderDesc(desc) || isStandingOrderDesc(notes)
     const isRefund = amount < 0
 
-    const originalAmount = (installment && curTxAmount !== -1)
-      ? Math.abs(parseAmount(row[curTxAmount]) ?? 0)
+    // Number.isFinite, not `?? 0`: parseAmount reports failure as NaN, which
+    // `??` passes straight through — the NaN then persists into the snapshot.
+    const parsedOriginal = curTxAmount !== -1 ? parseAmount(row[curTxAmount]) : NaN
+    const originalAmount = (installment && Number.isFinite(parsedOriginal))
+      ? Math.abs(parsedOriginal)
       : null
 
     transactions.push({

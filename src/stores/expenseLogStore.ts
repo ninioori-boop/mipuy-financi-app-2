@@ -23,11 +23,18 @@ export interface ExpenseEntry {
   foreignAmount?:   number
   foreignCurrency?: string
   fxRate?:          number
+  // The transactionInbox item id this entry was drained from. THE dedup key
+  // for re-drains: most captures carry no ref (route writes ref:null for the
+  // iOS shortcut), so without this a tab killed between save-ack and the
+  // inbox deleteDoc re-drained the same item next session and the charge
+  // appeared twice in the log. Absent on manually-added entries.
+  src?: string
 }
 
 type NewEntry = {
   date: string; amount: number; category: string; note: string
   foreignAmount?: number; foreignCurrency?: string; fxRate?: number
+  src?: string
 }
 
 interface ExpenseLogState {
@@ -54,6 +61,7 @@ export const useExpenseLogStore = create<ExpenseLogState>((set) => ({
         entry.foreignCurrency = e.foreignCurrency
         if (typeof e.fxRate === 'number') entry.fxRate = e.fxRate
       }
+      if (e.src) entry.src = e.src
       return { entries: [entry, ...s.entries] }
     }),
 

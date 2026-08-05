@@ -187,6 +187,32 @@ describe('extractTransactions', () => {
     expect(txns.map(t => t.desc)).toEqual(['שופרסל'])
   })
 
+  // parseExcel opens workbooks with cellDates:true, so a real date cell is a
+  // JS Date. String(date).substring(0,10) showed the client "Tue Aug 05" —
+  // English, no year. Local getters (not toISOString): Israel is UTC+3, so a
+  // local-midnight Date serialized via ISO lands on the previous day.
+  it('formats a real Date cell as YYYY-MM-DD', () => {
+    const withDate = [
+      ['תאריך רכישה', 'שם בית עסק', 'סכום חיוב', 'פירוט נוסף'],
+      [new Date(2026, 7, 5), 'שופרסל', '250', ''],
+    ]
+    const txns = extractTransactions(withDate as unknown[][], 'test.xlsx')
+    expect(txns[0].date).toBe('2026-08-05')
+  })
+
+  // parseAmount reports failure as NaN and `?? 0` passes NaN straight through
+  // — the NaN then persisted into the saved snapshot, waiting for any future
+  // consumer of originalAmount.
+  it('originalAmount is null, never NaN, when the transaction-amount cell is unparseable', () => {
+    const withInstallment = [
+      ['תאריך רכישה', 'שם בית עסק', 'סכום עסקה', 'סכום חיוב', 'פירוט נוסף'],
+      ['2024-01-15', 'חנות רהיטים', 'לא ידוע', '300', 'תשלום 2 מתוך 6'],
+    ]
+    const txns = extractTransactions(withInstallment as unknown[][], 'test.xlsx')
+    expect(txns[0].installment).toEqual({ current: 2, total: 6 })
+    expect(txns[0].originalAmount).toBeNull()
+  })
+
   it('returns empty array for unrecognized format', () => {
     const txns = extractTransactions([['a', 'b'], ['c', 'd']], 'bad.xlsx')
     expect(txns).toEqual([])
