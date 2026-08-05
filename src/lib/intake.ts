@@ -25,15 +25,6 @@ export interface IntakeFile {
   questionLabel?: string
 }
 
-export interface IntakeClient {
-  uid:         string
-  email:       string
-  displayName: string
-  updatedAt:   number  // ms
-  answers:     Record<string, string>   // text/choice answers, keyed by question id
-  files:       IntakeFile[]
-}
-
 const mkId = () => Math.random().toString(36).slice(2, 11)
 const toMs = (t: unknown): number =>
   t && typeof (t as Timestamp).toMillis === 'function' ? (t as Timestamp).toMillis() : 0
@@ -118,28 +109,6 @@ export async function deleteIntakeFile(f: IntakeFile): Promise<void> {
   const uid = requireUid()
   try { await deleteObject(ref(storage, f.path)) } catch { /* object may already be gone */ }
   await deleteDoc(doc(db, 'intake', uid, 'files', f.id))
-}
-
-/** Advisor: every client that has an intake, with their files (newest first). */
-export async function listAllIntake(): Promise<IntakeClient[]> {
-  const snap = await getDocs(collection(db, 'intake'))
-  const clients = await Promise.all(snap.docs.map(async (d) => {
-    const x = d.data()
-    const files = await readFiles(d.id)
-    const answers = x.answers && typeof x.answers === 'object' ? (x.answers as Record<string, string>) : {}
-    return {
-      uid: d.id,
-      email:       String(x.email ?? ''),
-      displayName: String(x.displayName ?? ''),
-      updatedAt:   toMs(x.updatedAt),
-      answers,
-      files,
-    }
-  }))
-  // Only clients that have uploaded something or answered, newest activity first.
-  return clients
-    .filter(c => c.files.length > 0 || Object.values(c.answers).some(v => v && v.trim()))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** A temporary download URL for a stored file (owner or advisor). */
