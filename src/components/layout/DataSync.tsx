@@ -601,6 +601,16 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     loadUserData(user.uid)
       .then(result => {
         if (cancelled) return
+        // An act-as-client session started while this load was in flight (the
+        // advisor page is reachable before hydration). Applying OUR data now
+        // would put the advisor's portfolio on screen under an active
+        // impersonation flag — in edit mode, the next save would write it into
+        // the client's document. Drop the result: the client snapshot the entry
+        // applied stays intact. The advisor page's own hydration gate makes
+        // this unreachable in normal flow; this is the belt-and-braces layer.
+        // Status returns to idle so the pill doesn't show a perpetual "טוען"
+        // over the act-as-client session (view mode has no save to clear it).
+        if (useImpersonationStore.getState().client) { setStatus('idle'); return }
         if (result?.data) applySnapshot(result.data)
         // baseline snapshot prevents an immediate auto-save right after load
         lastSavedJson.current = JSON.stringify(collectSnapshot())
@@ -653,6 +663,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       })
       .catch(err => {
         if (cancelled) return
+        // Same guard as the success path: a late failure must not raise the
+        // blocking error overlay over a live act-as-client session.
+        if (useImpersonationStore.getState().client) { setStatus('idle'); return }
         setStatus('error', (err as Error)?.message ?? 'שגיאה בטעינת נתונים')
         // Intentionally do NOT setHydrated(true) on load failure.
         // The save effect below is gated on `hydrated`, so leaving it false

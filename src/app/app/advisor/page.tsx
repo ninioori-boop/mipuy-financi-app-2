@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { db, callable } from '@/lib/firebase'
 import { applySnapshot, resetAllStores, resetSessionStores } from '@/lib/dataSync'
 import { useAuthStore } from '@/stores/authStore'
+import { useSyncStore } from '@/stores/syncStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { AdvisorDashboard } from '@/components/advisor/AdvisorDashboard'
 import { ClientDetailView } from '@/components/advisor/ClientDetailView'
@@ -65,6 +66,16 @@ export default function AdvisorPage() {
    *  client's snapshot and jump into the regular tabs. DataSync's guards make
    *  sure NOTHING gets saved while this mode is on. Exit = full reload. */
   async function viewFullAccount(c: MockClient) {
+    // The advisor's OWN load (DataSync effect 1) may still be in flight — this
+    // page's gates are separate reads that can succeed while it stalls. Entering
+    // act-as-client now would let that load resolve later and apply the
+    // advisor's portfolio OVER the client's snapshot (in edit mode, the next
+    // save would then write it into the client's document). A failed load needs
+    // no case here: DataSync's error overlay already blocks the whole app.
+    if (!useSyncStore.getState().hydrated) {
+      toast.info('הנתונים שלך עדיין נטענים — נסה שוב בעוד רגע.')
+      return
+    }
     try {
       const snap = await getDoc(doc(db, 'users', c.id))
       const raw  = snap.exists() ? snap.data() : null
@@ -103,6 +114,11 @@ export default function AdvisorPage() {
     // Defensive: never target a non-uid id (a pending invite's doc id is
     // pending_{email}) — writing users/pending_* would corrupt the namespace.
     if (!c.id || c.id.startsWith('pending_')) { toast.error('הלקוח עדיין לא נרשם למערכת.'); return }
+    // Same guard as viewFullAccount — and it matters more here (edit mode).
+    if (!useSyncStore.getState().hydrated) {
+      toast.info('הנתונים שלך עדיין נטענים — נסה שוב בעוד רגע.')
+      return
+    }
     try {
       const snap = await getDoc(doc(db, 'users', c.id))
       const raw  = snap.exists() ? snap.data() : null

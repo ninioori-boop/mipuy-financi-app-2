@@ -193,6 +193,36 @@ describe('DataSync — act-as-client must not survive an identity boundary', () 
     expect(useImpersonationStore.getState().mode).toBe('edit')
   })
 
+  // The pre-existing race the grill spotted while verifying the fix above: the
+  // advisor page is reachable before hydration, so act-as-client can begin while
+  // the advisor's OWN load is still in flight. That load resolving late used to
+  // apply the ADVISOR's portfolio over the client's snapshot — under an active
+  // edit flag, the next save would write it into the client's document.
+  it('a self-load resolving AFTER act-as-client entry must not clobber the client session', async () => {
+    render(<DataSync><div /></DataSync>)
+    let resolveLoad!: (v: { data: unknown; updatedAt: number }) => void
+    loadUserData.mockReturnValue(new Promise(r => { resolveLoad = r }))
+    await signIn('advisor')
+    expect(useSyncStore.getState().hydrated, 'load must still be pending').toBe(false)
+
+    // Mirrors editFullAccount: apply the client's snapshot, then raise the flag.
+    act(() => {
+      useMappingStore.setState({ creditScore: 555 })
+      useImpersonationStore.getState().start(CLIENT, 'edit', 500)
+    })
+
+    await act(async () => {
+      resolveLoad({ data: PORTFOLIO_A, updatedAt: 1_000 })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useMappingStore.getState().creditScore,
+      "the advisor's late-arriving portfolio must not replace the client's data").toBe(555)
+    expect(useSyncStore.getState().hydrated,
+      'the dropped result must not mark the session hydrated').toBe(false)
+  })
+
   // The money test — the defect the grill reproduced, end to end: edit-as-client,
   // sign out, sign back in, make an edit. Before the fix the surviving flag made
   // saveTarget() redirect the advisor's OWN portfolio into the CLIENT's document.
