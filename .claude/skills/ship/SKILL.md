@@ -30,7 +30,8 @@ description: Safe production deploy for this repo. Use whenever deploying web co
    npm run build
    ```
    (בלעדיהם הבנייה נופלת על `auth/invalid-api-key` ב-prerender — לא באג בקוד)
-4. **גריל** (ראה skill `grill`) — חובה
+4. **גריל** (ראה skill `grill`) — רק לשינוי **רגיש**: rules, functions, שמירה/טעינה
+   של נתוני לקוח, לוגיקה חדשה. שינוי תוכן/UI פשוט — לא נדרש (אורי, 05/08/2026)
 5. `git add` **קבצים ספציפיים**, לא `-A` + סריקת סודות (skill `safe-commit`)
 6. commit + `git push origin HEAD:main`
 

@@ -9,7 +9,8 @@ description: Adversarial pre-deploy code review. MUST run before pushing to main
 
 | מצב | להפעיל? |
 |---|---|
-| push ל-main (נפרס אוטומטית ללקוחות) | ✅ **חובה** |
+| push ל-main של שינוי **רגיש** — לוגיקה, שמירה/טעינה, מסלולי נתונים | ✅ **חובה** |
+| push ל-main של שינוי תוכן/UI פשוט (טקסט, עיצוב, סקשן סטטי) | ❌ מיותר (אורי, 05/08/2026) |
 | `firebase deploy --only functions:*` | ✅ **חובה** |
 | סקריפט שכותב ל-Firestore בפרודקשן (`--apply`) | ✅ **חובה** |
 | שינוי ב-`firestore.rules` / `storage.rules` | ✅ **חובה** |
