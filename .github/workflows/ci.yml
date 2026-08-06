@@ -74,5 +74,18 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The Firestore emulator is a Java process and recent versions want a
+      # modern JDK — the runner's default may lag. Pin 21 (verified locally).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Firestore rules tests (emulator)
-        run: npx -y firebase-tools emulators:exec --only firestore --project demo-rules-test "npx vitest run --config vitest.rules.config.ts"
+        # tee + ::error:: — job LOGS are admin-only via the public API, but
+        # ANNOTATIONS are readable, so on failure the tail of the output is
+        # surfaced where a credential-less session can actually see it.
+        # Explicit bash = pipefail, otherwise `| tee` masks the exit code.
+        shell: bash
+        run: |
+          npx -y firebase-tools emulators:exec --only firestore --project demo-rules-test "npx vitest run --config vitest.rules.config.ts" 2>&1 | tee rules-run.log || { echo "::error::rules tests failed — $(tail -c 650 rules-run.log | tr '\n' ' | ')"; exit 1; }
