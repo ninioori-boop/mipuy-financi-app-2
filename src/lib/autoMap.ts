@@ -258,8 +258,10 @@ export function validateMapping(
   if (txns.length) {
     const txnByCat = new Map<string, number>()
     for (const t of txns) {
-      if (t.isRefund) continue
-      txnByCat.set(t.category, (txnByCat.get(t.category) ?? 0) + t.amount)
+      // Refunds NET their category (2026-08-06, same rule as the main tabs) —
+      // otherwise this cross-check compares the AI's netted rows to gross
+      // sums and emits phantom warnings.
+      txnByCat.set(t.category, (txnByCat.get(t.category) ?? 0) + (t.isRefund ? -t.amount : t.amount))
     }
     const aiByCat = new Map<string, number>()
     for (const row of r.variable) {

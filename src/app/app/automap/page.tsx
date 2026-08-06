@@ -202,13 +202,15 @@ export default function AutoMapPage() {
     return () => clearInterval(id)
   }, [isGenerating])
 
-  // Category totals from the parsed transactions (excluding refunds).
+  // Category totals from the parsed transactions. Refunds NET their category
+  // (2026-08-06, same rule as the credit/import tabs) — a refunded charge is
+  // not spending, and the AI prompt must see the same numbers the tabs show.
   const catTotals = (() => {
     const map = new Map<string, { sum: number; count: number }>()
     for (const t of txns) {
-      if (t.isRefund) continue
       const e = map.get(t.category) ?? { sum: 0, count: 0 }
-      e.sum += t.amount; e.count++
+      e.sum += t.isRefund ? -t.amount : t.amount
+      if (!t.isRefund) e.count++
       map.set(t.category, e)
     }
     return [...map.entries()].sort((a, b) => b[1].sum - a[1].sum)

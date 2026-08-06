@@ -173,7 +173,11 @@ export default function BankPage() {
               : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } },
           ]
         } else {
-          const rows = await parseExcelFile(file)
+          // allSheets — a bank export often splits accounts/currencies across
+          // sheets (עו"ש + מט"ח); reading only sheet 1 silently dropped the
+          // rest. The rows become TEXT for the AI extractor, which handles a
+          // second header block mid-stream without any parser changes.
+          const rows = await parseExcelFile(file, { allSheets: true })
           content = [{ type: 'text', text:
             'חלץ את כל התנועות מדוח הבנק הבא (טבלה, עמודות מופרדות ב‑| ). ' +
             'שים לב לעמודת הסכום עם הסימן (מינוס=חיוב) והתעלם מעמודת היתרה הרצה וממספרי רצף:\n\n' +
