@@ -3,7 +3,7 @@ const { onCall } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, FieldPath } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const { getStorage } = require("firebase-admin/storage");
 
@@ -251,6 +251,16 @@ exports.inviteClient = onCall({ secrets: [RESEND_API_KEY] }, async (request) => 
   const email = String(request.data?.email ?? "").toLowerCase().trim();
   if (!EMAIL_RE.test(email)) {
     throw new HttpsError("invalid-argument", "כתובת מייל לא תקינה.");
+  }
+
+  // 2b) Rate limit. Every invite sends a real email through our Resend
+  // domain — an unlimited button lets a runaway loop or a compromised advisor
+  // session burn the domain's sending reputation, which hurts EVERY firm's
+  // mail. 60/day leaves room for a whole-firm onboarding day (the quota is
+  // consumed per ATTEMPT, including failed duplicates — standard anti-abuse).
+  if (!(await clientBot.consumeBotQuota(`invite:${callerUid}`, 60, 86_400_000))) {
+    throw new HttpsError("resource-exhausted",
+      "נשלחו הרבה הזמנות היום מהחשבון הזה. אפשר להמשיך מחר, ואם יש צורך חריג, פנה אלינו.");
   }
 
   // 3) Existing accounts may be invited ONLY if the INVITING PRACTICE lists
@@ -1086,6 +1096,12 @@ exports.getFirmOverview = onCall(async (request) => {
     linksSnap.forEach((l) => {
       const d = l.data();
       if (d.status === "consumed") return;
+      // An advisor who was manually moved between firms keeps their old links
+      // in the db — the firm overview must not leak another firm's client
+      // emails and statuses to this owner. Filtered in code, not in the
+      // query: legacy links with no practiceId (pre-white-label) must stay
+      // visible, and a query-level equality filter would drop them.
+      if (d.practiceId && d.practiceId !== practiceId) return;
       const ts = d.statusChangedAt || d.createdAt;
       const dateMs = ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0;
       clients.push({ email: d.invitedEmail, status: d.status, dateMs });
@@ -1408,6 +1424,39 @@ exports.deleteMyAccount = onCall(
       await db.recursiveDelete(db.collection("intake").doc(uid));
       await db.recursiveDelete(db.collection("transactionInbox").doc(uid));
       await db.recursiveDelete(db.collection("users").doc(uid));
+    });
+
+    // 7b. Operational residue — no financial content (ingest error reasons,
+    //     rate-limit counters), but uid-keyed, and "deleted" must mean
+    //     deleted. Counter doc ids embed the uid inside known prefixes
+    //     (`${key}_${bucket}`), so each prefix is swept with a documentId
+    //     range scan. A prefix with no docs is a free no-op.
+    await step(uid, "opsResidue", async () => {
+      await db.collection("transactionErrors").doc(uid).delete();
+      const prefixes = [
+        // Web API routes (src/lib/rateLimit.ts call sites).
+        `ai:user-day:${uid}`, `wa-link:${uid}`, `credit-statement:${uid}`,
+        `automap:${uid}`, `trimver:${uid}`, `categorize:${uid}`,
+        `learn:${uid}`, `analyze:${uid}`, `bank-statement:${uid}`,
+        // Functions-side counters (WhatsApp bot, digest, invites).
+        `wa-ai:${uid}`, `digest-now:${uid}`, `ai:advisor:${uid}`, `invite:${uid}`,
+      ];
+      let counters = 0;
+      // U+F8FF: the standard Firestore "everything with this prefix" range
+      // sentinel. Built with fromCharCode so the source stays plain ASCII —
+      // an invisible literal here already caused one false alarm.
+      // deleteByQuery (batched pages), not per-doc awaits: the client-side
+      // httpsCallable gives up after ~70s, and a long-lived account can hold
+      // hundreds of counter docs — a serial crawl risks the user seeing an
+      // error on a deletion that actually completed.
+      const rangeEnd = String.fromCharCode(0xf8ff);
+      for (const prefix of prefixes) {
+        const base = `${prefix}_`.replace(/\//g, "_");
+        counters += await deleteByQuery(db.collection("rateLimits")
+          .where(FieldPath.documentId(), ">=", base)
+          .where(FieldPath.documentId(), "<", base + rangeEnd));
+      }
+      return { counters };
     });
 
     // 8. Send audit: keep the row, drop everything identifying — including the

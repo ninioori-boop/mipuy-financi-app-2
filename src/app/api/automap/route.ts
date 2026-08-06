@@ -3,7 +3,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
-import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
+import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 import { AUTOMAP_SYSTEM_PROMPT } from '@/lib/autoMap'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   // App Check (gated) — no-op until APP_CHECK_ENFORCE=true.
-  if (process.env.APP_CHECK_ENFORCE === 'true') {
+  if (appCheckEnforced()) {
     try {
       await verifyAppCheckToken(req.headers.get('x-firebase-appcheck') ?? '')
     } catch {

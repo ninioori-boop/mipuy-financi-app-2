@@ -3,7 +3,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
-import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
+import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
 export const runtime = 'nodejs'
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
   }
 
-  if (process.env.APP_CHECK_ENFORCE === 'true') {
+  if (appCheckEnforced()) {
     try {
       await verifyAppCheckToken(req.headers.get('x-firebase-appcheck') ?? '')
     } catch {

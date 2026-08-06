@@ -3,7 +3,7 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
-import { verifyAppCheckToken } from '@/lib/verifyAppCheckToken'
+import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
 export const runtime = 'nodejs'
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   // App Check (gated): ensures the request comes from the real app, not a script.
   // No-op until APP_CHECK_ENFORCE=true (flip on only after reCAPTCHA is registered
   // and the App Check console shows real traffic is verified).
-  if (process.env.APP_CHECK_ENFORCE === 'true') {
+  if (appCheckEnforced()) {
     try {
       await verifyAppCheckToken(req.headers.get('x-firebase-appcheck') ?? '')
     } catch {

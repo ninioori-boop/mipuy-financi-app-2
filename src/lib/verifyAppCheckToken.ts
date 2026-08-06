@@ -10,6 +10,27 @@ let keysCache: Record<string, string> | null = null // kid -> PEM
 let keysCacheAt = 0
 
 /**
+ * Whether App Check should actually be enforced on this request. True only
+ * when the flag is on AND the client build can produce tokens: the site key
+ * is a NEXT_PUBLIC_ var baked into the same deployment, so if it is absent
+ * here, NO browser request carries a token — and enforcing would 401 every
+ * single user at once. That trap is real (documented 2026-08): flipping
+ * APP_CHECK_ENFORCE alone used to take the whole app down for everyone.
+ * Refuse loudly instead.
+ */
+export function appCheckEnforced(): boolean {
+  if (process.env.APP_CHECK_ENFORCE !== 'true') return false
+  if (!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY?.trim()) {
+    console.error(
+      'APP_CHECK_ENFORCE=true but NEXT_PUBLIC_RECAPTCHA_SITE_KEY is missing — ' +
+      'refusing to enforce (every request would be rejected). Set the site key first.',
+    )
+    return false
+  }
+  return true
+}
+
+/**
  * Verifies a Firebase App Check token (an RS256 JWT signed by Firebase App Check).
  * Mirrors verifyFirebaseToken.ts, but against the App Check JWKS and claims.
  * Resolves on success; throws on any failure (fail-closed).

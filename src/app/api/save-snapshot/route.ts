@@ -46,7 +46,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Size guard — the snapshot came from the client, don't trust it blindly.
-  const size = JSON.stringify(snapshot).length
+  // Real BYTES, not string length: Hebrew is 2 bytes per character in UTF-8,
+  // so a heavily-Hebrew snapshot could pass a `.length` check at "900KB" while
+  // actually being ~1.8MB — and then die on Firestore's 1MiB document ceiling
+  // with an unexplained 500 instead of this honest 413.
+  const size = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
   if (size > MAX_BYTES) {
     return NextResponse.json({ error: `snapshot too large (${size} bytes)` }, { status: 413 })
   }
