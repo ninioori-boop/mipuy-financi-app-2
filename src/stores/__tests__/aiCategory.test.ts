@@ -48,6 +48,31 @@ describe('applyAiCategoryById — stale-delete protection', () => {
     expect(txns.find(t => t.id === 'c')?.category).toBe('שונות')
   })
 
+  // Refunds net their category (Ori, 2026-08-06), and the AI batch is built
+  // from CHARGES only — so when the AI moves a charge out of 'שונות', its
+  // same-merchant refund must move WITH it. Otherwise the charge's new
+  // category keeps the full amount (the ₪1,350 complaint, unfixed on the AI
+  // path) and the orphan refund drives 'שונות' negative, deleting real spend.
+  it('a same-merchant REFUND follows the charge\'s AI category; other charges do not', () => {
+    const store = useCreditStore.getState()
+    const refund = { ...makeTxn('r', 'אוטובוס בכרם'), isRefund: true }
+    store.setTransactions([
+      makeTxn('a', 'אוטובוס בכרם'),
+      refund,
+      makeTxn('b', 'אוטובוס בכרם'),   // separate charge — has its own AI answer
+      makeTxn('c', 'paz'),
+    ], ['test.xlsx'])
+
+    store.applyAiCategoryById('a', 'חופשה וטיול')
+
+    const txns = useCreditStore.getState().transactions
+    expect(txns.find(t => t.id === 'r')?.category,
+      'the refund must follow its charge so the netting hits the right category').toBe('חופשה וטיול')
+    expect(txns.find(t => t.id === 'b')?.category,
+      'a sibling CHARGE keeps its own pending AI answer').toBe('שונות')
+    expect(txns.find(t => t.id === 'c')?.category).toBe('שונות')
+  })
+
   it('if a row was deleted mid-AI-run, applying the AI result is a silent no-op (no wrong row updated)', () => {
     const store = useCreditStore.getState()
     store.setTransactions([

@@ -69,7 +69,8 @@ export function SectionPanel({
     if (!creditTransactions) return []
     const myKey = normalizeForLookup(name)
     return creditTransactions.filter(t => {
-      if (t.isRefund) return false
+      // Refunds stay IN the list: the row amount nets them (importFromCredit),
+      // so the detail must show them or its sum won't match the row.
       if (t.category !== name) return false
       const merchantKey = normalizeForLookup(t.desc)
       // Skip the txn if its merchant has its OWN mapping row elsewhere.
@@ -159,8 +160,8 @@ export function SectionPanel({
                             <div className="truncate text-txt">{t.desc}</div>
                           </td>
                           <td className="px-3 py-1.5 text-muted-txt whitespace-nowrap">{t.date}</td>
-                          <td className="px-3 py-1.5 text-left font-medium text-gold tabular-nums whitespace-nowrap">
-                            {fmt(t.amount)}
+                          <td className={`px-3 py-1.5 text-left font-medium tabular-nums whitespace-nowrap ${t.isRefund ? 'text-green-400' : 'text-gold'}`}>
+                            {t.isRefund ? '+' : ''}{fmt(t.amount)}
                           </td>
                         </tr>
                       ))}
@@ -169,7 +170,7 @@ export function SectionPanel({
                       <tr>
                         <td colSpan={2} className="px-3 py-1.5 text-muted-txt">{txs.length} עסקאות</td>
                         <td className="px-3 py-1.5 text-left font-bold text-gold tabular-nums">
-                          {fmt(txs.reduce((s, t) => s + t.amount, 0))}
+                          {fmt(txs.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0))}
                         </td>
                       </tr>
                     </tfoot>

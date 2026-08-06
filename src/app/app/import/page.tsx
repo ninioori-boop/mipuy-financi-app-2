@@ -234,6 +234,19 @@ export default function ImportPage() {
               if (idx < 0) continue   // row was deleted mid-run — skip
               next[idx] = { ...next[idx], category: cat }
               updated++
+              // Same-merchant REFUNDS follow the charge's AI category (the AI
+              // never sees refunds — they're filtered above). Refunds net
+              // their category, so leaving one in 'שונות' while its charge
+              // moves means the charge stays fully counted AND the refund
+              // drives 'שונות' negative — deleting real misc spend there.
+              const refKey = normalizeForLookup(next[idx].desc)
+              if (refKey) {
+                for (let j = 0; j < next.length; j++) {
+                  if (next[j].isRefund && normalizeForLookup(next[j].desc) === refKey) {
+                    next[j] = { ...next[j], category: cat }
+                  }
+                }
+              }
             }
             return next
           })
@@ -272,24 +285,38 @@ export default function ImportPage() {
     if (!targetMonth) { toast.error('יש לבחור חודש יעד לפני השליחה'); return }
     if (!transactions.length) { toast.error('אין עסקאות — העלה קובץ קודם'); return }
 
-    // שולחים את כל העסקאות (ללא פילטר תאריך) — המשתמש בוחר לאיזה חודש
-    const filtered = transactions.filter(t => !t.isRefund)
-
+    // שולחים את כל העסקאות (ללא פילטר תאריך) — המשתמש בוחר לאיזה חודש.
+    // Refunds NET their category and their merchant (Ori, 2026-08-06): a
+    // refunded charge is not real spending, so the budget ACTUAL must not
+    // include it. Categories/merchants whose refunds meet or exceed their
+    // charges are dropped below — net credit is not an expense.
     const catSums: Record<string, number> = {}
-    filtered.forEach(t => { catSums[t.category] = (catSums[t.category] || 0) + t.amount })
+    transactions.forEach(t => {
+      catSums[t.category] = (catSums[t.category] || 0) + (t.isRefund ? -t.amount : t.amount)
+    })
+    // Clamp to 0, do NOT delete: a category netted to zero must still UPDATE
+    // an existing budget row's actual to 0 on a re-send (deleting the key made
+    // fillActual skip the row, so a stale actual from the previous send
+    // survived while the screen showed ₪0). New rows are still never created
+    // for a zero — fillActual/fillActualPerItem guard on sum > 0.
+    for (const k of Object.keys(catSums)) {
+      if (catSums[k] < 0) catSums[k] = 0
+    }
 
     // Per-business totals (name + category) so applyImport can fill the ACTUAL of
     // matching named rows in קבועות/מנויים/ביטוחים per specific business; anything
     // unmatched folds into its category total. Grouped by normalized business name.
     const merchantMap = new Map<string, { name: string; amount: number; category: string }>()
-    filtered.forEach(t => {
+    transactions.forEach(t => {
       const k = normalizeForLookup(t.desc)
       if (!k) return
       const e = merchantMap.get(k) ?? { name: t.desc, amount: 0, category: t.category }
-      e.amount += t.amount
+      e.amount += t.isRefund ? -t.amount : t.amount
       merchantMap.set(k, e)
     })
-    const merchantSums = [...merchantMap.values()]
+    // Same clamp logic as catSums: a merchant netted to zero must zero its
+    // named row's actual on re-send, not leave it stale.
+    const merchantSums = [...merchantMap.values()].map(m => ({ ...m, amount: Math.max(0, m.amount) }))
 
     initMonth(targetMonth)
     applyImport(
@@ -301,7 +328,9 @@ export default function ImportPage() {
     )
 
     const monthName = MONTHS_LIST.find(m => m.id === targetMonth)?.name
-    toast.success(`✅ יובאו ${filtered.length} עסקאות לתקציב ${monthName}`)
+    const chargeCount = transactions.filter(t => !t.isRefund).length
+    const refundCount = transactions.length - chargeCount
+    toast.success(`✅ יובאו ${chargeCount} חיובים${refundCount ? ` ו-${refundCount} זיכויים` : ''} לתקציב ${monthName}`)
     router.push(`/app/monthly/${targetMonth}`)
   }
 

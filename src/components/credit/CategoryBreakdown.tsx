@@ -42,9 +42,15 @@ function fmt(n: number) {
 function buildGroups(transactions: Transaction[]): CategoryGroup[] {
   const map = new Map<string, { total: number; count: number; entries: TxEntry[] }>()
   transactions.forEach((t, idx) => {
-    if (t.isRefund) return
+    // Refunds NET their category (Ori, 2026-08-06): a refunded charge is not
+    // an expense, so a ₪1,350 trip that was fully refunded must not inflate
+    // חופשה וטיול by ₪1,350. Refund rows are shown inside the category (green,
+    // with a + sign) so the coach can see WHY the total is lower. The earlier
+    // behavior — excluding refunds from the sum entirely — left the original
+    // charge fully counted. Matches TransactionTable's netted grand total and
+    // importFromCredit's netted category sums.
     const entry = map.get(t.category) ?? { total: 0, count: 0, entries: [] }
-    entry.total += t.amount
+    entry.total += t.isRefund ? -t.amount : t.amount
     entry.count++
     entry.entries.push({ t, idx })
     map.set(t.category, entry)
@@ -113,7 +119,10 @@ export function CategoryBreakdown({ transactions, onCategoryChange, onDescChange
       </div>
 
       {groups.map(group => {
-        const pct = grandTotal > 0 ? (group.total / grandTotal) * 100 : 0
+        // A category can net negative (refund-heavy statement) — clamp both
+        // ends: a negative group shows 0%, and a positive group larger than a
+        // refund-shrunken grand total shows 100%, not "1000%".
+        const pct = grandTotal > 0 ? Math.min(100, Math.max(0, (group.total / grandTotal) * 100)) : 0
         const isOpen = openCategory === group.category
         const icon = CATEGORY_ICONS[group.category] ?? '📦'
 
@@ -204,7 +213,9 @@ export function CategoryBreakdown({ transactions, onCategoryChange, onDescChange
                                   className="w-20 rounded border border-gold bg-surface px-2 py-0.5 text-xs text-txt text-left focus:outline-none tabular-nums"
                                 />
                               ) : (
-                                <span className="font-medium text-gold tabular-nums whitespace-nowrap">{fmt(t.amount)}</span>
+                                <span className={`font-medium tabular-nums whitespace-nowrap ${t.isRefund ? 'text-green-400' : 'text-gold'}`}>
+                                  {t.isRefund ? '+' : ''}{fmt(t.amount)}
+                                </span>
                               )}
                             </td>
 

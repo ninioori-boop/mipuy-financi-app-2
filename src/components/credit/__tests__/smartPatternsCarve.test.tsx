@@ -63,6 +63,30 @@ describe('SmartPatterns — carve-out preserves the expense total', () => {
     expect(sumOf(sub), 'total expenses must not change').toBe(100)
   })
 
+  // A merchant with a refund: the carve must move the NET amount. Gym billed
+  // 6×₪50 with one ₪50 refund over 3 months → net 250, monthly 83. The
+  // category row (also netted by importFromCredit) holds 83 — add == subtract
+  // still, and the refunded charge never inflates the mapping.
+  it('a refunded charge nets out of the carve — add still equals subtract', () => {
+    useMappingStore.setState({
+      sub: [{ id: 'cat', name: 'מנויים', amount: 83, fromCredit: true }],
+    })
+    const txs = ['03', '03', '04', '04', '05', '05'].map((mm, i) =>
+      tx({ desc: 'הולמס פלייס', amount: 50, category: 'מנויים', date: `2026-${mm}-${i % 2 ? 15 : 1}` }))
+    txs.push(tx({ desc: 'הולמס פלייס', amount: 50, category: 'מנויים', date: '2026-04-20', isRefund: true }))
+
+    render(<SmartPatterns transactions={txs} />)
+    fireEvent.click(screen.getByText('מנויים מזוהים'))
+    fireEvent.click(screen.getByTitle('שלח למנויים במיפוי'))
+
+    const sub = useMappingStore.getState().sub
+    expect(sub.find(r => r.name === 'הולמס פלייס')?.amount,
+      'the carved row must hold the NET monthly cost (250/3)').toBe(83)
+    expect(sub.find(r => r.name === 'מנויים'),
+      'the netted category row must be fully consumed').toBeUndefined()
+    expect(sumOf(sub), 'total expenses must not change').toBe(83)
+  })
+
   // A ₪150 standing order in a 3-month statement (3 appearances). Grouped, its
   // period total is 450 → monthly 150. Before the fix it was three count:1
   // items: carving one added 150/month but subtracted only 150/3=50 — the

@@ -294,9 +294,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }
     const totals: Record<string, number> = {}
     transactions.forEach(t => {
-      if (t.isRefund) return
       if (carvedOutMerchants.has(normalizeForLookup(t.desc))) return
-      totals[t.category] = (totals[t.category] ?? 0) + t.amount
+      // Refunds NET their category (Ori, 2026-08-06): a refunded charge is
+      // not an expense. The ≤0 guard below drops a category whose refunds
+      // meet or exceed its charges — net credit is not a mapping expense row.
+      totals[t.category] = (totals[t.category] ?? 0) + (t.isRefund ? -t.amount : t.amount)
     })
 
     // Helper: merge new amount into existing fromCredit rows, or add new row.

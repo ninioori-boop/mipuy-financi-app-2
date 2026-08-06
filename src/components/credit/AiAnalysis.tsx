@@ -42,7 +42,15 @@ export function AiAnalysis({ transactions, reportMonths }: Props) {
     let totalRefunds  = 0
 
     transactions.forEach(t => {
-      if (t.isRefund) { totalRefunds += t.amount; return }
+      // Refunds NET their category — the written analysis must quote the same
+      // numbers the CategoryBreakdown on this very screen shows. totalRefunds
+      // is still reported separately as context for the model.
+      if (t.isRefund) {
+        totalRefunds += t.amount
+        totals[t.category] = (totals[t.category] ?? 0) - t.amount
+        totalExpenses -= t.amount
+        return
+      }
       totals[t.category] = (totals[t.category] ?? 0) + t.amount
       counts[t.category] = (counts[t.category] ?? 0) + 1
       totalExpenses += t.amount

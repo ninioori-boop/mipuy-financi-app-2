@@ -108,7 +108,17 @@ export const useCreditStore = create<CreditState>((set, get) => ({
       return
     }
     set({
-      transactions: txns.map(t => t.id === id ? { ...t, category } : t),
+      // The AI runs on CHARGES only (refunds are filtered before the batch),
+      // and refunds net their category — so a same-merchant refund must
+      // follow its charge's new category. Without this, an unknown merchant
+      // that was charged AND refunded ends up: charge in the AI category
+      // (still counted in full — the ₪1,350 complaint), refund stuck in
+      // 'שונות' driving it negative and deleting real misc spend. Other
+      // same-desc CHARGES are untouched: each got its own AI answer by id.
+      transactions: txns.map(t =>
+        t.id === id ? { ...t, category }
+        : (t.isRefund && normalizeForLookup(t.desc) === key) ? { ...t, category }
+        : t),
       learnedDB: { ...get().learnedDB, [key]: category },
     })
   },

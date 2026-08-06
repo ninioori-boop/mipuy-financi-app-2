@@ -52,7 +52,8 @@ export function VariablePanel({
     if (!creditTransactions) return []
     const myKey = normalizeForLookup(name)
     return creditTransactions.filter(t => {
-      if (t.isRefund) return false
+      // Refunds stay IN the list: the row amount nets them (importFromCredit),
+      // so the detail must show them or its sum won't match the row.
       if (t.category !== name) return false
       const merchantKey = normalizeForLookup(t.desc)
       if (merchantKey && merchantKey !== myKey && allMappingNames.has(merchantKey)) return false
@@ -192,8 +193,8 @@ export function VariablePanel({
                             <div className="truncate text-txt">{t.desc}</div>
                           </td>
                           <td className="px-3 py-1.5 text-muted-txt whitespace-nowrap">{t.date}</td>
-                          <td className="px-3 py-1.5 text-left font-medium text-gold tabular-nums whitespace-nowrap">
-                            {fmt(t.amount)}
+                          <td className={`px-3 py-1.5 text-left font-medium tabular-nums whitespace-nowrap ${t.isRefund ? 'text-green-400' : 'text-gold'}`}>
+                            {t.isRefund ? '+' : ''}{fmt(t.amount)}
                           </td>
                         </tr>
                       ))}
@@ -201,8 +202,8 @@ export function VariablePanel({
                     <tfoot className="border-t border-line bg-surface2">
                       <tr>
                         <td colSpan={2} className="px-3 py-1.5 text-muted-txt">
-                          {txs.length} עסקאות | סה&quot;כ {fmt(txs.reduce((s, t) => s + t.amount, 0))}
-                          {varMonths > 1 && ` | ÷${varMonths} = ${fmt(Math.round(txs.reduce((s, t) => s + t.amount, 0) / varMonths))}/חודש`}
+                          {txs.length} עסקאות | סה&quot;כ {fmt(txs.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0))}
+                          {varMonths > 1 && ` | ÷${varMonths} = ${fmt(Math.round(txs.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0) / varMonths))}/חודש`}
                         </td>
                         <td />
                       </tr>

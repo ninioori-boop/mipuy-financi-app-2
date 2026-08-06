@@ -407,7 +407,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           // normalized name so multiple charges of the same business collapse.
           const byKey = new Map<string, { sum: number; category: string }>()
           for (const mrc of merchants) {
-            if (!cats.has(mrc.category) || mrc.amount <= 0) continue
+            // amount 0 is allowed through (a merchant fully netted by refunds
+            // must ZERO its named row's actual on re-send); negatives are not.
+            if (!cats.has(mrc.category) || mrc.amount < 0) continue
             const k = normalizeForLookup(mrc.name)
             if (!k) continue
             const e = byKey.get(k) ?? { sum: 0, category: mrc.category }

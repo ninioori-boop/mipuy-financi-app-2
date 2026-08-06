@@ -56,20 +56,32 @@ function detectPatterns(txs: Transaction[]) {
     if (t.isStandingOrder) standingOrders.push(t)
     if (t.installment)     installments.push(t)
     if (t.isRefund)        refunds.push(t)
-    if (!t.isRefund) {
-      const key = t.desc.toLowerCase().replace(/\s+/g, ' ').trim()
-      if (!merchantMap[key]) merchantMap[key] = []
-      merchantMap[key].push(t)
-      if (t.category === 'מנויים') {
-        if (!subscriptionsMap[key]) subscriptionsMap[key] = []
-        subscriptionsMap[key].push(t)
-      }
-      if (INSURANCE_CATEGORIES.has(t.category)) {
-        if (!insurancesMap[key]) insurancesMap[key] = []
-        insurancesMap[key].push(t)
-      }
+    // Refunds are INCLUDED in the merchant groups: they NET each group's
+    // total (Ori, 2026-08-06 — a refunded charge is not an expense), so the
+    // carve-out subtracts the merchant's NET contribution — the same number
+    // importFromCredit now nets into the aggregated category row. This only
+    // works when the refund carries the same merchant text as its charge; a
+    // refund written differently ("זיכוי X") lands in its own group, still
+    // nets the CATEGORY sums, but can't be tied back to X's group here.
+    const key = t.desc.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!merchantMap[key]) merchantMap[key] = []
+    merchantMap[key].push(t)
+    if (t.category === 'מנויים') {
+      if (!subscriptionsMap[key]) subscriptionsMap[key] = []
+      subscriptionsMap[key].push(t)
+    }
+    if (INSURANCE_CATEGORIES.has(t.category)) {
+      if (!insurancesMap[key]) insurancesMap[key] = []
+      insurancesMap[key].push(t)
     }
   }
+
+  // A merchant group's shape: count/avg speak about the CHARGES (what the
+  // coach sees as the billing pattern), total is the NET of charges minus
+  // refunds (what the carve-out math uses). A group with no charges at all
+  // (an orphan refund) or a non-positive net has nothing to carve — skipped.
+  const netOf = (group: Transaction[]) =>
+    Math.round(group.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0))
 
   // Group all charges from the same merchant (regardless of amount). The old
   // "bucket by exact amount" logic missed merchants with varying prices (e.g.
@@ -79,14 +91,16 @@ function detectPatterns(txs: Transaction[]) {
   // available for downstream subtract-from-category math.
   const recurring: { desc: string; amount: number; count: number; total: number; category: string }[] = []
   for (const [, group] of Object.entries(merchantMap)) {
-    if (group.length < 2) continue
-    const total = group.reduce((s, t) => s + t.amount, 0)
+    const charges = group.filter(t => !t.isRefund)
+    if (charges.length < 2) continue
+    const total = netOf(group)
+    if (total <= 0) continue
     recurring.push({
-      desc:     group[0].desc,
-      amount:   Math.round(total / group.length),
-      count:    group.length,
-      total:    Math.round(total),
-      category: group[0].category,
+      desc:     charges[0].desc,
+      amount:   Math.round(total / charges.length),
+      count:    charges.length,
+      total,
+      category: charges[0].category,
     })
   }
   // Show the biggest spenders first so the coach scans the relevant ones fast
@@ -94,12 +108,15 @@ function detectPatterns(txs: Transaction[]) {
 
   const subscriptions: { desc: string; amount: number; count: number; total: number; category: string }[] = []
   for (const [, group] of Object.entries(subscriptionsMap)) {
-    const total = group.reduce((s, t) => s + t.amount, 0)
+    const charges = group.filter(t => !t.isRefund)
+    if (!charges.length) continue
+    const total = netOf(group)
+    if (total <= 0) continue
     subscriptions.push({
-      desc:     group[0].desc,
-      amount:   Math.round(total / group.length),
-      count:    group.length,
-      total:    Math.round(total),
+      desc:     charges[0].desc,
+      amount:   Math.round(total / charges.length),
+      count:    charges.length,
+      total,
       category: 'מנויים',
     })
   }
@@ -107,15 +124,18 @@ function detectPatterns(txs: Transaction[]) {
 
   const insurances: { desc: string; amount: number; count: number; total: number; category: string }[] = []
   for (const [, group] of Object.entries(insurancesMap)) {
-    const total = group.reduce((s, t) => s + t.amount, 0)
+    const charges = group.filter(t => !t.isRefund)
+    if (!charges.length) continue
+    const total = netOf(group)
+    if (total <= 0) continue
     insurances.push({
-      desc:     group[0].desc,
-      amount:   Math.round(total / group.length),
-      count:    group.length,
-      total:    Math.round(total),
+      desc:     charges[0].desc,
+      amount:   Math.round(total / charges.length),
+      count:    charges.length,
+      total,
       // Keep each merchant's actual insurance category (ביטוח רכב vs ביטוח לאומי
       // etc.) so subtractFrom in handleSend hits the correct aggregated row.
-      category: group[0].category,
+      category: charges[0].category,
     })
   }
   insurances.sort((a, b) => b.total - a.total)
@@ -133,14 +153,17 @@ function detectPatterns(txs: Transaction[]) {
   }
   const standingGrouped: { desc: string; amount: number; count: number; total: number; category: string; date: string }[] = []
   for (const [, group] of Object.entries(standingGroupsMap)) {
-    const total = group.reduce((s, t) => s + t.amount, 0)
+    const charges = group.filter(t => !t.isRefund)
+    if (!charges.length) continue
+    const total = netOf(group)
+    if (total <= 0) continue
     standingGrouped.push({
-      desc:     group[0].desc,
-      amount:   Math.round(total / group.length),
-      count:    group.length,
-      total:    Math.round(total),
-      category: group[0].category,
-      date:     group[0].date,
+      desc:     charges[0].desc,
+      amount:   Math.round(total / charges.length),
+      count:    charges.length,
+      total,
+      category: charges[0].category,
+      date:     charges[0].date,
     })
   }
   standingGrouped.sort((a, b) => b.total - a.total)

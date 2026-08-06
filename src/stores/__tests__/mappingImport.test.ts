@@ -49,12 +49,11 @@ describe('importFromCredit — one row per category (no per-merchant split)', ()
     expect(fromCredit[0].amount).toBe(153)
   })
 
-  it('refunds are NEVER added to a category total (locking regression for credit + import)', () => {
+  it('refunds NET their category total — a refunded charge is not an expense (Ori, 2026-08-06)', () => {
     // 300 of real spend in מזון לבית, plus a 100 refund tagged to the same
-    // category. The mapping row must reflect 300 — refunds should not be
-    // summed in as expenses, nor subtracted as if they reduced the expense.
-    // (CategoryBreakdown / import sendToBudget / mappingStore all skip refunds
-    // entirely so the breakdown matches the mapping.)
+    // category → the mapping row must reflect 200. The earlier behavior
+    // (exclude the refund, keep the charge fully counted) surfaced as a real
+    // complaint: a fully-refunded ₪1,350 trip still inflated חופשה וטיול.
     const refund: Transaction = { ...makeTxn('החזר Shufersal', 100, 'מזון לבית'), isRefund: true }
     const txns: Transaction[] = [
       makeTxn('Shufersal', 200, 'מזון לבית'),
@@ -67,7 +66,23 @@ describe('importFromCredit — one row per category (no per-merchant split)', ()
     const fromCredit = variable.filter(r => r.fromCredit && !r.fromBank)
     expect(fromCredit).toHaveLength(1)
     expect(fromCredit[0].name).toBe('מזון לבית')
-    expect(fromCredit[0].amount).toBe(300)   // 200 + 100, refund excluded entirely
+    expect(fromCredit[0].amount).toBe(200)   // 200 + 100 − 100 refund
+  })
+
+  it('a category whose refunds meet or exceed its charges produces NO mapping row', () => {
+    const txns: Transaction[] = [
+      makeTxn('אוטובוס בכרם', 1350, 'חופשה וטיול'),
+      { ...makeTxn('אוטובוס בכרם', 1350, 'חופשה וטיול'), isRefund: true },
+      makeTxn('Shufersal', 200, 'מזון לבית'),
+    ]
+    useMappingStore.getState().importFromCredit(txns, 1)
+
+    const all = [
+      ...useMappingStore.getState().variable,
+      ...useMappingStore.getState().annual,
+    ].filter(r => r.fromCredit && !r.fromBank)
+    expect(all.map(r => r.name), 'the fully-refunded trip must not become an expense row')
+      .toEqual(['מזון לבית'])
   })
 })
 
