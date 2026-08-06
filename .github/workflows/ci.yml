@@ -4,14 +4,15 @@
 # protection), but a red X on main is a stop-everything signal.
 #
 # NOT here yet, deliberately:
-#  - Firestore rules tests (@firebase/rules-unit-testing is not a dependency
-#    and needs the emulator; own round)
 #  - Playwright E2E (day-17 scope; specs preserved in archive/businessdb-growth)
 name: CI
 
 on:
   push:
-    branches: [main]
+    # ci/** lets CI-infrastructure branches prove themselves BEFORE merging —
+    # rules tests can't run locally (no JRE), so their first execution must
+    # not be on main.
+    branches: [main, 'ci/**']
   pull_request:
 
 jobs:
@@ -53,3 +54,25 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: dummy.appspot.com
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: '000000000000'
           NEXT_PUBLIC_FIREBASE_APP_ID: '1:000000000000:web:0'
+
+  # Firestore security rules against the emulator — the rules had ZERO
+  # automated coverage until 2026-08-06 (no JRE on the dev machine; ubuntu
+  # runners ship Java preinstalled). Separate job: the emulator download +
+  # boot must not slow the main checks, and a rules failure should be
+  # identifiable at a glance.
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Firestore rules tests (emulator)
+        run: npx -y firebase-tools emulators:exec --only firestore --project rules-test "npx vitest run --config vitest.rules.config.ts"

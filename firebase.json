@@ -10,5 +10,13 @@
     "predeploy": [
       "node scripts/check-functions-tree.js"
     ]
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }

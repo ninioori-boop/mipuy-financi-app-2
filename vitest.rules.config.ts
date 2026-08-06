@@ -12,9 +12,9 @@ import { defineConfig } from 'vitest/config'
 //   2. npm i -D @firebase/rules-unit-testing
 //   3. `emulators.firestore` in firebase.json
 //
-// Until those exist the command fails loudly with a clear reason, which is the
-// point: the rules currently have NO automated coverage, and that gap should be
-// visible rather than hidden behind a permanently-red test in the main suite.
+// All three exist since 2026-08-06 in CI (the `rules` job — ubuntu runners
+// ship Java). Locally this still needs a JRE; without one the command fails
+// loudly, and CI remains the place these actually run.
 export default defineConfig({
   test: {
     include: ['functions/test/**/*.test.mjs'],

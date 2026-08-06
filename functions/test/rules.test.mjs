@@ -23,7 +23,7 @@ import {
   assertFails,
   assertSucceeds,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let testEnv;
@@ -161,4 +161,80 @@ test("owner reads all links; a stranger cannot read someone else's advisor doc",
   await setLink("active");
   await assertSucceeds(getDocs(collection(authed(OWNER, "o@example.com"), "clientLinks")));
   await assertFails(getDoc(doc(authed(OTHER_CLIENT, "y@example.com"), "advisors", ADVISOR)));
+});
+
+// ── 2026-08-05 hardening round (the rules that shipped with db05dee) ────────
+
+test("invite-only: an owner NOT on the allowlist cannot touch even their own doc", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", "ghostUid"), { data: {}, updatedAt: 1 });
+  });
+  const ghost = authed("ghostUid", "ghost@example.com");
+  await assertFails(getDoc(doc(ghost, "users", "ghostUid")));
+  await assertFails(setDoc(doc(ghost, "users", "ghostUid"), { data: { x: 1 } }, { merge: true }));
+});
+
+test("shared/learnedDB: allowlisted reads; a revoked account cannot; NOBODY writes from a browser", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "shared", "learnedDB"), { db: { shop: "מזון לבית" } });
+  });
+  await assertSucceeds(getDoc(doc(authed(CLIENT, CLIENT_EMAIL), "shared", "learnedDB")));
+  await assertFails(getDoc(doc(authed("revokedUid", "revoked@example.com"), "shared", "learnedDB")));
+  // Write closed even for a legitimate allowlisted session — the poison/DoS door.
+  await assertFails(setDoc(doc(authed(CLIENT, CLIENT_EMAIL), "shared", "learnedDB"), { db: { x: "y" } }, { merge: true }));
+});
+
+test("versions: WRITE-tier advisor may CREATE but never UPDATE or DELETE; the owner still deletes", async () => {
+  await setLink("active", "write");
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", CLIENT, "versions", "v0"), { savedAt: 1, snapshot: {}, size: 1 });
+  });
+  const advDb = authed(ADVISOR, ADVISOR_EMAIL);
+  await assertSucceeds(setDoc(doc(advDb, "users", CLIENT, "versions", "vNew"), { savedAt: 2, snapshot: {}, size: 1 }));
+  await assertFails(setDoc(doc(advDb, "users", CLIENT, "versions", "v0"), { savedAt: 9 }, { merge: true }));
+  await assertFails(deleteDoc(doc(advDb, "users", CLIENT, "versions", "v0")));
+  await assertSucceeds(deleteDoc(doc(authed(CLIENT, CLIENT_EMAIL), "users", CLIENT, "versions", "v0")));
+});
+
+test("intake: allowlisted owner reads/writes; the consented advisor reads; a REVOKED owner is fully cut off", async () => {
+  await setLink("active");
+  const clientDb = authed(CLIENT, CLIENT_EMAIL);
+  await assertSucceeds(setDoc(doc(clientDb, "intake", CLIENT), { answers: { q1: "כן" } }, { merge: true }));
+  await assertSucceeds(getDoc(doc(authed(ADVISOR, ADVISOR_EMAIL), "intake", CLIENT)));
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await deleteDoc(doc(ctx.firestore(), "allowlist", CLIENT_EMAIL));
+  });
+  await assertFails(getDoc(doc(clientDb, "intake", CLIENT)));
+  await assertFails(setDoc(doc(clientDb, "intake", CLIENT), { answers: { q2: "לא" } }, { merge: true }));
+});
+
+test("clientLinks by invitedEmail: readable only with a VERIFIED email claim (invite-squatting)", async () => {
+  await setLink("pending");
+  const verified = testEnv.authenticatedContext("newUid", { email: CLIENT_EMAIL, email_verified: true }).firestore();
+  const squatter = testEnv.authenticatedContext("squatterUid", { email: CLIENT_EMAIL, email_verified: false }).firestore();
+  const noClaim  = testEnv.authenticatedContext("noClaimUid", { email: CLIENT_EMAIL }).firestore();
+  await assertSucceeds(getDoc(doc(verified, "clientLinks", CLIENT)));
+  await assertFails(getDoc(doc(squatter, "clientLinks", CLIENT)));
+  await assertFails(getDoc(doc(noClaim, "clientLinks", CLIENT)));
+});
+
+test("sections subcollection mirrors the parent doc: advisor write-tier create/update but never delete", async () => {
+  await setLink("active", "write");
+  const clientDb = authed(CLIENT, CLIENT_EMAIL);
+  await assertSucceeds(setDoc(doc(clientDb, "users", CLIENT, "sections", "credit"), { transactions: [] }));
+  const advDb = authed(ADVISOR, ADVISOR_EMAIL);
+  await assertSucceeds(getDoc(doc(advDb, "users", CLIENT, "sections", "credit")));
+  await assertSucceeds(setDoc(doc(advDb, "users", CLIENT, "sections", "credit"), { transactions: [1] }, { merge: true }));
+  await assertFails(deleteDoc(doc(advDb, "users", CLIENT, "sections", "credit")));
+});
+
+test("transactionInbox: owner reads+deletes own items, cannot forge one, stranger fully blocked", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "transactionInbox", CLIENT, "items", "i1"), { merchant: "קפה", amount: 12 });
+  });
+  const clientDb = authed(CLIENT, CLIENT_EMAIL);
+  await assertSucceeds(getDoc(doc(clientDb, "transactionInbox", CLIENT, "items", "i1")));
+  await assertFails(setDoc(doc(clientDb, "transactionInbox", CLIENT, "items", "forged"), { merchant: "x", amount: 1 }));
+  await assertFails(getDoc(doc(authed(OTHER_CLIENT, "y@example.com"), "transactionInbox", CLIENT, "items", "i1")));
+  await assertSucceeds(deleteDoc(doc(clientDb, "transactionInbox", CLIENT, "items", "i1")));
 });
