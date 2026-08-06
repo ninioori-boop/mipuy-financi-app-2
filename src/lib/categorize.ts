@@ -57,6 +57,9 @@ const sortByLength = (entries: [string, string][]) =>
 // the resolution order is identical.
 const BUILTIN_ENTRIES = sortByLength(Object.entries(BUSINESS_DB))
 
+// Exact-match index (lowercased key → category), for the precedence tiers.
+const BUILTIN_EXACT = new Map(Object.entries(BUSINESS_DB).map(([k, c]) => [k.toLowerCase(), c]))
+
 export function categorize(
   desc: string,
   learnedDB: Record<string, string> = {},
@@ -65,18 +68,34 @@ export function categorize(
   const lower = desc.toLowerCase().trim()
   const normalized = normalizeForLookup(desc)
 
-  // 1. Check learnedDB first (user corrections + AI auto-learning)
+  // Precedence: EXACT beats substring, and within each specificity tier a
+  // learned correction beats the built-in DB. Before the exact tiers existed,
+  // any learned SUBSTRING key outranked a curated exact entry — one client's
+  // over-broad key (promoted to the shared pool) could hijack a merchant the
+  // built-in DB names precisely, for every account at once.
+
+  // 1. Exact learned — a correction for THIS merchant text always wins.
+  // typeof guard: direct indexing walks the prototype chain, and a merchant
+  // literally named "constructor" would come back as a function.
+  const learnedExact = learnedDB[lower] ?? learnedDB[normalized]
+  if (typeof learnedExact === 'string') return learnedExact
+
+  // 2. Exact built-in.
+  const builtinExact = BUILTIN_EXACT.get(lower) ?? BUILTIN_EXACT.get(normalized)
+  if (builtinExact) return builtinExact
+
+  // 3. Substring learned (user corrections + reviewed pool promotions).
   const learnedEntries = sortByLength(Object.entries(learnedDB))
   let result = searchDB(learnedEntries, lower)
   if (!result && normalized !== lower) result = searchDB(learnedEntries, normalized)
   if (result) return result
 
-  // 2. Check built-in BUSINESS_DB
+  // 4. Substring built-in.
   result = searchDB(BUILTIN_ENTRIES, lower)
   if (!result && normalized !== lower) result = searchDB(BUILTIN_ENTRIES, normalized)
   if (result) return result
 
-  // 3. Payment-rail fallback: Hebrew rail variants BUSINESS_DB has no key for
+  // 5. Payment-rail fallback: Hebrew rail variants BUSINESS_DB has no key for
   // ("תשלום בביט", "פייבוקס") must still land on their untracked default —
   // otherwise they fall to שונות and hit the paid AI on EVERY upload, because
   // rail results are deliberately never learned. Placed last so specific

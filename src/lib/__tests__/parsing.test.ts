@@ -54,10 +54,25 @@ describe('normalizeForLookup', () => {
   it('strips בע"מ suffix', () => {
     expect(normalizeForLookup('שופרסל בע"מ')).toBe('שופרסל')
   })
-  it('strips city name', () => {
-    const result = normalizeForLookup('ארומה תל אביב')
-    expect(result).not.toContain('תל אביב')
-    expect(result).toContain('ארומה')
+  // City stripping was REMOVED 2026-08-06: matching is by substring, so the
+  // key "ארומה" already matches "ארומה תל אביב" — while stripping produced
+  // wildcard learned keys ("מאפיית ירושלים" → "מאפיית") that hijacked every
+  // bakery for every account. The merchant text now stays whole.
+  it('KEEPS the city — the merchant text is the key', () => {
+    expect(normalizeForLookup('ארומה תל אביב')).toBe('ארומה תל אביב')
+    expect(normalizeForLookup('מאפיית ירושלים')).toBe('מאפיית ירושלים')
+  })
+  it('a city-suffixed merchant still categorizes via substring matching', () => {
+    expect(categorize('ארומה תל אביב')).toBe(categorize('ארומה'))
+  })
+  it('folds gershayim to an ASCII quote so בע״מ is stripped in both spellings', () => {
+    expect(normalizeForLookup('שופרסל בע״מ')).toBe('שופרסל')
+  })
+  it('strips niqqud marks', () => {
+    expect(normalizeForLookup('שׁוּפֶּרְסָל')).toBe('שופרסל')
+  })
+  it('maqaf becomes a space, never glue — a rail with ־ must stay detectable', () => {
+    expect(normalizeForLookup('ביט־כהן')).toBe('ביט כהן')
   })
   it('strips Ltd suffix', () => {
     const result = normalizeForLookup('some company ltd')

@@ -55,9 +55,12 @@ describe('payment-rail one-time edits', () => {
     const txns = useCreditStore.getState().transactions
     expect(txns[0].category).toBe('מזון לבית')
     expect(txns[1].category).toBe('מזון לבית')
-    // normalizeForLookup strips the city — the learned key is the bare merchant.
-    expect(useCreditStore.getState().learnedDB['שופרסל דיל']).toBe('מזון לבית')
-    expect(saveLearnedEntry).toHaveBeenCalledWith('שופרסל דיל', 'מזון לבית')
+    // Since 2026-08-06 the learned key keeps the FULL merchant text (city
+    // included): substring matching already lets "ארומה" match every branch,
+    // while city-stripped keys ("מאפיית ירושלים" → "מאפיית") were wildcard
+    // hijacks. The key IS the merchant string, normalized.
+    expect(useCreditStore.getState().learnedDB['שופרסל דיל רמת גן']).toBe('מזון לבית')
+    expect(saveLearnedEntry).toHaveBeenCalledWith('שופרסל דיל רמת גן', 'מזון לבית')
   })
 
   it('learn() refuses rail descriptors outright (covers the expenses-page path)', () => {

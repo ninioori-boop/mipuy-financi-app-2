@@ -6,6 +6,7 @@ import { sendPushToUser } from '@/lib/webPush'
 import { verifyDeviceToken } from '@/lib/deviceToken'
 import { isDeviceTokenRevoked } from '@/lib/deviceTokenRevocation'
 import { categorize } from '@/lib/categorize'
+import { isPaymentRailKey } from '@/lib/learnedSharing'
 import { aiCategorizeOne } from '@/lib/aiCategorize'
 import { logAiSuggestion } from '@/lib/aiSuggestions'
 import { checkAiBudget } from '@/lib/aiBudget'
@@ -513,13 +514,22 @@ function merchantFromRaw(raw: string, matched: string): string {
 
 // Reads the shared merchant→category corrections (admin SDK) so a fix made once
 // in the expenses/credit/import tabs auto-applies to future ingested charges.
+// Payment-rail keys are dropped at READ time, mirroring creditStore's
+// mergedLearnedDB: a rail carries a different payee on every charge, so a rail
+// entry that ever slipped into the pool (the 2026-07 Bit incident) must not
+// categorize ingested charges — this was the one read path that didn't filter.
 async function loadSharedLearned(db: Firestore): Promise<Record<string, string>> {
   try {
     const snap = await db.collection('shared').doc('learnedDB').get()
     const data = snap.exists ? snap.data() : null
-    return data && typeof data.db === 'object' && data.db
+    const raw = data && typeof data.db === 'object' && data.db
       ? (data.db as Record<string, string>)
       : {}
+    const clean: Record<string, string> = {}
+    for (const [key, cat] of Object.entries(raw)) {
+      if (!isPaymentRailKey(key)) clean[key] = cat
+    }
+    return clean
   } catch {
     return {}
   }
