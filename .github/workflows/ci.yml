@@ -75,4 +75,4 @@ jobs:
         run: npm ci
 
       - name: Firestore rules tests (emulator)
-        run: npx -y firebase-tools emulators:exec --only firestore --project rules-test "npx vitest run --config vitest.rules.config.ts"
+        run: npx -y firebase-tools emulators:exec --only firestore --project demo-rules-test "npx vitest run --config vitest.rules.config.ts"

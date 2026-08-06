@@ -40,7 +40,9 @@ const authed = (uid, email) => testEnv.authenticatedContext(uid, email ? { email
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
-    projectId: "rules-test",
+    // demo-* project ids run the CLI fully offline — anything else makes
+    // firebase-tools look for a real project, which CI has no access to.
+    projectId: "demo-rules-test",
     firestore: { rules: readFileSync(join(here, "..", "..", "firestore.rules"), "utf8") },
   });
 });
