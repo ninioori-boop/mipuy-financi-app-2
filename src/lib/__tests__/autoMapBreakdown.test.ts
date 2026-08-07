@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
+  sectionOfCategory, groupByName, formatIncomeBreakdown,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 
@@ -132,7 +133,7 @@ describe('formatCategoryBreakdown', () => {
     ]))
     expect(lines).toEqual([
       '(כל הסכומים כאן הם סך הכל על פני חודש אחד, אחרי קיזוז זיכויים)',
-      'מזון לבית: 400 ש"ח (2 עסקאות)',
+      '[משתנות] מזון לבית: 400 ש"ח (2 עסקאות)',
       '  - שופרסל: 300 (1)',
       '  - רמי לוי: 100 (1)',
     ])
@@ -221,6 +222,76 @@ describe('validateMapping — period vs monthly', () => {
     r.variable = [{ name: 'סופרמרקטים', amount: 300, category: 'מזון לבית' }]
     const issues = validateMapping(r, [vtx(500, 'מזון לבית'), vtx(200, 'מזון לבית', true)], 1)
     expect(issues.filter(i => i.message.includes('מזון לבית'))).toEqual([])
+  })
+})
+
+// The section is deterministic in constants.ts. Stating it — in the data we
+// send and in the lab's row editor — is what stops rows landing in the wrong
+// panel. Both consumers read this one function, so they cannot drift.
+describe('sectionOfCategory', () => {
+  it.each([
+    ['ארנונה',       'fixed'],
+    ['מזון לבית',    'variable'],
+    ['חדר כושר',     'sub'],
+    ['ביטוח רכב',    'ins'],
+    ['חופשה וטיול',  'annual'],
+    ['השקעות',       'skip'],
+  ])('%s → %s', (cat, section) => {
+    expect(sectionOfCategory(cat)).toBe(section)
+  })
+
+  it('routes הכנסות to income, not skip, so a misfiled salary row can be moved', () => {
+    expect(sectionOfCategory('הכנסות')).toBe('income')
+  })
+
+  it('returns null for an unknown or empty category', () => {
+    expect(sectionOfCategory('קטגוריה שלא קיימת')).toBeNull()
+    expect(sectionOfCategory('')).toBeNull()
+  })
+})
+
+describe('formatCategoryBreakdown — section tag', () => {
+  it('prefixes each category with the section it belongs to', () => {
+    const lines = formatCategoryBreakdown(buildCategoryBreakdown([
+      tx('חברת חשמל', 400, 'חשמל'),
+      tx('שופרסל',    900, 'מזון לבית'),
+    ]))
+    expect(lines.find(l => l.includes('חשמל:'))).toContain('[קבועות]')
+    expect(lines.find(l => l.includes('מזון לבית:'))).toContain('[משתנות]')
+  })
+
+  it('leaves an unknown category untagged rather than guessing', () => {
+    const lines = formatCategoryBreakdown(buildCategoryBreakdown([tx('משהו', 100, 'קטגוריה מומצאת')]))
+    expect(lines.find(l => l.startsWith('קטגוריה מומצאת'))).toBeTruthy()
+    expect(lines.some(l => l.includes('[undefined]'))).toBe(false)
+  })
+})
+
+describe('income block', () => {
+  const dep = (desc: string, amount: number) => ({ desc, amount })
+
+  it('groups deposits by payer, biggest first', () => {
+    const lines = groupByName([dep('משכורת אלפא', 14000), dep('משכורת אלפא', 14000), dep('קצבת ילדים', 400)])
+    expect(lines).toEqual([
+      { name: 'משכורת אלפא', sum: 28000, count: 2 },
+      { name: 'קצבת ילדים',  sum: 400,   count: 1 },
+    ])
+  })
+
+  it('folds a long tail so the block stays bounded', () => {
+    const lines = groupByName(Array.from({ length: 30 }, (_, i) => dep(`מקור ${i}`, 100)), 25)
+    expect(lines).toHaveLength(26)
+    expect(lines[25].name).toContain('שאר ההפקדות (5)')
+  })
+
+  it('states that the figures are a period total, so they are not read as monthly', () => {
+    const out = formatIncomeBreakdown(groupByName([dep('משכורת', 42000)]), 3)
+    expect(out[0]).toContain('3 חודשים')
+    expect(out[1]).toContain('42000')
+  })
+
+  it('renders nothing when there are no deposits', () => {
+    expect(formatIncomeBreakdown([], 3)).toEqual([])
   })
 })
 

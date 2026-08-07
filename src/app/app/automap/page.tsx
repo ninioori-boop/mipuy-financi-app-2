@@ -15,8 +15,11 @@ import { useAutoMapStore } from '@/stores/autoMapStore'
 import {
   parseGeneratedMapping, validateMapping,
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
+  groupByName, formatIncomeBreakdown,
   type GeneratedMapping,
 } from '@/lib/autoMap'
+import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
+import { categorize } from '@/lib/categorize'
 import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
@@ -82,6 +85,9 @@ export default function AutoMapPage() {
   }, [user, ready, isAdvisor, router])
 
   const [txns, setTxns]           = useState<Transaction[]>([])
+  // Bank rows are kept apart from credit transactions: they carry a direction
+  // (money in vs out), which is the whole reason income used to be wrong.
+  const [bankRows, setBankRows]   = useState<BankRow[]>([])
   const [fileNames, setFileNames] = useState<string[]>([])
   const [docs, setDocs]           = useState<AttachedDoc[]>([])
   const [isParsing, setIsParsing] = useState(false)
@@ -136,6 +142,7 @@ export default function AutoMapPage() {
       const all: Transaction[] = []
       const names: string[] = []
       const newDocs: AttachedDoc[] = []
+      let bankCount = 0
       for (const file of files) {
         try {
           const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
@@ -143,7 +150,17 @@ export default function AutoMapPage() {
           const isImage = file.type.startsWith('image/')
           if (isExcel) {
             const rows = await parseExcelFile(file, { allSheets: true })
-            all.push(...extractTransactions(rows, file.name, learned))
+            // A bank statement must NOT go through the credit parser: it has no
+            // concept of חובה/זכות, so it read a salary deposit as an expense.
+            // detectBankHeader keys on words a credit export never contains, so
+            // credit files stay on exactly the path they use today.
+            const bank = extractBankRows(rows)
+            if (bank.length) {
+              bankCount += bank.length
+              setBankRows(prev => [...prev, ...bank])
+            } else {
+              all.push(...extractTransactions(rows, file.name, learned))
+            }
             names.push(file.name)
           } else if (isImage) {
             newDocs.push({ id: mkId(), name: file.name, kind: 'image', mediaType: 'image/jpeg', data: await imageToJpegBase64(file) })
@@ -163,9 +180,10 @@ export default function AutoMapPage() {
       if (all.length)     { setTxns(prev => [...prev, ...all]); setFileNames(prev => [...prev, ...names]) }
       if (newDocs.length) setDocs(prev => [...prev, ...newDocs])
       const parts: string[] = []
-      if (all.length)     parts.push(`${all.length} עסקאות`)
-      if (newDocs.length) parts.push(`${newDocs.length} מסמכים`)
-      if (parts.length)   toast.success(`נקלטו ${parts.join(' · ')}`)
+      if (all.length)      parts.push(`${all.length} עסקאות אשראי`)
+      if (bankCount)       parts.push(`${bankCount} תנועות עו"ש`)
+      if (newDocs.length)  parts.push(`${newDocs.length} מסמכים`)
+      if (parts.length)    toast.success(`נקלטו ${parts.join(' · ')}`)
     } catch (e) {
       toast.error('שגיאה בפענוח: ' + (e as Error).message)
     } finally {
@@ -226,10 +244,46 @@ export default function AutoMapPage() {
   // ~9.8ms on a routine 3,000-txn upload vs 0.1ms for the old totals-only pass.
   // Unmemoized it re-ran on every keystroke in the context textarea, which is
   // store-backed — 9.8ms per character, on exactly the biggest client files.
-  const breakdown = useMemo(() => buildCategoryBreakdown(txns, VAR_CATEGORIES), [txns])
+  // Split the bank rows three ways.
+  //
+  // A card-settlement line in the bank is a SUMMARY of the credit statement, so
+  // counting it next to the credit file's own detail double-counts the client's
+  // whole card spend. It is removed — but ONLY when a credit file actually
+  // produced transactions. With no credit detail to fall back on there is no
+  // duplication to avoid, and dropping it would lose the expense entirely.
+  const { incomeRows, bankExpenses, settlements } = useMemo(() => {
+    const hasCreditDetail = txns.length > 0
+    const income: BankRow[] = [], expenses: BankRow[] = [], settled: BankRow[] = []
+    for (const r of bankRows) {
+      if (r.dir === 'in') { income.push(r); continue }
+      if (hasCreditDetail && isCardSettlement(r.desc)) { settled.push(r); continue }
+      expenses.push(r)
+    }
+    return { incomeRows: income, bankExpenses: expenses, settlements: settled }
+  }, [bankRows, txns])
 
-  // Cross-check for the months field — see the warning it feeds, below.
-  const detectedMonths = useMemo(() => detectMonthSpan(txns), [txns])
+  // Bank charges become ordinary categorized expenses, so a mortgage or a
+  // standing order that never touches the credit card still reaches the mapping.
+  const expenseTxns = useMemo(() => {
+    const learned = useCreditStore.getState().mergedLearnedDB()
+    const fromBank: Transaction[] = bankExpenses.map(r => ({
+      desc: r.desc, amount: r.amount, originalAmount: null,
+      category: categorize(r.desc, learned), source: 'עו"ש', notes: '',
+      date: r.date, installment: null, isStandingOrder: false, isRefund: false,
+    }))
+    return [...txns, ...fromBank]
+  }, [txns, bankExpenses])
+
+  const breakdown = useMemo(() => buildCategoryBreakdown(expenseTxns, VAR_CATEGORIES), [expenseTxns])
+  const incomeLines = useMemo(() => groupByName(incomeRows), [incomeRows])
+
+  // Cross-check for the months field. Reads every dated row we have, bank
+  // included — a bank statement often spans the period more completely than
+  // the credit export does.
+  const detectedMonths = useMemo(
+    () => detectMonthSpan([...expenseTxns, ...incomeRows.map(r => ({ date: r.date }))]),
+    [expenseTxns, incomeRows],
+  )
 
   const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
   const tooBig    = docsBytes > 3_800_000
@@ -251,8 +305,19 @@ export default function AutoMapPage() {
     lines.push(`מספר החודשים שהנתונים מכסים: ${reportMonths}`)
     lines.push('')
     if (breakdown.length) {
-      lines.push('== עסקאות לפי קטגוריה ובית עסק (מתוך הקבצים שהועלו) ==')
+      lines.push('== הוצאות לפי קטגוריה ובית עסק ==')
       lines.push(...formatCategoryBreakdown(breakdown, reportMonths))
+      lines.push('')
+    }
+    if (incomeLines.length) {
+      lines.push('== הכנסות והפקדות שזוהו בעו"ש ==')
+      lines.push(...formatIncomeBreakdown(incomeLines, reportMonths))
+      lines.push('')
+    }
+    if (settlements.length) {
+      const total = settlements.reduce((s, r) => s + r.amount, 0)
+      lines.push('== תשלומי ריכוז לחברות אשראי — כבר הוסרו מההוצאות, לא לספור שוב ==')
+      lines.push(`${settlements.length} תשלומים, ${Math.round(total)} ש"ח סך הכל. הפירוט האמיתי נמצא בבלוק ההוצאות.`)
       lines.push('')
     }
     if (contextText.trim()) {
@@ -263,7 +328,7 @@ export default function AutoMapPage() {
   }
 
   async function generate() {
-    if (!txns.length && !contextText.trim() && !docs.length) {
+    if (!txns.length && !bankRows.length && !contextText.trim() && !docs.length) {
       toast.error('העלה קובץ/מסמך או הזן נתונים בטקסט קודם')
       return
     }
@@ -515,8 +580,8 @@ export default function AutoMapPage() {
   // are monthly. Passing it is what keeps the check from firing on correct
   // multi-month results (and staying silent on inflated ones).
   const issues = useMemo(
-    () => (result ? validateMapping(result, txns, reportMonths) : []),
-    [result, txns, reportMonths],
+    () => (result ? validateMapping(result, expenseTxns, reportMonths) : []),
+    [result, expenseTxns, reportMonths],
   )
 
   const monthlyExpense = result
@@ -655,8 +720,14 @@ export default function AutoMapPage() {
 
         {fileNames.length > 0 && (
           <div className="text-xs text-muted-txt flex items-center gap-2 flex-wrap">
-            <span>📊 {fileNames.join(', ')} · {txns.length} עסקאות · {breakdown.length} קטגוריות</span>
-            <button onClick={() => { setTxns([]); setFileNames([]) }}
+            <span>
+              📊 {fileNames.join(', ')} · {expenseTxns.length} הוצאות · {breakdown.length} קטגוריות
+              {incomeRows.length > 0 && <> · <span className="text-income">{incomeRows.length} הפקדות</span></>}
+              {/* Say what was removed. A silently vanished expense is worse
+                  than a visible one the advisor can argue with. */}
+              {settlements.length > 0 && <> · {settlements.length} תשלומי ריכוז אשראי (לא נספרו)</>}
+            </span>
+            <button onClick={() => { setTxns([]); setBankRows([]); setFileNames([]) }}
               className="me-auto text-xs px-2 py-0.5 rounded border border-line hover:text-expense hover:border-expense/40 transition-colors">נקה</button>
           </div>
         )}

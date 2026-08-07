@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
+import { CategoryPicker } from '@/components/shared/CategoryPicker'
 import { SectionPanel } from '@/components/mapping/SectionPanel'
 import { DebtPanel } from '@/components/mapping/DebtPanel'
 import { InstallmentPanel } from '@/components/mapping/InstallmentPanel'
@@ -11,7 +13,7 @@ import { CashflowSummary } from '@/components/mapping/CashflowSummary'
 import type {
   MappingRow, AnnualRow, DebtRow, InstallmentRow, SavingRow, CreditCardRow, BankAccountRow,
 } from '@/stores/mappingStore'
-import type { GeneratedMapping } from '@/lib/autoMap'
+import { sectionOfCategory, SECTION_LABEL_HE, type GeneratedMapping, type MappingSection } from '@/lib/autoMap'
 import type { Transaction } from '@/types/transaction'
 
 // The auto-mapping lab renders the AI result through the EXACT same panels as
@@ -155,10 +157,59 @@ export function LabMappingView({ result, txns, onChange }: Props) {
   const bankAccountRows: BankAccountRow[] =
     (result.bankAccounts ?? []).map((r, i) => ({ id: `bankAccounts-${i}`, name: r.name, balance: r.balance, overdraftLimit: r.overdraftLimit }))
 
-  // Confidence/source chip for a simple-section row, looked up by id.
+  // ── category editing, and the row move that follows from it ──
+  //
+  // "Rows land in the wrong section" was the advisor's most common complaint,
+  // and until now the only remedy was deleting the row and retyping it in the
+  // right panel. Picking a category now MOVES the row, because the category
+  // already determines the section (sectionOfCategory — the same function that
+  // tags the data we send the model, so the two can never disagree).
+  //
+  // Only the five sections that share the {name, amount} shape take part.
+  // `annual` is deliberately excluded: it stores annualAmount and means a
+  // yearly sum, so silently moving a row in or out of it would change what the
+  // number means. Its category still updates.
+  const MOVABLE: Partial<Record<MappingSection, SimpleKey | 'variable'>> = {
+    income: 'income', fixed: 'fixed', variable: 'variable', sub: 'sub', ins: 'ins',
+  }
+
+  function setCategory(key: SimpleKey | 'variable', idx: number, cat: string) {
+    const rows = [...result[key]]
+    const row  = rows[idx]
+    if (!row) return
+
+    const target  = sectionOfCategory(cat)
+    const destKey = target ? MOVABLE[target] : undefined
+
+    if (destKey && destKey !== key) {
+      onChange({
+        [key]:     rows.filter((_, i) => i !== idx),
+        [destKey]: [...result[destKey], { ...row, category: cat }],
+      } as Partial<GeneratedMapping>)
+      toast.success(`"${row.name || 'השורה'}" הועברה ל${SECTION_LABEL_HE[target!]}`)
+      return
+    }
+
+    rows[idx] = { ...row, category: cat }
+    patch(key, rows)
+  }
+
+  // Row extras: the category picker (editable) + the confidence/source chip.
   const chipFor = (key: SimpleKey) => (row: MappingRow) => {
-    const r = result[key][idxOf(row.id)]
-    return r ? <RowMetaChip confidence={r.confidence} source={r.source} /> : null
+    const i = idxOf(row.id)
+    const r = result[key][i]
+    if (!r) return null
+    return (
+      <span className="flex items-center gap-1 shrink-0">
+        <CategoryPicker
+          value={r.category ?? ''}
+          onChange={cat => setCategory(key, i, cat)}
+          variant="chip"
+          placeholder="קטגוריה"
+        />
+        <RowMetaChip confidence={r.confidence} source={r.source} />
+      </span>
+    )
   }
 
   // Drill-down transactions for a fixed/sub/ins row — the parsed report lines
@@ -384,6 +435,14 @@ export function LabMappingView({ result, txns, onChange }: Props) {
                       {g.rows.map(r => (
                         <div key={r._idx} className="flex items-center gap-2 group flex-wrap">
                           <input value={r.name} onChange={e => editVariable(r._idx, 'name', e.target.value)} className={`${inputCls} flex-1 min-w-[100px]`} placeholder="שם" />
+                          {/* Picking a different category moves the row out of
+                              משתנות and into the section that category belongs to. */}
+                          <CategoryPicker
+                            value={r.category ?? ''}
+                            onChange={cat => setCategory('variable', r._idx, cat)}
+                            variant="chip"
+                            placeholder="קטגוריה"
+                          />
                           <RowMetaChip confidence={r.confidence} source={r.source} />
                           <input type="number" value={r.amount || ''} onChange={e => editVariable(r._idx, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
                           <button onClick={() => delRow('variable', r._idx)} className="size-7 flex items-center justify-center text-muted-txt hover:text-expense sm:opacity-0 sm:group-hover:opacity-100 text-base rounded">×</button>

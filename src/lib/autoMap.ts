@@ -63,6 +63,43 @@ export interface GeneratedMapping {
 
 const list = (s: Set<string>) => [...s].join(', ')
 
+// ── Which mapping section a category belongs to ──
+//
+// This split is DETERMINISTIC in constants.ts, yet the prompt used to hand the
+// model 44 category names and expect it to remember which are fixed, which are
+// variable and which are insurance. Rows landing in the wrong section was the
+// most common error the advisor reported. We already know the answer, so we
+// state it — in the data block (the [tag] before each category) and in the
+// lab's row editor (picking a category moves the row). One source of truth for
+// both, so the tag the model reads and the move the advisor makes cannot drift.
+
+export type MappingSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | 'skip'
+
+export const SECTION_LABEL_HE: Record<MappingSection, string> = {
+  income:   'הכנסה',
+  fixed:    'קבועות',
+  variable: 'משתנות',
+  sub:      'מנויים',
+  ins:      'ביטוחים',
+  annual:   'שנתיות',
+  skip:     'לא הוצאה',
+}
+
+/** The section a category belongs to, or null when it isn't in any group. */
+export function sectionOfCategory(cat: string): MappingSection | null {
+  if (!cat) return null
+  // 'הכנסות' lives in SKIP_CATEGORIES (it is not an expense) but it IS the
+  // income section — checked first so a misfiled salary row can be moved there.
+  if (cat === 'הכנסות')            return 'income'
+  if (FIXED_CATEGORIES.has(cat))    return 'fixed'
+  if (VAR_CATEGORIES.has(cat))      return 'variable'
+  if (SUB_CATEGORIES.has(cat))      return 'sub'
+  if (INSURANCE_CATEGORIES.has(cat)) return 'ins'
+  if (ANNUAL_CATEGORIES.has(cat))   return 'annual'
+  if (SKIP_CATEGORIES.has(cat))     return 'skip'
+  return null
+}
+
 // ── Merchant-level breakdown of the parsed transactions ──
 //
 // The prompt below asks the model to split a big variable category into named
@@ -168,6 +205,48 @@ export function buildCategoryBreakdown(
   return out.sort((a, b) => b.sum - a.sum)
 }
 
+// ── Bank deposits (income) and card settlements ──
+//
+// Kept separate from the category breakdown on purpose. Income has no expense
+// category, and formatCategoryBreakdown's header talks about refund netting,
+// which is meaningless for a salary. Settlements are shown so the advisor can
+// see what was excluded rather than having it vanish silently.
+
+export interface NamedTotal { name: string; sum: number; count: number }
+
+/** Group by merchant (same normalization as everywhere else), biggest first. */
+export function groupByName(rows: { desc: string; amount: number }[], cap = 25): NamedTotal[] {
+  const map = new Map<string, NamedTotal>()
+  for (const r of rows) {
+    const key = normalizeForLookup(r.desc) || r.desc.trim()
+    if (!key) continue
+    const line = map.get(key) ?? { name: r.desc.trim() || key, sum: 0, count: 0 }
+    line.sum += r.amount
+    line.count++
+    map.set(key, line)
+  }
+  const all = [...map.values()].sort((a, b) => b.sum - a.sum)
+  if (all.length <= cap) return all
+  const rest = all.slice(cap)
+  return [
+    ...all.slice(0, cap),
+    {
+      name:  `שאר ההפקדות (${rest.length})`,
+      sum:   rest.reduce((s, m) => s + m.sum, 0),
+      count: rest.reduce((s, m) => s + m.count, 0),
+    },
+  ]
+}
+
+/** Renders deposits as the income block. Amounts are PERIOD totals, like everything else. */
+export function formatIncomeBreakdown(lines: NamedTotal[], months = 1): string[] {
+  if (!lines.length) return []
+  const span = months > 1 ? `על פני ${months} חודשים` : 'על פני חודש אחד'
+  const out = [`(סך ההפקדות ${span}. חלק במספר החודשים כדי לקבל הכנסה חודשית)`]
+  for (const l of lines) out.push(`  - ${short(l.name)}: ${Math.round(l.sum)} (${l.count} הפקדות)`)
+  return out
+}
+
 /**
  * How many distinct calendar months the uploaded transactions actually cover.
  *
@@ -215,7 +294,10 @@ export function formatCategoryBreakdown(rows: CategoryBreakdown[], months = 1): 
   lines.push(`(כל הסכומים כאן הם ${span}, אחרי קיזוז זיכויים)`)
   for (const r of rows) {
     const neg = r.sum < 0 ? ' — נטו שלילי: הוחזר יותר ממה שחויב בתקופה' : ''
-    lines.push(`${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)${neg}`)
+    // The [tag] is the category's section, stated rather than left to memory.
+    const sec = sectionOfCategory(r.category)
+    const tag = sec ? `[${SECTION_LABEL_HE[sec]}] ` : ''
+    lines.push(`${tag}${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)${neg}`)
     for (const m of r.merchants) {
       lines.push(`  - ${short(m.name)}: ${Math.round(m.sum)} (${countLabel(m.count)})`)
     }
@@ -255,8 +337,12 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - annual: סכום **שנתי** (הסכום בפועל לשנה, לא ×12 של חד‑פעמי).
 - מספרים בלבד (ללא ₪ וללא פסיקים).
 
+## מבנה הנתונים שאתה מקבל
+- **בלוק ההוצאות** — קטגוריות ובתי עסק. לפני כל קטגוריה מופיע תג בסוגריים מרובעות, למשל \`[קבועות]\` או \`[משתנות]\`. **התג הוא הסעיף שאליו הקטגוריה שייכת. השתמש בו כמו שהוא ואל תחליט לבד** לאיזה סעיף שורה הולכת.
+- **בלוק ההכנסות** — הפקדות שזוהו בעו"ש. זה המקור העיקרי לסעיף income. אם הוא קיים, אל תנחש הכנסות ממקום אחר.
+- **בלוק תשלומי הריכוז** — תשלומים לחברות האשראי. הם **כבר הוסרו** מבלוק ההוצאות, כי הפירוט האמיתי שלהם נמצא שם. הם מוצגים לידיעה בלבד — **אל תוסיף אותם כהוצאה**.
+
 ## כללי אנטי‑כפילות (קריטי)
-- שורת "תשלום כרטיס אשראי" / "פירעון אשראי" בעו"ש היא **סיכום** של דוח האשראי — **אל תספור אותה כהוצאה**. ההוצאות האמיתיות הן הפירוט בדוח האשראי.
 - התעלם מ: העברות בין חשבונות, ומשיכות מזומן ללא פירוט (אלא אם צוין).
 - **זיכויים כבר מקוזזים בנתונים שקיבלת** — אל תחסיר אותם שוב. שורה עם סכום שלילי או עם "זיכוי בלבד" פירושה שבתקופה הזו הוחזר יותר ממה שחויב. אל תיצור שורת הוצאה שלילית: החזר 0 לאותה שורה, וציין את זה ב‑assessment.
 - קטגוריות שאינן הוצאה (${list(SKIP_CATEGORIES)}) — אל תכניס כהוצאה; הכנסות לך ל‑income.
