@@ -90,6 +90,38 @@ function refuse(
 // the original `^נרשם:` guard does not match.
 const OUR_OWN_TEXT = /^(לא )?נרשם:|^כבר נרשם|קוטלג ל/
 
+// A capture whose entire "merchant" is a card issuer's own name is never a
+// purchase — it is the issuer's app talking about itself. Observed live
+// 2026-08-07: two clients who had bought nothing got expenses of ₪1,037.80 and
+// ₪10 with merchant "Max", almost certainly a statement-total or limit notice
+// the listener read as a charge. BUSINESS_DB maps "max" to עמלות בנק ואשראי
+// (correct for a real card fee), so they landed silently as fee expenses and
+// skewed the budget and safe-to-spend of people who had spent nothing.
+//
+// ⚠️ EXACT match after normalization, never a substring. "מקס ברנר" (restaurant)
+// and "מקס סטוק" (homeware) are real merchants in BUSINESS_DB, and a genuine
+// ₪50 capture on 2026-07-29 read "Ampi Max Rishin Ltd". A `includes('max')`
+// rule would silently swallow all three. The tests pin exactly that.
+const ISSUER_NAMES = new Set([
+  'max', 'מקס',
+  'visa', 'ויזה',
+  'isracard', 'ישראכרט',
+  'cal', 'כאל', 'ויזה כאל',
+  'leumicard', 'לאומי קארד',
+  'amex', 'american express', 'אמריקן אקספרס',
+  'diners', 'דיינרס',
+])
+
+/** True when the merchant string is nothing but a card issuer's name. */
+export function isIssuerOnlyMerchant(merchant: string): boolean {
+  const s = merchant
+    .toLowerCase()
+    .replace(/["'׳״.,()\-_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return ISSUER_NAMES.has(s)
+}
+
 // What the caller's token LOOKS like — never the signature itself. `uidPart` is
 // logged only when it decodes to something shaped like a Firebase uid, so a
 // client who pastes the wrong clipboard content (a password, another credential)
@@ -203,6 +235,16 @@ export async function POST(req: NextRequest) {
   // marks (RLM/LRM etc.) around the ₪ — they break the currency-anchored
   // regexes below and pollute the merchant name for categorization.
   let cleanMerchant = stripInvisible(merchant).trim()
+
+  // Reject the issuer's own notifications before anything is recorded — see
+  // ISSUER_NAMES. Refusing (rather than dropping) keeps the client informed and
+  // matches every other rejection here: nothing vanishes silently.
+  if (isIssuerOnlyMerchant(cleanMerchant)) {
+    return refuse(db, 400, 'issuer notification', notifyOf(
+      'לא נרשם: זו הודעה מחברת האשראי, לא קנייה',
+      'הודעות על חיוב חודשי, מסגרת או מצב חשבון אינן קנייה בבית עסק ולכן אינן נרשמות. אם באמת קנית עכשיו — אפשר לרשום ידנית באפליקציה.',
+    ), uid, { merchantLen: cleanMerchant.length })
+  }
 
   // Which currency this charge is denominated in.
   //
