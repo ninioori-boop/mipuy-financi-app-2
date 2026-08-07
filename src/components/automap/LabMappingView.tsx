@@ -225,8 +225,79 @@ export function LabMappingView({ result, txns, onChange }: Props) {
 
   const creditScore = result.creditScore ?? 0
 
+  // ── the review queue ──
+  //
+  // Nobody reviews forty rows — not the advisor, and certainly not a client, who
+  // would approve the lot or walk away. But the model already tells us which
+  // rows it was unsure of, and that turns a seven-screen read into a handful of
+  // questions. It is also the precondition for ever opening this tool up: the
+  // review has to be short before it can be someone else's job.
+  const QUEUE_SECTIONS: (SimpleKey | 'variable')[] = ['income', 'fixed', 'variable', 'sub', 'ins']
+  const reviewQueue = QUEUE_SECTIONS.flatMap(key =>
+    result[key]
+      .map((r, i) => ({ key, idx: i, row: r }))
+      .filter(({ row }) => !row.reviewed && (row.confidence === 'low' || row.confidence === 'medium')),
+  )
+
+  function markReviewed(key: SimpleKey | 'variable', idx: number) {
+    const rows = [...result[key]]
+    if (!rows[idx]) return
+    rows[idx] = { ...rows[idx], reviewed: true }
+    patch(key, rows)
+  }
+
+  function editQueueRow(key: SimpleKey | 'variable', idx: number, field: 'name' | 'amount', value: string | number) {
+    const rows = [...result[key]]
+    rows[idx] = { ...rows[idx], [field]: field === 'amount' ? asNum(value) : String(value) }
+    patch(key, rows)
+  }
+
   return (
     <div className="space-y-6">
+
+      {reviewQueue.length > 0 && (
+        <div className="rounded-xl border-2 border-gold/30 bg-gold/5 p-3 sm:p-4 space-y-2">
+          <div className="text-sm font-semibold text-gold">
+            🔎 שורות לבדיקה ({reviewQueue.length})
+          </div>
+          <p className="text-xs text-muted-txt">
+            רק השורות שה‑AI לא היה בטוח בהן. תקן או אשר, והן ייעלמו מכאן. שאר השורות סומנו כאמינות.
+          </p>
+          <div className="space-y-1.5">
+            {reviewQueue.map(({ key, idx, row }) => (
+              <div key={`${key}-${idx}`} className="flex items-center gap-2 flex-wrap rounded-lg border border-line bg-surface px-2 py-1.5">
+                <input
+                  value={row.name}
+                  onChange={e => editQueueRow(key, idx, 'name', e.target.value)}
+                  className={`${inputCls} flex-1 min-w-[120px]`}
+                  placeholder="שם"
+                />
+                <CategoryPicker
+                  value={row.category ?? ''}
+                  onChange={cat => setCategory(key, idx, cat)}
+                  variant="chip"
+                  placeholder="קטגוריה"
+                />
+                <RowMetaChip confidence={row.confidence} source={row.source} />
+                <input
+                  type="number"
+                  value={row.amount || ''}
+                  onChange={e => editQueueRow(key, idx, 'amount', e.target.value)}
+                  style={{ direction: 'ltr' }}
+                  className={`${inputCls} w-24 text-left tabular-nums shrink-0`}
+                  placeholder="₪"
+                />
+                <button
+                  onClick={() => markReviewed(key, idx)}
+                  className="shrink-0 rounded-md border border-income/50 bg-income/10 px-2.5 py-1 text-xs font-semibold text-income hover:bg-income/20 transition-colors"
+                >
+                  ✓ אושר
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Profile snapshot — credit score + credit cards + checking account,
           identical to the top of the manual mapping tab (point-in-time facts). */}

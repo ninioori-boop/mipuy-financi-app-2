@@ -24,6 +24,11 @@ export interface GenRowMeta {
   confidence?: GenConfidence
   source?:     string
   category?:   string
+  /**
+   * Set locally when the advisor confirms a row in the review queue — never by
+   * the model. Optional, so drafts saved before it existed keep loading.
+   */
+  reviewed?:   boolean
 }
 
 export interface GenSimpleRow extends GenRowMeta { name: string; amount: number }

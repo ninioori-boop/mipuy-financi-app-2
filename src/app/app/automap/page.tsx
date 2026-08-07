@@ -23,6 +23,7 @@ import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBa
 import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
 } from '@/lib/automapAnnual'
+import { buildCompletenessReport } from '@/lib/automapCompleteness'
 import { categorize } from '@/lib/categorize'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { VAR_CATEGORIES } from '@/lib/constants'
@@ -326,6 +327,18 @@ export default function AutoMapPage() {
       confirmedOneOffKeys,
     ),
     [breakdown, detectedMonths, reportMonths, dismissedOneOffs, confirmedOneOffKeys],
+  )
+
+  // What the mapping is MISSING, as opposed to what in it is wrong. Deterministic
+  // and free, so it runs before generation too — which is when the advisor can
+  // still go and fetch what it names.
+  const completeness = useMemo(
+    () => buildCompletenessReport({
+      expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
+      annualItems, installments: installmentLines, settlements,
+    }),
+    [expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
+     annualItems, installmentLines, settlements],
   )
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
@@ -887,6 +900,34 @@ export default function AutoMapPage() {
             </div>
           )}
         </div>
+
+        {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
+            of a client's life looks identical to one built from 95% — every
+            number present reconciles and nothing says otherwise. Shown before
+            generation, because that's when it can still be acted on. */}
+        {completeness.length > 0 && (
+          <div className="rounded-xl border border-line bg-surface2/60 p-3 space-y-2">
+            <div className="text-sm font-semibold text-txt">
+              🔍 מה חסר לתמונה
+              <span className="text-xs font-normal text-muted-txt"> · {completeness.filter(i => i.severity === 'gap').length} פערים</span>
+            </div>
+            <ul className="space-y-1.5">
+              {completeness.map(item => (
+                <li
+                  key={item.key}
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                    item.severity === 'gap'
+                      ? 'border-gold/40 bg-gold/10 text-gold'
+                      : 'border-line bg-surface text-muted-txt'
+                  }`}
+                >
+                  <div className="font-semibold">{item.title}</div>
+                  {item.detail && <div className="mt-0.5 opacity-90">{item.detail}</div>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Annual expenses — the hole a 3-month upload always has, closed two
             ways that never overlap: charges that ARE in the data and are being
