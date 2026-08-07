@@ -151,8 +151,8 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Safe-to-spend-today — lab-gated (advisor-only) for now */}
-      {isAdvisor && <SafeToSpendToday />}
+      {/* Safe-to-spend-today — open to everyone (renders nothing without a budget) */}
+      <SafeToSpendToday />
 
       {/* End-of-month budget-review reminder — open to everyone */}
       <BudgetReviewReminder />

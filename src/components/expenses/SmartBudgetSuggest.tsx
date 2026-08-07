@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { useLabAccess } from '@/hooks/useLabAccess'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { suggestBudgets } from '@/lib/budgetSuggest'
@@ -12,13 +11,12 @@ const fmt  = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
 const icon = (c: string) => CATEGORY_ICONS[c] ?? '📦'
 
 /**
- * Suggests category budgets from spending history, one tap to apply. Self-gates
- * to advisors (hasLabAccess) so the page only needs to render it, and renders
- * nothing until there's enough history to suggest anything. "Apply all" fills
- * only the categories without a budget yet, so a manual budget is never clobbered.
+ * Suggests category budgets from spending history, one tap to apply. Open to
+ * every client (graduated out of the lab 2026-08-07) and renders nothing until
+ * there's enough history to suggest anything. "Apply all" fills only the
+ * categories without a budget yet, so a manual budget is never clobbered.
  */
 export function SmartBudgetSuggest() {
-  const { allowed: labAllowed } = useLabAccess()
   const entries   = useExpenseLogStore(s => s.entries)
   const budgets   = useCategoryBudgetStore(s => s.budgets)
   const setBudget = useCategoryBudgetStore(s => s.setBudget)
@@ -26,7 +24,6 @@ export function SmartBudgetSuggest() {
 
   const { months, suggestions } = useMemo(() => suggestBudgets(entries), [entries])
 
-  if (!labAllowed) return null      // lab-gated for now (email list OR advisor role)
   if (suggestions.length === 0) return null
 
   const gaps = suggestions.filter(s => !(budgets[s.category] > 0))
