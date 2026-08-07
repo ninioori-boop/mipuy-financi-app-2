@@ -119,6 +119,17 @@ export default function AutoMapPage() {
   // and by how much. The advisor confirms or cancels with full context.
   const [showCopyPreview, setShowCopyPreview] = useState(false)
 
+  // Inline replacements for window.prompt / window.confirm. Those are suppressed
+  // in several in-app WebView configurations — the same shell the Android
+  // clients run — so on those devices saving a draft, deleting one, or resetting
+  // the lab silently did nothing at all. `confirming` holds the key of the one
+  // action awaiting a second click; `draftName` is non-null while the save row
+  // is open.
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [draftName, setDraftName]   = useState<string | null>(null)
+  // Typed guard for the one action that destroys live client data.
+  const [replaceGuard, setReplaceGuard] = useState('')
+
   // Drafts panel collapsed/expanded — kept local, doesn't need persistence.
   const [showDrafts, setShowDrafts] = useState(false)
 
@@ -481,26 +492,38 @@ export default function AutoMapPage() {
       toast.warning('אין תוצאה לשמירה — צור מיפוי קודם')
       return
     }
-    const name = window.prompt('שם הטיוטה (למשל "יוסי כהן - יוני 2026"):', '') ?? ''
-    if (name === '') return
-    const id = saveDraft(name)
-    if (id) toast.success(`💾 הטיוטה "${name.trim() || 'ללא שם'}" נשמרה`)
+    setDraftName('')
   }
 
-  // Load a draft into the live editor. If there's an existing result, warn
-  // first — loading overwrites contextText / reportMonths / result.
+  function commitDraft() {
+    const name = draftName ?? ''
+    const id = saveDraft(name)
+    if (id) toast.success(`💾 הטיוטה "${name.trim() || 'ללא שם'}" נשמרה`)
+    setDraftName(null)
+  }
+
+  // Load a draft into the live editor. Overwrites contextText / reportMonths /
+  // result, so an existing result costs a second click.
   function handleLoadDraft(id: string, name: string) {
-    if (result && !window.confirm(`לטעון את "${name}"? זה ידרוס את התוצאה הנוכחית.`)) return
+    if (result && confirming !== `load-${id}`) { setConfirming(`load-${id}`); return }
+    setConfirming(null)
     if (loadDraft(id)) {
       toast.success(`📂 הטיוטה "${name}" נטענה`)
       setShowDrafts(false)
     }
   }
 
-  function handleDeleteDraft(id: string, name: string) {
-    if (!window.confirm(`למחוק את הטיוטה "${name}"?`)) return
+  function handleDeleteDraft(id: string) {
+    if (confirming !== `del-${id}`) { setConfirming(`del-${id}`); return }
+    setConfirming(null)
     deleteDraft(id)
     toast.success('🗑️ הטיוטה נמחקה')
+  }
+
+  function handleReset() {
+    if (confirming !== 'reset') { setConfirming('reset'); return }
+    setConfirming(null)
+    reset(); setTxns([]); setBankRows([]); setFileNames([]); setDocs([])
   }
 
   // Pre-fill the context textarea from the client's existing mapping rows.
@@ -695,7 +718,7 @@ export default function AutoMapPage() {
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6">
         <h1 className="text-2xl font-bold text-gold mb-1">🧪 מיפוי אוטומטי (ניסיוני)</h1>
         <p className="text-muted-txt text-sm">
-          מעבדה עצמאית: מזינים את נתוני הלקוח (Excel · PDF · תמונות · טקסט), ה‑AI קורא הכל ובונה תמונת מצב — מיפוי שלם לפי עקרונות <BrandNameHe />.
+          מעבדה עצמאית: מזינים את הנתונים (Excel · PDF · תמונות · טקסט), ה‑AI קורא הכל ובונה תמונת מצב — מיפוי שלם לפי עקרונות <BrandNameHe />.
           <strong className="text-txt"> מנותק מהמערכת</strong> — שום דבר לא נשמר למיפוי הרגיל עד שתלחץ "העתק למיפוי".
         </p>
       </div>
@@ -724,16 +747,26 @@ export default function AutoMapPage() {
                   </div>
                   <button
                     onClick={() => handleLoadDraft(d.id, d.name)}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 transition-colors whitespace-nowrap"
+                    onBlur={() => confirming === `load-${d.id}` && setConfirming(null)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                      confirming === `load-${d.id}`
+                        ? 'border-gold bg-gold/25 text-gold font-semibold'
+                        : 'border-gold/40 bg-gold/10 text-gold hover:bg-gold/20'
+                    }`}
                   >
-                    📂 טען
+                    {confirming === `load-${d.id}` ? 'ידרוס את התוצאה — לחץ שוב' : '📂 טען'}
                   </button>
                   <button
-                    onClick={() => handleDeleteDraft(d.id, d.name)}
+                    onClick={() => handleDeleteDraft(d.id)}
+                    onBlur={() => confirming === `del-${d.id}` && setConfirming(null)}
                     aria-label={`מחק את ${d.name}`}
-                    className="size-8 flex items-center justify-center rounded-lg border border-line text-muted-txt hover:text-expense hover:border-expense/40 transition-colors"
+                    className={`flex items-center justify-center rounded-lg border transition-colors ${
+                      confirming === `del-${d.id}`
+                        ? 'px-2 h-8 text-xs font-semibold border-expense/60 bg-expense/10 text-expense'
+                        : 'size-8 border-line text-muted-txt hover:text-expense hover:border-expense/40'
+                    }`}
                   >
-                    🗑️
+                    {confirming === `del-${d.id}` ? 'למחוק?' : '🗑️'}
                   </button>
                 </div>
               ))}
@@ -1026,7 +1059,7 @@ export default function AutoMapPage() {
               type="button"
               onClick={prefillFromMapping}
               className="text-xs px-2.5 py-1 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors whitespace-nowrap"
-              title="טוען את המיפוי הקיים של הלקוח כקונטקסט — ה‑AI יראה אותו וידע מה כבר קיים"
+              title="טוען את המיפוי הקיים כקונטקסט — ה‑AI יראה אותו וידע מה כבר קיים"
             >
               📥 טען מהמיפוי הקיים
             </button>
@@ -1060,10 +1093,43 @@ export default function AutoMapPage() {
             </button>
           )}
           {result && (
-            <button onClick={() => { if (confirm('לאפס את המעבדה (קלט ותוצאה)?')) { reset(); setTxns([]); setFileNames([]); setDocs([]) } }}
-              className="me-auto text-xs text-muted-txt hover:text-expense transition-colors">אפס מעבדה</button>
+            <button
+              onClick={handleReset}
+              onBlur={() => confirming === 'reset' && setConfirming(null)}
+              className={`me-auto text-xs transition-colors ${
+                confirming === 'reset' ? 'text-expense font-semibold' : 'text-muted-txt hover:text-expense'
+              }`}
+            >
+              {confirming === 'reset' ? 'בטוח? לחץ שוב' : 'אפס מעבדה'}
+            </button>
           )}
         </div>
+
+        {/* Inline draft-name row — replaces window.prompt, which the app's
+            WebView suppresses. */}
+        {draftName !== null && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <input
+              autoFocus
+              value={draftName}
+              onChange={e => setDraftName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitDraft()
+                if (e.key === 'Escape') setDraftName(null)
+              }}
+              placeholder='שם הטיוטה, למשל "יוסי כהן - יוני 2026"'
+              className={`${inputCls} flex-1 min-w-[180px]`}
+            />
+            <button onClick={commitDraft}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 transition-colors">
+              שמור
+            </button>
+            <button onClick={() => setDraftName(null)}
+              className="text-xs px-2 py-1.5 text-muted-txt hover:text-txt transition-colors">
+              ביטול
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Result */}
@@ -1148,20 +1214,55 @@ export default function AutoMapPage() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={doCopyToMapping}
-                      className="bg-gold text-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-gold-light transition-colors"
-                    >
-                      ✓ אשר והעתק
-                    </button>
-                    <button
-                      onClick={() => setShowCopyPreview(false)}
-                      className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted-txt hover:text-txt hover:border-gold/40 transition-colors"
-                    >
-                      ביטול
-                    </button>
-                  </div>
+                  {/* Replace wipes a mapping that is synced to the client's own
+                      Firestore document — and this page is normally used while
+                      viewing AS that client. Two clicks was not enough distance
+                      from a permanent, un-undoable loss of their work, so it
+                      costs a typed word. Merge is untouched: it only adds. */}
+                  {(() => {
+                    const existingRows = diff.reduce((s, d) => s + d.current, 0)
+                    const needsGuard   = copyMode === 'replace' && existingRows > 0
+                    const armed        = !needsGuard || replaceGuard.trim() === 'מחק'
+                    return (
+                      <>
+                        {needsGuard && (
+                          <div className="rounded-lg border border-expense/50 bg-expense/10 px-3 py-2 space-y-2">
+                            <div className="text-xs text-expense font-semibold">
+                              ⚠️ ההחלפה תמחק {existingRows} שורות קיימות מהמיפוי. אין ביטול.
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-muted-txt">הקלד <strong className="text-txt">מחק</strong> כדי לאשר:</span>
+                              <input
+                                value={replaceGuard}
+                                onChange={e => setReplaceGuard(e.target.value)}
+                                className={`${inputCls} w-24`}
+                                placeholder="מחק"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => { doCopyToMapping(); setReplaceGuard('') }}
+                            disabled={!armed}
+                            className={`rounded-lg px-4 py-2.5 text-sm font-bold transition-colors ${
+                              armed
+                                ? 'bg-gold text-surface hover:bg-gold-light'
+                                : 'bg-surface border border-line text-muted-txt cursor-not-allowed'
+                            }`}
+                          >
+                            ✓ אשר והעתק
+                          </button>
+                          <button
+                            onClick={() => { setShowCopyPreview(false); setReplaceGuard('') }}
+                            className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted-txt hover:text-txt hover:border-gold/40 transition-colors"
+                          >
+                            ביטול
+                          </button>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               )
             })()}

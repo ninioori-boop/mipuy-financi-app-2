@@ -3,15 +3,48 @@ import { checkRateLimit } from '@/lib/rateLimit'
 import { checkAiBudget } from '@/lib/aiBudget'
 import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
+import { getAdminDb } from '@/lib/firebaseAdmin'
+import { hasLabAccess } from '@/lib/labAccess'
 import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 import { AUTOMAP_SYSTEM_PROMPT } from '@/lib/autoMap'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
 export const runtime = 'nodejs'
 
-// Per-user rate limit: 20 auto-mapping generations per day (heavy call).
-const USER_LIMIT  = 20
-const WINDOW_MS   = 86_400_000 // 24 hours
+// Per-user daily rate limit. This is the most expensive call in the product —
+// Sonnet with up to 16K output and up to ~4MB of decoded PDF/image input — and
+// it draws on the SAME daily AI counter as categorization for every client. At
+// one flat limit of 20, opening this tool to ~40 clients would allow 800
+// generations/day against a 500/day ceiling: a handful of curious clients could
+// take categorization down for everyone.
+//
+// The tier is resolved server-side because until now the advisor gate was
+// CLIENT-SIDE ONLY — any authenticated user could POST here directly and spend
+// 20 generations a day on a page they cannot even open.
+const ADVISOR_LIMIT = 20
+const CLIENT_LIMIT  = 3
+const WINDOW_MS     = 86_400_000 // 24 hours
+
+/**
+ * Advisor or not. Mirrors the client's useLabAccess: the bootstrap email list,
+ * or a real advisors/{uid} document.
+ *
+ * Fails OPEN to 'advisor' on a read error, deliberately: a transient Firestore
+ * blip must not silently cut a working advisor down to three generations a day
+ * mid-session. The cost of being wrong is one extra tier for one user; the cost
+ * of the opposite is an advisor blocked with no explanation.
+ */
+async function resolveTier(uid: string, email: string | null): Promise<'advisor' | 'client'> {
+  if (hasLabAccess(email)) return 'advisor'
+  const db = getAdminDb()
+  if (!db) return 'client'
+  try {
+    const snap = await db.collection('advisors').doc(uid).get()
+    return snap.exists ? 'advisor' : 'client'
+  } catch {
+    return 'advisor'
+  }
+}
 
 // The client's data summary can be large (transaction lines + free text).
 const MAX_MESSAGE_LEN = 40_000
@@ -51,10 +84,12 @@ export async function POST(req: NextRequest) {
   }
   // Per-user limit — Firestore-backed so it survives cold starts and
   // cannot be bypassed by spreading requests across serverless instances.
-  const rl = await checkRateLimit({ key: 'automap:' + uid, limit: USER_LIMIT, windowMs: WINDOW_MS })
+  const tier  = await resolveTier(uid, email)
+  const limit = tier === 'advisor' ? ADVISOR_LIMIT : CLIENT_LIMIT
+  const rl = await checkRateLimit({ key: 'automap:' + uid, limit, windowMs: WINDOW_MS })
   if (!rl.allowed) {
     return NextResponse.json(
-      { error: 'הגעת למגבלת המיפויים האוטומטיים היומית (20) — נסה שוב מחר' },
+      { error: `הגעת למגבלת המיפויים האוטומטיים היומית (${limit}) — נסה שוב מחר` },
       { status: 429 },
     )
   }
@@ -138,6 +173,6 @@ export async function POST(req: NextRequest) {
   // JSON" and "the mapping was cut off at the token ceiling" — two failures
   // that look identical on the client and need opposite fixes. Passing it
   // through costs nothing and turns a guess into a diagnosis.
-  console.log(`[automap] uid=${uid} stop=${data.stop_reason} out=${data.usage?.output_tokens}`)
+  console.log(`[automap] uid=${uid} tier=${tier} stop=${data.stop_reason} out=${data.usage?.output_tokens}`)
   return NextResponse.json({ text, stopReason: data.stop_reason ?? null })
 }
