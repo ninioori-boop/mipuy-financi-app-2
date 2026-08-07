@@ -1648,8 +1648,12 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   ["סטוק מארקט", "כלי בית"],
   ["הסטוק קונספט", "כלי בית"],
   ["stock concept", "כלי בית"],
-  ["מקס סטוק", "כלי בית"],
-  ["max stock", "כלי בית"],
+  // ריהוט והבית, not כלי בית — Ori's call 2026-08-07, so the chain lands in one
+  // category however its name reaches us. All three spellings must agree: the
+  // phone sends Latin, the credit statement sends Hebrew, and the same purchase
+  // splitting across two categories is exactly what makes a mapping untrustworthy.
+  ["מקס סטוק", "ריהוט והבית"],
+  ["max stock", "ריהוט והבית"],
   ["ג'מבו סטוק", "כלי בית"],
   ["jumbo stock", "כלי בית"],
   ["דן דיל", "כלי בית"],
@@ -4294,7 +4298,7 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   ["איי דיגיטל", "כלי בית"],
   ["לאסט פרייס", "כלי בית"],
   ["last price", "כלי בית"],
-  ["maxstock", "כלי בית"],
+  ["maxstock", "ריהוט והבית"],   // keep in sync with "מקס סטוק" / "max stock" above
   ["דייסו", "כלי בית"],
   ["daiso", "כלי בית"],
 

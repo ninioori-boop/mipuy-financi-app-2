@@ -34,9 +34,17 @@ describe('the generic card-fee rule still works', () => {
   // contains "מקס" keeps its own category.
   it.each([
     ['מקס ברנר', 'אוכל בחוץ ובילויים'],
-    ['מקס סטוק', 'כלי בית'],
     ['מקס בייבי', 'צעצועים'],
   ])('%s is unaffected', (name, expected) => {
     expect(categorize(name)).toBe(expected)
+  })
+})
+
+// The same chain reaches us in three spellings — Latin from the phone, Hebrew
+// from the credit statement. If they disagree, one client's purchases split
+// across two categories and the mapping stops being trustworthy.
+describe('מקס סטוק resolves to one category however it is spelled', () => {
+  it.each(['מקס סטוק', 'max stock', 'maxstock', 'MAX 10', 'מקס 10'])('%s', name => {
+    expect(categorize(name)).toBe('ריהוט והבית')
   })
 })
