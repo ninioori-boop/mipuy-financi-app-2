@@ -205,15 +205,21 @@ export function CategoryPicker({
   function panel(big: boolean) {
     return (
       <>
+        {/* On the mobile sheet the chips live in ONE horizontally-scrollable row.
+            Wrapping let 8 chips stack 4-5 rows tall (worse with an OS font
+            scale), squeezing the flex-1 category list below to zero height —
+            "the options disappeared". A single bounded row can't do that. */}
         {chips.length > 0 && (
-          <div className="p-2 border-b border-line flex flex-wrap gap-1.5">
+          <div className={`p-2 border-b border-line shrink-0 flex gap-1.5 ${
+            big ? 'overflow-x-auto scrollbar-none' : 'flex-wrap'
+          }`}>
             {chips.map(c => (
               <button
                 key={c}
                 type="button"
                 onClick={() => pick(c)}
-                className={`inline-flex items-center gap-1.5 rounded-full border transition-colors ${
-                  big ? 'px-3.5 py-3 text-sm' : 'px-2.5 py-1 text-xs'
+                className={`inline-flex items-center gap-1.5 rounded-full border transition-colors whitespace-nowrap ${
+                  big ? 'px-3.5 py-3 text-sm shrink-0' : 'px-2.5 py-1 text-xs'
                 } ${
                   c === value
                     ? 'border-gold bg-gold/15 text-gold'
@@ -226,7 +232,7 @@ export function CategoryPicker({
             ))}
           </div>
         )}
-        <div className="p-2 border-b border-line">
+        <div className="p-2 border-b border-line shrink-0">
           <input
             ref={inputRef}
             value={search}
@@ -236,7 +242,7 @@ export function CategoryPicker({
             className="w-full rounded-md border border-line bg-surface px-2.5 py-2 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
           />
         </div>
-        <div className={`overflow-y-auto py-1 ${big ? 'flex-1' : 'max-h-64'}`}>
+        <div className={`overflow-y-auto py-1 ${big ? 'flex-1 min-h-0' : 'max-h-64'}`}>
           {filtered.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-muted-txt">אין תוצאות</div>
           ) : (
@@ -292,9 +298,12 @@ export function CategoryPicker({
         isMobile ? (
           <div className="fixed inset-0 z-[60] flex flex-col justify-end" dir="rtl">
             <div className="absolute inset-0 bg-black/50" onClick={close} />
+            {/* Fixed height, not max-height: the list is 44 categories long, so
+                the sheet was always at its cap anyway — pinning it keeps the
+                scroll area a predictable size whatever the OS font scale does. */}
             <div
               ref={popRef}
-              className="relative rounded-t-2xl border-t border-line bg-surface2 shadow-xl shadow-black/50 max-h-[80vh] flex flex-col"
+              className="relative rounded-t-2xl border-t border-line bg-surface2 shadow-xl shadow-black/50 h-[85vh] flex flex-col pb-[env(safe-area-inset-bottom)]"
             >
               <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
                 <span className="text-sm font-semibold text-txt">בחירת קטגוריה</span>

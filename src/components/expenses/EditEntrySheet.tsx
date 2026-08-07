@@ -49,7 +49,7 @@ export function EditEntrySheet({ entry, suggested, onSave, onClose }: Props) {
   return createPortal(
     <div className="fixed inset-0 z-[55] flex flex-col justify-end" dir="rtl">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative rounded-t-2xl border-t border-line bg-surface2 shadow-xl shadow-black/50 max-h-[90vh] overflow-y-auto">
+      <div className="relative rounded-t-2xl border-t border-line bg-surface2 shadow-xl shadow-black/50 max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-between px-4 py-3 border-b border-line">
           <span className="text-sm font-semibold text-txt">עריכת הוצאה</span>
           <button

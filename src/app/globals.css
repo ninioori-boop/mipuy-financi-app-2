@@ -129,6 +129,23 @@
   }
 }
 
+/* Phone text scale.
+   The native Android/iOS shells render this app in a WebView, and a WebView
+   multiplies every font by the OS "font size" accessibility setting. At 130%+
+   the layout stops fitting: in the category sheet the suggestion chips wrapped
+   several rows deep and shoved the category list off the bottom of the screen,
+   which is the "I can't see the options" report. text-size-adjust pins that
+   multiplier, and the base font comes down a notch on phones so more fits per
+   screen. Touch targets are px-based (min-h-[44px]) on purpose — they do NOT
+   shrink with this. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (max-width: 639px) {
+  html { font-size: 15px; }
+}
+
 @layer utilities {
   .scrollbar-none {
     scrollbar-width: none;
