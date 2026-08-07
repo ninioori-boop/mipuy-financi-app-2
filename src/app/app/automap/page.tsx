@@ -16,10 +16,15 @@ import {
   parseGeneratedMapping, validateMapping,
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   groupByName, formatIncomeBreakdown,
+  buildInstallments, buildStandingOrders, formatInstallments, formatStandingOrders, isInstallment,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
+import {
+  ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
+} from '@/lib/automapAnnual'
 import { categorize } from '@/lib/categorize'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
@@ -71,8 +76,9 @@ export default function AutoMapPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const {
-    contextText, reportMonths, result, drafts,
+    contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs,
     setContextText, setReportMonths, setResult, updateResult, reset,
+    setAnnualItem, removeAnnualItem, dismissOneOff,
     saveDraft, loadDraft, deleteDraft,
   } = useAutoMapStore()
 
@@ -240,10 +246,6 @@ export default function AutoMapPage() {
   // categories get a merchant list, because the prompt keeps fixed/sub/ins to
   // one row each and listing merchants there invited it to split those too.
   //
-  // Memoized: this runs normalizeForLookup (~12 regex passes) per transaction,
-  // ~9.8ms on a routine 3,000-txn upload vs 0.1ms for the old totals-only pass.
-  // Unmemoized it re-ran on every keystroke in the context textarea, which is
-  // store-backed — 9.8ms per character, on exactly the biggest client files.
   // Split the bank rows three ways.
   //
   // A card-settlement line in the bank is a SUMMARY of the credit statement, so
@@ -262,9 +264,10 @@ export default function AutoMapPage() {
     return { incomeRows: income, bankExpenses: expenses, settlements: settled }
   }, [bankRows, txns])
 
-  // Bank charges become ordinary categorized expenses, so a mortgage or a
-  // standing order that never touches the credit card still reaches the mapping.
-  const expenseTxns = useMemo(() => {
+  // Every transaction we know about. Bank charges become ordinary categorized
+  // expenses, so a mortgage or a standing order that never touches the credit
+  // card still reaches the mapping.
+  const allTxns = useMemo(() => {
     const learned = useCreditStore.getState().mergedLearnedDB()
     const fromBank: Transaction[] = bankExpenses.map(r => ({
       desc: r.desc, amount: r.amount, originalAmount: null,
@@ -274,6 +277,33 @@ export default function AutoMapPage() {
     return [...txns, ...fromBank]
   }, [txns, bankExpenses])
 
+  const installmentLines = useMemo(() => buildInstallments(allTxns), [allTxns])
+  const standingOrders   = useMemo(() => buildStandingOrders(allTxns), [allTxns])
+
+  // THE rule this whole round rests on: anything that moves to a block of its
+  // own leaves the expense set, and this one set feeds both the breakdown the
+  // model reads and the cross-check that grades its answer. Skip it and either
+  // the model double-counts, or validateMapping reports a gap it created itself.
+  //
+  // Two exclusions: installment legs (they have their own section in the
+  // mapping) and charges the advisor confirmed as annual (they move from a
+  // monthly category to the annual block).
+  const confirmedOneOffKeys = useMemo(
+    () => new Set(annualItems.filter(a => a.source === 'detected').map(a => a.key)),
+    [annualItems],
+  )
+  const expenseTxns = useMemo(
+    () => allTxns.filter(t =>
+      !isInstallment(t) &&
+      !confirmedOneOffKeys.has(oneOffKey(t.category, normalizeForLookup(t.desc) || t.desc.trim())),
+    ),
+    [allTxns, confirmedOneOffKeys],
+  )
+
+  // Memoized: buildCategoryBreakdown runs normalizeForLookup (~12 regex passes)
+  // per transaction — ~9.8ms on a routine 3,000-txn upload vs 0.1ms for the old
+  // totals-only pass. Unmemoized it re-ran on every keystroke in the context
+  // textarea, which is store-backed: 9.8ms per character, on the biggest files.
   const breakdown = useMemo(() => buildCategoryBreakdown(expenseTxns, VAR_CATEGORIES), [expenseTxns])
   const incomeLines = useMemo(() => groupByName(incomeRows), [incomeRows])
 
@@ -284,6 +314,27 @@ export default function AutoMapPage() {
     () => detectMonthSpan([...expenseTxns, ...incomeRows.map(r => ({ date: r.date }))]),
     [expenseTxns, incomeRows],
   )
+
+  // Large charges that appeared exactly once. Suspicious for annual, never
+  // assumed to be — a new sofa and a yearly insurance premium look identical
+  // from the data alone, so this only raises the question.
+  const oneOffCandidates = useMemo(
+    () => detectOneOffCharges(
+      breakdown,
+      detectedMonths || reportMonths,
+      new Set(dismissedOneOffs),
+      confirmedOneOffKeys,
+    ),
+    [breakdown, detectedMonths, reportMonths, dismissedOneOffs, confirmedOneOffKeys],
+  )
+
+  function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
+    setAnnualItem({
+      key: c.key, name: c.name, category: c.category,
+      annualAmount: c.amount, source: 'detected',
+    })
+    toast.success(`"${c.name}" סומן כהוצאה שנתית והוסר מההוצאות החודשיות`)
+  }
 
   const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
   const tooBig    = docsBytes > 3_800_000
@@ -312,6 +363,21 @@ export default function AutoMapPage() {
     if (incomeLines.length) {
       lines.push('== הכנסות והפקדות שזוהו בעו"ש ==')
       lines.push(...formatIncomeBreakdown(incomeLines, reportMonths))
+      lines.push('')
+    }
+    if (annualItems.length) {
+      lines.push('== הוצאות שנתיות שהיועץ אישר ==')
+      lines.push(...formatAnnualItems(annualItems))
+      lines.push('')
+    }
+    if (installmentLines.length) {
+      lines.push('== עסקאות בתשלומים ==')
+      lines.push(...formatInstallments(installmentLines))
+      lines.push('')
+    }
+    if (standingOrders.length) {
+      lines.push('== חיובים בהוראת קבע ==')
+      lines.push(...formatStandingOrders(standingOrders))
       lines.push('')
     }
     if (settlements.length) {
@@ -348,23 +414,37 @@ export default function AutoMapPage() {
       }
       const data = await res.json()
       const rawText: string = (data as { text?: string }).text ?? ''
+      const stopReason = (data as { stopReason?: string | null }).stopReason ?? null
       try {
         const parsed = parseGeneratedMapping(rawText)
         setResult(parsed)
-        toast.success('✅ נוצר מיפוי — בדוק וערוך לפי הצורך')
+        // A truncated reply still parses now (extractJsonObject repairs it), but
+        // the tail sections are missing — say so rather than let it pass as a
+        // clean run the advisor would trust.
+        if (stopReason === 'max_tokens') {
+          toast.warning(
+            'התשובה נקטעה באורך המקסימלי. שוחזר מה שהספיק להיכתב — בדוק אילו סעיפים חסרים והרץ שוב עם פחות מסמכים.',
+            { duration: 12000 },
+          )
+        } else {
+          toast.success('✅ נוצר מיפוי — בדוק וערוך לפי הצורך')
+        }
       } catch (parseErr) {
         // Surface what Claude actually returned so we can debug "no JSON"
         // failures from the console instead of guessing. The toast keeps
         // the user-facing message short; the console has the full payload.
         console.error('[automap] failed to parse AI response', {
-          error:     (parseErr as Error).message,
-          textLen:   rawText.length,
-          textHead:  rawText.slice(0, 300),
-          textTail:  rawText.slice(-300),
+          error:      (parseErr as Error).message,
+          stopReason,
+          textLen:    rawText.length,
+          textHead:   rawText.slice(0, 300),
+          textTail:   rawText.slice(-300),
         })
         const preview = rawText.slice(0, 80).replace(/\s+/g, ' ')
         toast.error(
-          `שגיאה בקריאת תשובת ה‑AI. תחילת התשובה: "${preview || '(ריק)'}…" — פתח קונסול לפרטים`,
+          stopReason === 'max_tokens'
+            ? 'התשובה נקטעה באורך המקסימלי לפני שנכתב מיפוי שאפשר לשחזר. הסר חלק מהמסמכים או צמצם את הטקסט החופשי ונסה שוב.'
+            : `שגיאה בקריאת תשובת ה‑AI. תחילת התשובה: "${preview || '(ריק)'}…" — פתח קונסול לפרטים`,
           { duration: 12000 },
         )
       }
@@ -723,6 +803,7 @@ export default function AutoMapPage() {
             <span>
               📊 {fileNames.join(', ')} · {expenseTxns.length} הוצאות · {breakdown.length} קטגוריות
               {incomeRows.length > 0 && <> · <span className="text-income">{incomeRows.length} הפקדות</span></>}
+              {installmentLines.length > 0 && <> · {installmentLines.length} עסקאות בתשלומים</>}
               {/* Say what was removed. A silently vanished expense is worse
                   than a visible one the advisor can argue with. */}
               {settlements.length > 0 && <> · {settlements.length} תשלומי ריכוז אשראי (לא נספרו)</>}
@@ -803,6 +884,96 @@ export default function AutoMapPage() {
               >
                 עדכן ל‑{detectedMonths}
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Annual expenses — the hole a 3-month upload always has, closed two
+            ways that never overlap: charges that ARE in the data and are being
+            silently divided by the month count, and expenses that are NOT in
+            the data at all. Placed before generation, where it still changes
+            the answer. */}
+        <div className="rounded-xl border border-line bg-surface2/60 p-3 space-y-3">
+          <div className="text-sm font-semibold text-txt">📆 הוצאות שנתיות</div>
+          <p className="text-xs text-muted-txt">
+            הוצאה שנתית לא מופיעה בחלון של שלושה חודשים, ולכן היא נעלמת מהמיפוי בלי שום סימן.
+            שתי דרכים לסגור את זה, בלי להעלות עוד קבצים.
+          </p>
+
+          {/* Path 1: charges already in the data */}
+          {oneOffCandidates.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-gold">
+                חיובים מעל {ONE_OFF_MIN.toLocaleString('he-IL')} ש&quot;ח שהופיעו פעם אחת בלבד — שנתיים?
+              </div>
+              {oneOffCandidates.map(c => (
+                <div key={c.key} className="flex items-center gap-2 flex-wrap rounded-lg border border-line bg-surface px-2.5 py-1.5">
+                  <span className="text-xs text-txt flex-1 min-w-0 truncate">
+                    {c.name} <span className="text-muted-txt">· {c.category}</span>
+                  </span>
+                  <span className="text-xs tabular-nums text-txt shrink-0">{fmt(c.amount)}</span>
+                  <button
+                    onClick={() => confirmOneOffAsAnnual(c)}
+                    className="shrink-0 rounded-md border border-gold/50 bg-gold/15 px-2 py-1 text-xs font-semibold text-gold hover:bg-gold/25 transition-colors"
+                  >
+                    שנתי
+                  </button>
+                  <button
+                    onClick={() => dismissOneOff(c.key)}
+                    className="shrink-0 rounded-md border border-line px-2 py-1 text-xs text-muted-txt hover:text-txt transition-colors"
+                  >
+                    לא
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Path 2: expenses that never reach the files */}
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-gold list-none">
+              צ&apos;קליסט שנתיות שלא מופיעות בדוחות
+              <span className="text-muted-txt font-normal"> · {annualItems.filter(a => a.source === 'checklist').length} סומנו</span>
+            </summary>
+            <div className="mt-2 space-y-2">
+              {[...new Set(ANNUAL_CHECKLIST.map(i => i.group))].map(group => (
+                <div key={group} className="space-y-1">
+                  <div className="text-[11px] text-muted-txt">{group}</div>
+                  {ANNUAL_CHECKLIST.filter(i => i.group === group).map(item => {
+                    const current = annualItems.find(a => a.key === item.key)
+                    return (
+                      <div key={item.key} className="flex items-center gap-2">
+                        <span className="text-xs text-txt flex-1 min-w-0 truncate">{item.label}</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={current?.annualAmount || ''}
+                          placeholder="₪ לשנה"
+                          onChange={e => {
+                            const n = parseFloat(e.target.value) || 0
+                            if (n > 0) {
+                              setAnnualItem({
+                                key: item.key, name: item.label, category: item.category,
+                                annualAmount: n, source: 'checklist',
+                              })
+                            } else {
+                              removeAnnualItem(item.key)
+                            }
+                          }}
+                          style={{ direction: 'ltr' }}
+                          className={`${inputCls} w-28 text-left tabular-nums shrink-0`}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          </details>
+
+          {annualItems.length > 0 && (
+            <div className="text-xs text-income">
+              ✓ {annualItems.length} הוצאות שנתיות, {fmt(annualItems.reduce((s, a) => s + a.annualAmount, 0))} לשנה
             </div>
           )}
         </div>

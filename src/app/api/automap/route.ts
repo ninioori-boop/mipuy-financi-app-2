@@ -127,7 +127,17 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const data = await res.json()
-  const text = (data as { content?: { text?: string }[] }).content?.[0]?.text ?? ''
-  return NextResponse.json({ text })
+  const data = await res.json() as {
+    content?: { text?: string }[]
+    stop_reason?: string
+    usage?: { input_tokens?: number; output_tokens?: number }
+  }
+  const text = data.content?.[0]?.text ?? ''
+
+  // stop_reason is the difference between "the model wrote prose instead of
+  // JSON" and "the mapping was cut off at the token ceiling" — two failures
+  // that look identical on the client and need opposite fixes. Passing it
+  // through costs nothing and turns a guess into a diagnosis.
+  console.log(`[automap] uid=${uid} stop=${data.stop_reason} out=${data.usage?.output_tokens}`)
+  return NextResponse.json({ text, stopReason: data.stop_reason ?? null })
 }

@@ -100,6 +100,92 @@ export function sectionOfCategory(cat: string): MappingSection | null {
   return null
 }
 
+// ── Installments and standing orders ──
+//
+// extractTransactions already parses "3 מתוך 12" out of the notes column into
+// `installment`, and flags standing orders — and none of it was ever sent. We
+// were meanwhile asking the model to fill an `installments` section with
+// paidCount / totalCount / totalAmount, which it had no data for and therefore
+// had to invent, exactly like the sub-row splits before 2026-08-07.
+//
+// A charge in installments is NOT also a variable expense: the mapping keeps
+// them in separate buckets and the page's monthlyExpense already adds the two.
+// So these transactions leave the expense set (see isInstallment below) — the
+// one rule that keeps every block's numbers reconcilable.
+
+export interface InstallmentLine {
+  name:           string
+  monthlyPayment: number   // the recurring charge
+  paidCount:      number   // highest "current" seen in the uploaded period
+  totalCount:     number
+  totalAmount:    number   // full purchase price, when the file carried it
+}
+
+/** True when a transaction is one leg of an installment plan. */
+export function isInstallment(t: { installment: { current: number; total: number } | null }): boolean {
+  return !!t.installment && t.installment.total > 1
+}
+
+/**
+ * Group installment legs by merchant. The uploaded window shows only some of
+ * the legs, so paidCount is the highest leg number present — that is what the
+ * client has actually paid by the end of the period.
+ */
+export function buildInstallments(
+  txns: {
+    desc: string; amount: number; originalAmount: number | null; isRefund: boolean
+    installment: { current: number; total: number } | null
+  }[],
+): InstallmentLine[] {
+  const map = new Map<string, InstallmentLine>()
+  for (const t of txns) {
+    if (t.isRefund || !isInstallment(t)) continue
+    const key = normalizeForLookup(t.desc) || t.desc.trim()
+    if (!key) continue
+    const line = map.get(key) ?? {
+      name: t.desc.trim() || key, monthlyPayment: 0, paidCount: 0, totalCount: 0, totalAmount: 0,
+    }
+    line.monthlyPayment = Math.max(line.monthlyPayment, t.amount)
+    line.paidCount      = Math.max(line.paidCount, t.installment!.current)
+    line.totalCount     = Math.max(line.totalCount, t.installment!.total)
+    line.totalAmount    = Math.max(line.totalAmount, t.originalAmount ?? 0)
+    map.set(key, line)
+  }
+  return [...map.values()].sort((a, b) => b.monthlyPayment - a.monthlyPayment)
+}
+
+/**
+ * Merchants charging by standing order. The strongest signal we have for
+ * fixed-vs-variable, and until now we kept it to ourselves.
+ */
+export function buildStandingOrders(
+  txns: { desc: string; isStandingOrder: boolean; isRefund: boolean }[],
+): string[] {
+  const seen = new Map<string, string>()
+  for (const t of txns) {
+    if (t.isRefund || !t.isStandingOrder) continue
+    const key = normalizeForLookup(t.desc) || t.desc.trim()
+    if (key && !seen.has(key)) seen.set(key, t.desc.trim() || key)
+  }
+  return [...seen.values()]
+}
+
+export function formatInstallments(lines: InstallmentLine[]): string[] {
+  if (!lines.length) return []
+  const out = ['(כבר הוסרו מבלוק ההוצאות — אל תספור אותם שוב שם)']
+  for (const l of lines) {
+    const total = l.totalAmount > 0 ? `, סכום עסקה מלא ${Math.round(l.totalAmount)}` : ''
+    out.push(`  - ${short(l.name)}: ${Math.round(l.monthlyPayment)} לחודש, תשלום ${l.paidCount} מתוך ${l.totalCount}${total}`)
+  }
+  return out
+}
+
+export function formatStandingOrders(names: string[]): string[] {
+  if (!names.length) return []
+  return [`(חיובים אלה מזוהים כהוראת קבע — סימן חזק שהם קבועים ולא משתנים)`,
+    ...names.map(n => `  - ${short(n)}`)]
+}
+
 // ── Merchant-level breakdown of the parsed transactions ──
 //
 // The prompt below asks the model to split a big variable category into named
@@ -114,6 +200,14 @@ export function sectionOfCategory(cat: string): MappingSection | null {
 // advisor sees.
 
 export interface MerchantLine {
+  /**
+   * Normalized identity — the same key the categorizer groups on. Callers that
+   * need to point back at a merchant's transactions (confirming a one-off
+   * charge as annual, for instance) must use THIS, not `name`: re-normalizing
+   * the display name happens to work today and would break the moment the
+   * display name stops being a raw description.
+   */
+  key:   string
   name:  string   // the merchant as it appeared in the file (first spelling seen)
   sum:   number
   count: number
@@ -170,7 +264,7 @@ export function buildCategoryBreakdown(
 
     if (detailCategories && !detailCategories.has(t.category)) continue
     const merchants = byCat.get(t.category) ?? new Map<string, MerchantLine>()
-    const line = merchants.get(key) ?? { name: t.desc.trim() || key, sum: 0, count: 0 }
+    const line = merchants.get(key) ?? { key, name: t.desc.trim() || key, sum: 0, count: 0 }
     line.sum += signed
     if (!t.isRefund) line.count++
     merchants.set(key, line)
@@ -311,6 +405,9 @@ export function formatCategoryBreakdown(rows: CategoryBreakdown[], months = 1): 
 // ── "כללי המיפוי של הכלכלן של הבית" (v1) — server-owned, tuned over time ──
 export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פיננסי מומחה לשוק הישראלי. תפקידך: לקבל את כל נתוני הלקוח (עסקאות אשראי, תנועות עו"ש, הלוואות, תשלומים, נכסים, חיסכון, וטקסט חופשי) ולבנות **מיפוי חודשי שלם** — חלוקה מסודרת של ההכנסות וההוצאות לסעיפים.
 
+## פורמט התשובה — לפני כל דבר אחר
+**התו הראשון בתשובה שלך חייב להיות \`{\`.** אל תכתוב מילת פתיחה, אל תתאר מה אתה עומד לעשות, ואל תסביר את הניתוח. כל טקסט לפני ה‑JSON גוזל מתקציב הפלט ועלול לקטוע את המיפוי באמצע. הניתוח שלך שייך לתוכן ה‑JSON, לא לפתיח שלפניו.
+
 ## הסעיפים והסיווג
 שייך כל הוצאה לסעיף לפי הקטגוריה:
 - **fixed (קבועות)**: ${list(FIXED_CATEGORIES)}
@@ -341,6 +438,9 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **בלוק ההוצאות** — קטגוריות ובתי עסק. לפני כל קטגוריה מופיע תג בסוגריים מרובעות, למשל \`[קבועות]\` או \`[משתנות]\`. **התג הוא הסעיף שאליו הקטגוריה שייכת. השתמש בו כמו שהוא ואל תחליט לבד** לאיזה סעיף שורה הולכת.
 - **בלוק ההכנסות** — הפקדות שזוהו בעו"ש. זה המקור העיקרי לסעיף income. אם הוא קיים, אל תנחש הכנסות ממקום אחר.
 - **בלוק תשלומי הריכוז** — תשלומים לחברות האשראי. הם **כבר הוסרו** מבלוק ההוצאות, כי הפירוט האמיתי שלהם נמצא שם. הם מוצגים לידיעה בלבד — **אל תוסיף אותם כהוצאה**.
+- **בלוק התשלומים** — עסקאות בתשלומים, עם מספר התשלום מתוך הסך ועם הסכום המלא. זה המקור לסעיף installments. הם **כבר הוסרו** מבלוק ההוצאות — אל תכניס אותם גם ל‑variable או ל‑fixed.
+- **בלוק הוראות הקבע** — בתי עסק שמחייבים בהוראת קבע. השתמש בזה כדי להכריע קבוע מול משתנה. הם **כן** נספרים בבלוק ההוצאות, זה רק סימון.
+- **בלוק ההוצאות השנתיות** — סכומים **שנתיים** שהיועץ אישר. זה המקור לסעיף annual. אל תחלק אותם ב‑12, ואל תוסיף אותם לשום סעיף חודשי. אלה שמסומנים "כבר הוסר" גם לא נמצאים בבלוק ההוצאות.
 
 ## כללי אנטי‑כפילות (קריטי)
 - התעלם מ: העברות בין חשבונות, ומשיכות מזומן ללא פירוט (אלא אם צוין).
@@ -597,11 +697,60 @@ function meta(r: Record<string, unknown>): GenRowMeta {
 const simple = (rows: unknown[]): GenSimpleRow[] =>
   rows.map(obj).map(r => ({ name: str(r.name), amount: num(r.amount), ...meta(r) })).filter(r => r.name || r.amount)
 
+/**
+ * Pull the mapping object out of the model's reply, repairing it when the reply
+ * was cut off mid-JSON.
+ *
+ * Why the repair exists: a run that hits max_tokens returns a JSON object with
+ * no closing brace, and the old `/\{[\s\S]*\}/` match then found nothing at all
+ * — so an answer that was 90% complete was thrown away whole, and the advisor
+ * saw "no valid JSON" with no idea that the real problem was length. (Observed
+ * live 2026-08-07: the model wrote an English preamble, which ate into the
+ * output budget, and the mapping never closed.)
+ *
+ * The repair walks the text tracking string/escape state, remembers the last
+ * position where a nested value CLOSED cleanly, cuts there, and shuts the
+ * remaining open brackets. Everything the model finished is kept; only the
+ * half-written tail is dropped.
+ */
+export function extractJsonObject(text: string): string {
+  const start = text.indexOf('{')
+  if (start === -1) throw new Error('לא התקבל JSON תקין מה‑AI')
+
+  const stack: string[] = []
+  let inString = false, escaped = false
+  let lastSafe = -1              // index of the last cleanly-closed nested value
+  let lastSafeDepth = 0
+
+  for (let i = start; i < text.length; i++) {
+    const c = text[i]
+    if (escaped) { escaped = false; continue }
+    if (c === '\\' && inString) { escaped = true; continue }
+    if (c === '"') { inString = !inString; continue }
+    if (inString) continue
+
+    if (c === '{' || c === '[') stack.push(c)
+    else if (c === '}' || c === ']') {
+      stack.pop()
+      if (stack.length === 0) return text.slice(start, i + 1)   // complete object
+      lastSafe = i
+      lastSafeDepth = stack.length
+    }
+  }
+
+  // Truncated. Salvage everything up to the last value that closed cleanly.
+  if (lastSafe === -1) throw new Error('תשובת ה‑AI נקטעה לפני שהתקבל מיפוי')
+  const head = text.slice(start, lastSafe + 1)
+  const closers: string[] = []
+  const openers = stack.slice(0, lastSafeDepth)
+  for (let i = openers.length - 1; i >= 0; i--) closers.push(openers[i] === '{' ? '}' : ']')
+  return head + closers.join('')
+}
+
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
-  const match = text.match(/\{[\s\S]*\}/)
-  if (!match) throw new Error('לא התקבל JSON תקין מה‑AI')
-  const raw = obj(JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1')))
+  const json = extractJsonObject(text)
+  const raw = obj(JSON.parse(json.replace(/,\s*([}\]])/g, '$1')))
 
   return {
     creditScore:  num(raw.creditScore),

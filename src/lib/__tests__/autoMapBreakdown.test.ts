@@ -23,9 +23,18 @@ describe('buildCategoryBreakdown', () => {
     expect(food.sum).toBe(900)
     expect(food.count).toBe(3)
     expect(food.merchants).toEqual([
-      { name: 'שופרסל דיל', sum: 500, count: 2 },
-      { name: 'רמי לוי',    sum: 400, count: 1 },
+      { key: 'שופרסל דיל', name: 'שופרסל דיל', sum: 500, count: 2 },
+      { key: 'רמי לוי',    name: 'רמי לוי',    sum: 400, count: 1 },
     ])
+  })
+
+  // `key` is the normalized identity other code points back at (confirming a
+  // one-off charge as annual, for one). It must NOT be the raw display name.
+  it('carries a normalized key alongside the raw display name', () => {
+    const rows = buildCategoryBreakdown([tx('הראל ביטוח בע"מ', 3600, 'ביטוח')])
+    expect(rows[0].merchants[0]).toEqual({
+      key: 'הראל ביטוח', name: 'הראל ביטוח בע"מ', sum: 3600, count: 1,
+    })
   })
 
   it('nets refunds into the merchant and the category, and never counts them', () => {
@@ -34,7 +43,7 @@ describe('buildCategoryBreakdown', () => {
       tx('זארה', 200, 'ביגוד', true),
     ])
     expect(rows[0]).toMatchObject({ sum: 300, count: 1 })
-    expect(rows[0].merchants).toEqual([{ name: 'זארה', sum: 300, count: 1 }])
+    expect(rows[0].merchants).toEqual([{ key: 'זארה', name: 'זארה', sum: 300, count: 1 }])
   })
 
   it('keeps the category total equal to the sum of its parts', () => {
@@ -86,7 +95,7 @@ describe('buildCategoryBreakdown', () => {
   it.each(['סניף 5', '- 12'])('keeps a transaction whose desc normalizes to empty: %s', desc => {
     const rows = buildCategoryBreakdown([tx(desc, 80, 'שונות')])
     expect(rows[0].sum).toBe(80)
-    expect(rows[0].merchants).toEqual([{ name: desc, sum: 80, count: 1 }])
+    expect(rows[0].merchants).toEqual([{ key: desc, name: desc, sum: 80, count: 1 }])
   })
 
   it('drops an unattributable row from the total too, so the parts always add up', () => {
@@ -117,7 +126,7 @@ describe('buildCategoryBreakdown', () => {
     ])
     expect(rows[0].sum).toBe(-4300)
     const ikea = rows[0].merchants.find(m => m.name === 'איקאה')!
-    expect(ikea).toEqual({ name: 'איקאה', sum: -4500, count: 0 })
+    expect(ikea).toEqual({ key: 'איקאה', name: 'איקאה', sum: -4500, count: 0 })
   })
 
   it('returns nothing for no transactions', () => {

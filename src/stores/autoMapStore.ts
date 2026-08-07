@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { GeneratedMapping } from '@/lib/autoMap'
+import type { AnnualItem } from '@/lib/automapAnnual'
 
 // A saved AutoMap session. Captures everything needed to reload a past
 // generation in full — context + months + the full editable result — so
@@ -26,10 +27,24 @@ interface AutoMapState {
   result: GeneratedMapping | null // last AI-generated mapping (editable)
   drafts: AutoMapDraft[]          // saved sessions, newest first
 
+  /**
+   * Annual expenses the advisor confirmed — the answer to the hole a 3-month
+   * upload always has. Two sources that never overlap: `checklist` items are
+   * NOT in the uploaded data, `detected` ones ARE (and are therefore dropped
+   * from the monthly breakdown so they aren't counted twice).
+   */
+  annualItems: AnnualItem[]
+  /** One-off charges the advisor said are not annual; never offered again. */
+  dismissedOneOffs: string[]
+
   setContextText: (t: string) => void
   setReportMonths: (n: number) => void
   setResult: (r: GeneratedMapping | null) => void
   updateResult: (patch: Partial<GeneratedMapping>) => void
+  setAnnualItem: (item: AnnualItem) => void
+  removeAnnualItem: (key: string) => void
+  dismissOneOff: (key: string) => void
+  restoreOneOff: (key: string) => void
   reset: () => void
 
   // Drafts — save the current session under a name, restore any saved
@@ -58,12 +73,28 @@ export const useAutoMapStore = create<AutoMapState>()(
       reportMonths: 1,
       result: null,
       drafts: [],
+      annualItems: [],
+      dismissedOneOffs: [],
 
       setContextText:  (contextText) => set({ contextText }),
       setReportMonths: (n) => set({ reportMonths: Math.max(1, Math.min(24, Math.floor(n || 1))) }),
       setResult:       (result) => set({ result }),
       updateResult:    (patch) => set(s => ({ result: s.result ? { ...s.result, ...patch } : s.result })),
-      reset:           () => set({ contextText: '', reportMonths: 1, result: null }),
+
+      // Upsert by key: re-confirming an item updates its amount rather than
+      // adding a second row for the same expense.
+      setAnnualItem: (item) => set(s => ({
+        annualItems: [...s.annualItems.filter(a => a.key !== item.key), item],
+      })),
+      removeAnnualItem: (key) => set(s => ({ annualItems: s.annualItems.filter(a => a.key !== key) })),
+      dismissOneOff:    (key) => set(s => (s.dismissedOneOffs.includes(key)
+        ? s : { dismissedOneOffs: [...s.dismissedOneOffs, key] })),
+      restoreOneOff:    (key) => set(s => ({ dismissedOneOffs: s.dismissedOneOffs.filter(k => k !== key) })),
+
+      reset: () => set({
+        contextText: '', reportMonths: 1, result: null,
+        annualItems: [], dismissedOneOffs: [],
+      }),
 
       saveDraft: (name) => {
         const s = get()
