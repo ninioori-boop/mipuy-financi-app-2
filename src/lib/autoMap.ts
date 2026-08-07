@@ -99,12 +99,31 @@ const MAX_MERCHANT_LINES = 250
 
 export function buildCategoryBreakdown(
   txns: { desc: string; amount: number; category: string; isRefund: boolean }[],
+  /**
+   * Categories that get a merchant list. Everything else contributes to its
+   * category total but is emitted as a single line. Production passes
+   * VAR_CATEGORIES: the prompt says fixed/sub/ins/annual stay one row per
+   * category, and printing merchants for them invited the model to split those
+   * too. Omit to detail every category (tests, future callers).
+   */
+  detailCategories?: Set<string>,
 ): CategoryBreakdown[] {
   // category → merchantKey → line
   const byCat = new Map<string, Map<string, MerchantLine>>()
   const totals = new Map<string, { sum: number; count: number }>()
 
   for (const t of txns) {
+    // Group by the same normalized form the categorizer uses, so the two views
+    // of a merchant never disagree. Fall back to the raw desc when it
+    // normalizes to nothing ("סניף 5" and "- 12" both do).
+    const key = normalizeForLookup(t.desc) || t.desc.trim()
+    // Resolved BEFORE the totals below: a row we cannot attribute to a merchant
+    // must not land in the category total either, or the header would claim an
+    // amount that no printed line accounts for — and the prompt tells the model
+    // the parts must equal the total. Today extractTransactions never yields an
+    // empty desc; this keeps the invariant true for any future producer.
+    if (!key) continue
+
     const signed = t.isRefund ? -t.amount : t.amount
 
     const tot = totals.get(t.category) ?? { sum: 0, count: 0 }
@@ -112,11 +131,7 @@ export function buildCategoryBreakdown(
     if (!t.isRefund) tot.count++
     totals.set(t.category, tot)
 
-    // Group by the same normalized form the categorizer uses, so the two views
-    // of a merchant never disagree. Fall back to the raw desc when it
-    // normalizes to nothing (punctuation-only descriptions do exist).
-    const key = normalizeForLookup(t.desc) || t.desc.trim()
-    if (!key) continue
+    if (detailCategories && !detailCategories.has(t.category)) continue
     const merchants = byCat.get(t.category) ?? new Map<string, MerchantLine>()
     const line = merchants.get(key) ?? { name: t.desc.trim() || key, sum: 0, count: 0 }
     line.sum += signed
@@ -153,6 +168,28 @@ export function buildCategoryBreakdown(
   return out.sort((a, b) => b.sum - a.sum)
 }
 
+/**
+ * How many distinct calendar months the uploaded transactions actually cover.
+ *
+ * The "מספר חודשים" field is a single point of failure: it drives the prompt AND
+ * the validation cross-check, it defaults to 1, and the advisor's habitual
+ * export is 3 months. Get it wrong and the model returns period totals as
+ * monthly figures — a 3× inflated mapping that nothing downstream can detect,
+ * because every number is then self-consistent. This lets the UI check the
+ * advisor's answer against the files.
+ *
+ * Returns 0 when the dates are unusable: extractTransactions emits YYYY-MM-DD
+ * only when the cell parsed as a real Date, otherwise it passes the raw string
+ * through, so anything that isn't ISO is not counted rather than guessed at.
+ */
+export function detectMonthSpan(txns: { date: string }[]): number {
+  const months = new Set<string>()
+  for (const t of txns) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t.date)) months.add(t.date.slice(0, 7))
+  }
+  return months.size
+}
+
 // Merchant descriptions from credit files carry trailing junk (terminal ids,
 // addresses) that adds tokens without adding meaning. Truncating also puts a
 // hard ceiling on the block: MAX_MERCHANT_LINES × ~60 chars ≈ 15KB, comfortably
@@ -160,16 +197,30 @@ export function buildCategoryBreakdown(
 const MAX_MERCHANT_NAME = 40
 const short = (s: string) => (s.length > MAX_MERCHANT_NAME ? s.slice(0, MAX_MERCHANT_NAME - 1) + '…' : s)
 
-/** Renders the breakdown as the Hebrew text block the model receives. */
-export function formatCategoryBreakdown(rows: CategoryBreakdown[]): string[] {
+// Refunds net, so a return with no matching charge in the uploaded period makes
+// a merchant — or a whole category — go negative, with a transaction count of
+// zero. "איקאה: -4500 (0)" is not something a model can reason about, and the
+// prompt's "the parts equal the total" rule then pushes it to book a negative
+// expense. Every such line is labelled instead of left as a bare number.
+const countLabel = (c: number) => (c > 0 ? `${c}` : 'זיכוי בלבד')
+
+/**
+ * Renders the breakdown as the Hebrew text block the model receives.
+ * `months` is stated on the header because every figure here is a PERIOD total
+ * across the uploaded files, while the mapping the model returns is monthly.
+ */
+export function formatCategoryBreakdown(rows: CategoryBreakdown[], months = 1): string[] {
   const lines: string[] = []
+  const span = months > 1 ? `סך הכל על פני ${months} חודשים` : 'סך הכל על פני חודש אחד'
+  lines.push(`(כל הסכומים כאן הם ${span}, אחרי קיזוז זיכויים)`)
   for (const r of rows) {
-    lines.push(`${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)`)
+    const neg = r.sum < 0 ? ' — נטו שלילי: הוחזר יותר ממה שחויב בתקופה' : ''
+    lines.push(`${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)${neg}`)
     for (const m of r.merchants) {
-      lines.push(`  - ${short(m.name)}: ${Math.round(m.sum)} (${m.count})`)
+      lines.push(`  - ${short(m.name)}: ${Math.round(m.sum)} (${countLabel(m.count)})`)
     }
     if (r.other) {
-      lines.push(`  - שאר בתי העסק (${r.other.merchants}): ${Math.round(r.other.sum)} (${r.other.count})`)
+      lines.push(`  - שאר בתי העסק (${r.other.merchants}): ${Math.round(r.other.sum)} (${countLabel(r.other.count)})`)
     }
   }
   return lines
@@ -206,7 +257,8 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 
 ## כללי אנטי‑כפילות (קריטי)
 - שורת "תשלום כרטיס אשראי" / "פירעון אשראי" בעו"ש היא **סיכום** של דוח האשראי — **אל תספור אותה כהוצאה**. ההוצאות האמיתיות הן הפירוט בדוח האשראי.
-- התעלם מ: העברות בין חשבונות, משיכות מזומן ללא פירוט (אלא אם צוין), והחזרים (זיכויים).
+- התעלם מ: העברות בין חשבונות, ומשיכות מזומן ללא פירוט (אלא אם צוין).
+- **זיכויים כבר מקוזזים בנתונים שקיבלת** — אל תחסיר אותם שוב. שורה עם סכום שלילי או עם "זיכוי בלבד" פירושה שבתקופה הזו הוחזר יותר ממה שחויב. אל תיצור שורת הוצאה שלילית: החזר 0 לאותה שורה, וציין את זה ב‑assessment.
 - קטגוריות שאינן הוצאה (${list(SKIP_CATEGORIES)}) — אל תכניס כהוצאה; הכנסות לך ל‑income.
 
 ## פירוט הוצאות משתנות (variable)
@@ -219,12 +271,12 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - במקום "תחביבים 600" → אם ניתן, לזהות את הסוג: "ספרים 200", "מנוי לקולנוע 50", "חוגים 350".
 
 חוקי שבירה:
+- **שבור אך ורק קטגוריות של variable.** ל‑fixed/sub/ins/annual החזר תמיד שורה אחת לקטגוריה, גם אם במקרה קיבלת עבורן פירוט (חיובים מובהקים).
 - **בסס את השבירה אך ורק על רשימת בתי העסק שקיבלת תחת אותה קטגוריה.** מתחת לכל קטגוריה מופיעות שורות "- שם בית עסק: סכום (מספר עסקאות)" — אלה הנתונים האמיתיים. קבץ אותן לתת‑סוגים הגיוניים (למשל שופרסל + רמי לוי + ויקטורי → "סופרמרקטים") וסכם את הסכומים שלהן.
 - **אם לקטגוריה לא מופיעה רשימת בתי עסק — אל תשבור אותה.** החזר שורה אחת ברמת הקטגוריה. אסור להמציא חלוקה שאין לה כיסוי בנתונים, גם אם הסכומים מסתכמים נכון.
 - השורה "שאר בתי העסק (N)" מייצגת זנב של בתי עסק קטנים שלא פורטו. שים אותה בשורה כללית של הקטגוריה, אל תנחש מה יש בתוכה.
 - שייך כל שורה לאותה קטגוריה ראשית (השם בעמודת ה‑name יכול להיות תיאורי, אבל הסיווג נשאר משתנה).
-- שמור על סך הקטגוריה: סכום השורות המפורטות של "מזון לבית" שווה לסכום המקורי של "מזון לבית".
-- ההפרדה רלוונטית בעיקר ל‑variable. הסעיפים fixed/sub/ins/annual נשארים שורה אחת לקטגוריה (חיובים מובהקים).
+- **שמור על היחס, לא על המספר.** הסכומים ברשימה הם סך התקופה. סכום השורות המפורטות של "מזון לבית" **חלקי מספר החודשים** הוא הסכום החודשי שאתה מחזיר. אם קיבלת "מזון לבית: 7500" על פני 3 חודשים — השורות שתחזיר חייבות להסתכם ל‑2500, לא ל‑7500.
 
 ## אמינות ומקור (confidence + source) — שדות חובה בכל שורה
 לכל שורה הוסף שני שדות אופציונליים שעוזרים ליועץ לדעת איפה לבדוק לעומק:
@@ -283,6 +335,14 @@ export interface ValidationIssue {
 export function validateMapping(
   r:    GeneratedMapping,
   txns: { amount: number; category: string; isRefund: boolean }[] = [],
+  /**
+   * How many months the uploaded files cover. The AI returns MONTHLY figures
+   * while `txns` are the raw period; without this the cross-check compared
+   * 2,500/mo against a 3-month sum of 7,500 and warned "פער 67%" on a correct
+   * answer — while a model that wrongly echoed 7,500 passed silently. That is
+   * the check inverted: it punished the right result and rewarded the wrong one.
+   */
+  months = 1,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = []
 
@@ -383,17 +443,31 @@ export function validateMapping(
       if (!row.category) continue
       aiByCat.set(row.category, (aiByCat.get(row.category) ?? 0) + row.amount)
     }
-    for (const [cat, txnSum] of txnByCat) {
+    const span = Math.max(1, months)
+    for (const [cat, periodSum] of txnByCat) {
       if (!VAR_CATEGORIES.has(cat)) continue   // only check variable txns
-      const aiSum = aiByCat.get(cat) ?? 0
-      if (aiSum === 0) continue                 // AI didn't cover it; not a "diff" issue
+      const txnSum = periodSum / span          // period → monthly, to match the AI
+      const aiSum  = aiByCat.get(cat) ?? 0
+      // A category the AI dropped entirely is the exact failure this check
+      // exists to catch, and it used to be the one case skipped. Only flag it
+      // when there is real money behind it (₪50/mo is the same floor
+      // suggestBudgets uses for "worth mentioning").
+      if (aiSum === 0) {
+        if (txnSum >= 50) {
+          issues.push({
+            severity: 'warning', section: 'variable',
+            message: `משתנות: "${cat}" — ${Math.round(txnSum)}₪ לחודש בעסקאות, אבל אין שורה מתאימה בתוצאה`,
+          })
+        }
+        continue
+      }
       const diff = Math.abs(aiSum - txnSum)
       const tol  = Math.max(50, txnSum * 0.10)
       if (diff > tol) {
         const pct = txnSum > 0 ? Math.round((diff / txnSum) * 100) : 0
         issues.push({
           severity: 'warning', section: 'variable',
-          message: `משתנות: "${cat}" — AI חישב ${Math.round(aiSum)}₪, סכום העסקאות בפועל ${Math.round(txnSum)}₪ (פער ${pct}%)`,
+          message: `משתנות: "${cat}" — AI חישב ${Math.round(aiSum)}₪ לחודש, סכום העסקאות בפועל ${Math.round(txnSum)}₪ לחודש (פער ${pct}%)`,
         })
       }
     }

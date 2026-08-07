@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
@@ -14,9 +14,10 @@ import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
 import {
   parseGeneratedMapping, validateMapping,
-  buildCategoryBreakdown, formatCategoryBreakdown,
+  buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   type GeneratedMapping,
 } from '@/lib/autoMap'
+import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
 import type { Transaction } from '@/types/transaction'
@@ -116,6 +117,13 @@ export default function AutoMapPage() {
   //   the original copyToMapping did. Useful for fresh clients.
   const [copyMode, setCopyMode] = useState<'merge' | 'replace'>('merge')
 
+  // Replace mode wipes every section of a Firestore-synced live mapping, and
+  // nothing used to reset it: pick it once for a fresh client, load a draft for
+  // an existing one, and the copy panel came up pre-armed to destroy their data.
+  // Any new result — generated, loaded from a draft, or cleared — returns to the
+  // safe default.
+  useEffect(() => { setCopyMode('merge') }, [result])
+
   // Route each file by type: Excel → parsed transactions (cheap/local);
   // PDF + images → base64 blocks the AI reads directly.
   // parseStatus is updated per-file so the user sees ✓/⏳/✗ next to each one
@@ -210,8 +218,18 @@ export default function AutoMapPage() {
   // category (2026-08-06, same rule as the credit/import tabs) — a refunded
   // charge is not spending, and the AI prompt must see the same numbers the
   // tabs show. Sending the merchants (2026-08-07) is what lets the model break
-  // a category into real sub-rows instead of guessing the split.
-  const breakdown = buildCategoryBreakdown(txns)
+  // a category into real sub-rows instead of guessing the split; only VARIABLE
+  // categories get a merchant list, because the prompt keeps fixed/sub/ins to
+  // one row each and listing merchants there invited it to split those too.
+  //
+  // Memoized: this runs normalizeForLookup (~12 regex passes) per transaction,
+  // ~9.8ms on a routine 3,000-txn upload vs 0.1ms for the old totals-only pass.
+  // Unmemoized it re-ran on every keystroke in the context textarea, which is
+  // store-backed — 9.8ms per character, on exactly the biggest client files.
+  const breakdown = useMemo(() => buildCategoryBreakdown(txns, VAR_CATEGORIES), [txns])
+
+  // Cross-check for the months field — see the warning it feeds, below.
+  const detectedMonths = useMemo(() => detectMonthSpan(txns), [txns])
 
   const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
   const tooBig    = docsBytes > 3_800_000
@@ -234,7 +252,7 @@ export default function AutoMapPage() {
     lines.push('')
     if (breakdown.length) {
       lines.push('== עסקאות לפי קטגוריה ובית עסק (מתוך הקבצים שהועלו) ==')
-      lines.push(...formatCategoryBreakdown(breakdown))
+      lines.push(...formatCategoryBreakdown(breakdown, reportMonths))
       lines.push('')
     }
     if (contextText.trim()) {
@@ -369,9 +387,21 @@ export default function AutoMapPage() {
 
   // Filter result rows to those whose name doesn't already appear in the
   // existing section (matched by normName). Used in 'merge' mode below.
+  // `seen` grows as rows are accepted, so a result that contains the same name
+  // twice — likely now that sub-row names come from merchant groupings, e.g.
+  // "משלוחים" under both אוכל בחוץ and מזון לבית — appends it once, not twice.
+  // Without this the duplicate became permanent: on the next run both copies
+  // dedup against the single existing name and neither is ever cleaned up.
   function newRowsOnly<T extends { name: string }>(newRows: T[], existing: { name: string }[]): T[] {
     const seen = new Set(existing.map(r => normName(r.name)))
-    return newRows.filter(r => !seen.has(normName(r.name)))
+    const out: T[] = []
+    for (const r of newRows) {
+      const k = normName(r.name)
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(r)
+    }
+    return out
   }
 
   // Actual copy. Wrapped in a confirm step (the preview panel) so the user
@@ -451,11 +481,43 @@ export default function AutoMapPage() {
     ]
   }
 
+  // Merge mode deliberately never overwrites an existing row's amount, so a
+  // manual edit is never clobbered. The cost is that re-running automap on an
+  // existing client to REFRESH the numbers looks like it worked ("מוזג למיפוי")
+  // while silently changing nothing. Count those rows so the preview can say so
+  // out loud instead of leaving the advisor to discover it later.
+  function staleAmountCount(): number {
+    if (!result) return 0
+    const m = useMappingStore.getState()
+    const sections: [{ name: string; amount: number }[], { name: string; amount: number }[]][] = [
+      [result.income,   m.income],
+      [result.fixed,    m.fixed],
+      [result.variable, m.variable],
+      [result.sub,      m.sub],
+      [result.ins,      m.ins],
+    ]
+    let n = 0
+    for (const [rows, existing] of sections) {
+      const byName = new Map(existing.map(e => [normName(e.name), e.amount]))
+      for (const r of rows) {
+        const cur = byName.get(normName(r.name))
+        if (cur !== undefined && Math.round(cur) !== Math.round(r.amount)) n++
+      }
+    }
+    return n
+  }
+
   // Local sanity checks on the AI result — runs free, instantly, on every
   // edit. Surfaces zeroed-out rows, paid>total installments, AI sums that
   // disagree with the underlying txns, etc. Recomputed when result or
   // txns change.
-  const issues = result ? validateMapping(result, txns) : []
+  // reportMonths is load-bearing here: txns are the raw period, the AI's rows
+  // are monthly. Passing it is what keeps the check from firing on correct
+  // multi-month results (and staying silent on inflated ones).
+  const issues = useMemo(
+    () => (result ? validateMapping(result, txns, reportMonths) : []),
+    [result, txns, reportMonths],
+  )
 
   const monthlyExpense = result
     ? [...result.fixed, ...result.variable, ...result.sub, ...result.ins].reduce((s, r) => s + r.amount, 0)
@@ -645,11 +707,33 @@ export default function AutoMapPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-muted-txt">מספר חודשים שהנתונים מכסים:</span>
-          <input type="number" min={1} max={24} value={reportMonths}
-            onChange={e => setReportMonths(parseInt(e.target.value) || 1)}
-            style={{ direction: 'ltr' }} className={`${inputCls} w-16 text-center`} />
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs text-muted-txt">מספר חודשים שהנתונים מכסים:</span>
+            <input type="number" min={1} max={24} value={reportMonths}
+              onChange={e => setReportMonths(parseInt(e.target.value) || 1)}
+              style={{ direction: 'ltr' }} className={`${inputCls} w-16 text-center`} />
+          </div>
+
+          {/* This field drives BOTH the prompt and the validation cross-check,
+              and it defaults to 1 while the usual export is 3 months. Getting it
+              wrong yields a silently 3x-inflated mapping that nothing downstream
+              can catch, because every number is then self-consistent. So check
+              the advisor's answer against the dates in the files. */}
+          {detectedMonths > 0 && detectedMonths !== reportMonths && (
+            <div className="flex items-center gap-2 flex-wrap rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-xs text-gold">
+              <span>
+                ⚠️ בקבצים שהעלית יש עסקאות מ‑{detectedMonths} חודשים שונים, ורשום {reportMonths}.
+                מספר שגוי כאן מכפיל או מחלק את כל המיפוי.
+              </span>
+              <button
+                onClick={() => setReportMonths(detectedMonths)}
+                className="shrink-0 rounded-md border border-gold/50 bg-gold/15 px-2 py-1 font-semibold hover:bg-gold/25 transition-colors"
+              >
+                עדכן ל‑{detectedMonths}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="space-y-1">
@@ -744,6 +828,15 @@ export default function AutoMapPage() {
                       ? 'מיזוג: שורות קיימות במיפוי נשארות. רק שורות חדשות (לפי שם) יתווספו. עריכות ידניות לא ידרסו.'
                       : 'החלפה: כל המיפוי הנוכחי יימחק ויוחלף בתוצאת ה‑AI. עריכות ידניות יאבדו.'}
                   </div>
+
+                  {/* Merge keeps existing amounts by design. Say so when it
+                      actually costs the advisor something, so a "refresh the
+                      numbers" run can't look like it worked when it didn't. */}
+                  {copyMode === 'merge' && staleAmountCount() > 0 && (
+                    <div className="rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-xs text-gold">
+                      ⚠️ {staleAmountCount()} שורות קיימות הגיעו מה‑AI עם סכום שונה. מיזוג לא מעדכן סכומים של שורות קיימות, אז הן יישארו כפי שהן. לעדכון סכומים ערוך אותן במיפוי, או בחר החלפה מלאה.
+                    </div>
+                  )}
                   <div className="rounded-lg overflow-hidden border border-line">
                     <table className="w-full text-xs">
                       <thead className="bg-surface2 border-b border-line">
