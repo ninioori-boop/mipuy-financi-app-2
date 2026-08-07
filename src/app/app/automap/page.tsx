@@ -12,7 +12,11 @@ import { extractTransactions } from '@/lib/parsing'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useAutoMapStore } from '@/stores/autoMapStore'
-import { parseGeneratedMapping, validateMapping, type GeneratedMapping } from '@/lib/autoMap'
+import {
+  parseGeneratedMapping, validateMapping,
+  buildCategoryBreakdown, formatCategoryBreakdown,
+  type GeneratedMapping,
+} from '@/lib/autoMap'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
 import type { Transaction } from '@/types/transaction'
@@ -202,19 +206,12 @@ export default function AutoMapPage() {
     return () => clearInterval(id)
   }, [isGenerating])
 
-  // Category totals from the parsed transactions. Refunds NET their category
-  // (2026-08-06, same rule as the credit/import tabs) — a refunded charge is
-  // not spending, and the AI prompt must see the same numbers the tabs show.
-  const catTotals = (() => {
-    const map = new Map<string, { sum: number; count: number }>()
-    for (const t of txns) {
-      const e = map.get(t.category) ?? { sum: 0, count: 0 }
-      e.sum += t.isRefund ? -t.amount : t.amount
-      if (!t.isRefund) e.count++
-      map.set(t.category, e)
-    }
-    return [...map.entries()].sort((a, b) => b[1].sum - a[1].sum)
-  })()
+  // Per-category totals AND the merchants inside each one. Refunds NET their
+  // category (2026-08-06, same rule as the credit/import tabs) — a refunded
+  // charge is not spending, and the AI prompt must see the same numbers the
+  // tabs show. Sending the merchants (2026-08-07) is what lets the model break
+  // a category into real sub-rows instead of guessing the split.
+  const breakdown = buildCategoryBreakdown(txns)
 
   const docsBytes = docs.reduce((s, d) => s + d.data.length, 0)
   const tooBig    = docsBytes > 3_800_000
@@ -235,11 +232,9 @@ export default function AutoMapPage() {
     const lines: string[] = []
     lines.push(`מספר החודשים שהנתונים מכסים: ${reportMonths}`)
     lines.push('')
-    if (catTotals.length) {
-      lines.push('== סיכום עסקאות לפי קטגוריה (מתוך הקבצים שהועלו) ==')
-      for (const [cat, { sum, count }] of catTotals) {
-        lines.push(`${cat}: ${Math.round(sum)} ש"ח (${count} עסקאות)`)
-      }
+    if (breakdown.length) {
+      lines.push('== עסקאות לפי קטגוריה ובית עסק (מתוך הקבצים שהועלו) ==')
+      lines.push(...formatCategoryBreakdown(breakdown))
       lines.push('')
     }
     if (contextText.trim()) {
@@ -598,7 +593,7 @@ export default function AutoMapPage() {
 
         {fileNames.length > 0 && (
           <div className="text-xs text-muted-txt flex items-center gap-2 flex-wrap">
-            <span>📊 {fileNames.join(', ')} · {txns.length} עסקאות · {catTotals.length} קטגוריות</span>
+            <span>📊 {fileNames.join(', ')} · {txns.length} עסקאות · {breakdown.length} קטגוריות</span>
             <button onClick={() => { setTxns([]); setFileNames([]) }}
               className="me-auto text-xs px-2 py-0.5 rounded border border-line hover:text-expense hover:border-expense/40 transition-colors">נקה</button>
           </div>

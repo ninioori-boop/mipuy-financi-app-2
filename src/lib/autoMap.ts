@@ -9,6 +9,7 @@ import {
   INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES,
 } from '@/lib/constants'
 import { BRAND } from '@/lib/brand'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 // Optional per-row meta. confidence quantifies the AI's certainty;
 // source is a short free-text label of where the row came from
@@ -62,6 +63,118 @@ export interface GeneratedMapping {
 
 const list = (s: Set<string>) => [...s].join(', ')
 
+// ── Merchant-level breakdown of the parsed transactions ──
+//
+// The prompt below asks the model to split a big variable category into named
+// sub-rows ("מזון לבית 2500" → "סופרמרקטים 1800, מאפיות 300"). Until 2026-08-07
+// we sent it ONLY per-category totals, so it had no merchant data to split on
+// and had to invent the division — undetectably, since the parts always summed
+// back to the right total. This builds the missing input: within each category,
+// the actual merchants and what they cost.
+//
+// Refunds NET and don't count, exactly as the credit/import tabs and the page's
+// own catTotals do, so every number the model sees matches every number the
+// advisor sees.
+
+export interface MerchantLine {
+  name:  string   // the merchant as it appeared in the file (first spelling seen)
+  sum:   number
+  count: number
+}
+export interface CategoryBreakdown {
+  category:  string
+  sum:       number
+  count:     number
+  merchants: MerchantLine[]
+  /** Merchants past the per-category cap, folded into one line. null if none. */
+  other:     { merchants: number; sum: number; count: number } | null
+}
+
+// Per-category merchant cap, tried in order. A long tail of one-off merchants
+// adds tokens without adding signal, and the whole message must stay under the
+// route's MAX_MESSAGE_LEN (40,000). We step the cap down until the total number
+// of merchant lines fits MAX_MERCHANT_LINES.
+const MERCHANT_CAPS      = [15, 10, 6, 3]
+const MAX_MERCHANT_LINES = 250
+
+export function buildCategoryBreakdown(
+  txns: { desc: string; amount: number; category: string; isRefund: boolean }[],
+): CategoryBreakdown[] {
+  // category → merchantKey → line
+  const byCat = new Map<string, Map<string, MerchantLine>>()
+  const totals = new Map<string, { sum: number; count: number }>()
+
+  for (const t of txns) {
+    const signed = t.isRefund ? -t.amount : t.amount
+
+    const tot = totals.get(t.category) ?? { sum: 0, count: 0 }
+    tot.sum += signed
+    if (!t.isRefund) tot.count++
+    totals.set(t.category, tot)
+
+    // Group by the same normalized form the categorizer uses, so the two views
+    // of a merchant never disagree. Fall back to the raw desc when it
+    // normalizes to nothing (punctuation-only descriptions do exist).
+    const key = normalizeForLookup(t.desc) || t.desc.trim()
+    if (!key) continue
+    const merchants = byCat.get(t.category) ?? new Map<string, MerchantLine>()
+    const line = merchants.get(key) ?? { name: t.desc.trim() || key, sum: 0, count: 0 }
+    line.sum += signed
+    if (!t.isRefund) line.count++
+    merchants.set(key, line)
+    byCat.set(t.category, merchants)
+  }
+
+  // Pick the largest cap whose total line count fits the budget.
+  const sizes = [...byCat.values()].map(m => m.size)
+  const cap =
+    MERCHANT_CAPS.find(c => sizes.reduce((s, n) => s + Math.min(n, c), 0) <= MAX_MERCHANT_LINES)
+    ?? MERCHANT_CAPS[MERCHANT_CAPS.length - 1]
+
+  const out: CategoryBreakdown[] = []
+  for (const [category, tot] of totals) {
+    const all = [...(byCat.get(category)?.values() ?? [])].sort((a, b) => b.sum - a.sum)
+    const kept = all.slice(0, cap)
+    const rest = all.slice(cap)
+    out.push({
+      category,
+      sum:   tot.sum,
+      count: tot.count,
+      merchants: kept,
+      other: rest.length
+        ? {
+            merchants: rest.length,
+            sum:   rest.reduce((s, m) => s + m.sum, 0),
+            count: rest.reduce((s, m) => s + m.count, 0),
+          }
+        : null,
+    })
+  }
+  return out.sort((a, b) => b.sum - a.sum)
+}
+
+// Merchant descriptions from credit files carry trailing junk (terminal ids,
+// addresses) that adds tokens without adding meaning. Truncating also puts a
+// hard ceiling on the block: MAX_MERCHANT_LINES × ~60 chars ≈ 15KB, comfortably
+// inside the route's 40,000-char MAX_MESSAGE_LEN even with a long advisor note.
+const MAX_MERCHANT_NAME = 40
+const short = (s: string) => (s.length > MAX_MERCHANT_NAME ? s.slice(0, MAX_MERCHANT_NAME - 1) + '…' : s)
+
+/** Renders the breakdown as the Hebrew text block the model receives. */
+export function formatCategoryBreakdown(rows: CategoryBreakdown[]): string[] {
+  const lines: string[] = []
+  for (const r of rows) {
+    lines.push(`${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)`)
+    for (const m of r.merchants) {
+      lines.push(`  - ${short(m.name)}: ${Math.round(m.sum)} (${m.count})`)
+    }
+    if (r.other) {
+      lines.push(`  - שאר בתי העסק (${r.other.merchants}): ${Math.round(r.other.sum)} (${r.other.count})`)
+    }
+  }
+  return lines
+}
+
 // ── "כללי המיפוי של הכלכלן של הבית" (v1) — server-owned, tuned over time ──
 export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פיננסי מומחה לשוק הישראלי. תפקידך: לקבל את כל נתוני הלקוח (עסקאות אשראי, תנועות עו"ש, הלוואות, תשלומים, נכסים, חיסכון, וטקסט חופשי) ולבנות **מיפוי חודשי שלם** — חלוקה מסודרת של ההכנסות וההוצאות לסעיפים.
 
@@ -106,9 +219,11 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - במקום "תחביבים 600" → אם ניתן, לזהות את הסוג: "ספרים 200", "מנוי לקולנוע 50", "חוגים 350".
 
 חוקי שבירה:
+- **בסס את השבירה אך ורק על רשימת בתי העסק שקיבלת תחת אותה קטגוריה.** מתחת לכל קטגוריה מופיעות שורות "- שם בית עסק: סכום (מספר עסקאות)" — אלה הנתונים האמיתיים. קבץ אותן לתת‑סוגים הגיוניים (למשל שופרסל + רמי לוי + ויקטורי → "סופרמרקטים") וסכם את הסכומים שלהן.
+- **אם לקטגוריה לא מופיעה רשימת בתי עסק — אל תשבור אותה.** החזר שורה אחת ברמת הקטגוריה. אסור להמציא חלוקה שאין לה כיסוי בנתונים, גם אם הסכומים מסתכמים נכון.
+- השורה "שאר בתי העסק (N)" מייצגת זנב של בתי עסק קטנים שלא פורטו. שים אותה בשורה כללית של הקטגוריה, אל תנחש מה יש בתוכה.
 - שייך כל שורה לאותה קטגוריה ראשית (השם בעמודת ה‑name יכול להיות תיאורי, אבל הסיווג נשאר משתנה).
 - שמור על סך הקטגוריה: סכום השורות המפורטות של "מזון לבית" שווה לסכום המקורי של "מזון לבית".
-- אם אין מספיק נתונים להפרדה אמינה — שורה אחת ברמת הקטגוריה זה בסדר. אל תמציא תת‑סוגים.
 - ההפרדה רלוונטית בעיקר ל‑variable. הסעיפים fixed/sub/ins/annual נשארים שורה אחת לקטגוריה (חיובים מובהקים).
 
 ## אמינות ומקור (confidence + source) — שדות חובה בכל שורה
