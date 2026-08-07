@@ -1598,6 +1598,18 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   ["isracard", "עמלות בנק ואשראי"],
   ["max", "עמלות בנק ואשראי"],
   ["מקס", "עמלות בנק ואשראי"],
+  // Real businesses whose names contain an issuer's. Matching is by substring
+  // with the LONGEST key winning, so each of these must out-length "max"/"מקס"
+  // above — otherwise the generic card-fee rule swallows them. Found live
+  // 2026-08-07: a client's four purchases at מקס סטוק arrived from the phone as
+  // "MAX 10 #and-…" (Latin, so the Hebrew "מקס סטוק" key never matched) and were
+  // filed as bank fees, distorting their budget and category picture.
+  ["max 10", "ריהוט והבית"],
+  ["מקס 10", "ריהוט והבית"],
+  ["מיני מקס", "ריהוט והבית"],
+  ["mini max", "ריהוט והבית"],
+  ["ampi max", "אוכל בחוץ ובילויים"],   // אמפי — the concert venue
+  ["אמפי מקס", "אוכל בחוץ ובילויים"],
   ["amex", "עמלות בנק ואשראי"],
   ["אמריקן אקספרס", "עמלות בנק ואשראי"],
   ["דיינרס", "עמלות בנק ואשראי"],
