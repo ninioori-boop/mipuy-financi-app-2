@@ -80,6 +80,42 @@ describe('store reset coverage', () => {
     }
   })
 
+  // The store-level check above is not enough: autoMapStore was already listed
+  // as session-scoped and still leaked, because two FIELDS added on 2026-08-07
+  // (annualItems, dismissedOneOffs) were never added to the setState that
+  // clears it. They carry the client's own merchant names and amounts, so they
+  // survived an identity switch and would have been sent to the AI as the next
+  // client's context. Field-level, so the next field added can't repeat it.
+  it('resetSessionStores clears every client-data field of the lab store', () => {
+    const body = DATA_SYNC.slice(DATA_SYNC.indexOf('export function resetSessionStores'))
+    const storeSrc = readFileSync(join(STORES_DIR, 'autoMapStore.ts'), 'utf8')
+
+    // Deliberately preserved, each for a stated reason in dataSync.ts.
+    const PRESERVED = ['drafts']
+
+    // State fields = the properties of the state interface (name: type), minus
+    // the actions (name: (…) => …).
+    const iface = storeSrc.slice(
+      storeSrc.indexOf('interface AutoMapState'),
+      storeSrc.indexOf('const mkId'),
+    )
+    // Split on the value, not a lookahead: `\s*(?!\()` backtracks to zero-width
+    // and then happily passes on `reset: () => void`, so every action leaked in.
+    const fields = [...iface.matchAll(/^ {2}(\w+):(.*)$/gm)]
+      .filter(m => !/^\s*\(/.test(m[2]))          // drop actions — `name: (args) => …`
+      .map(m => m[1])
+
+    expect(fields.length, 'could not read AutoMapState fields — did the store move?').toBeGreaterThan(3)
+
+    const missing = fields.filter(f => !PRESERVED.includes(f) && !new RegExp(`\\b${f}\\s*:`).test(body))
+    expect(
+      missing,
+      `autoMapStore field(s) not cleared on identity change: ${missing.join(', ')}.\n` +
+      `Add them to the useAutoMapStore.setState({...}) inside resetSessionStores() in src/lib/dataSync.ts,\n` +
+      `or add them to PRESERVED here with the reason they may outlive one person's session.`,
+    ).toEqual([])
+  })
+
   it('resetSessionStores is NOT called from applyRemote — that would wipe work mid-session', () => {
     // applyRemote runs on every live-sync event from the other side, within ONE
     // identity. Clearing the bank tab there deletes a statement the user is

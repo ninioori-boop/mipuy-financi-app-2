@@ -567,10 +567,19 @@ export function resetSessionStores(opts?: { purgeArchive?: boolean }): void {
   // confirmation in the UI), it is the advisor's OWN work, and localStorage is
   // its only copy — it is in neither the snapshot nor the cloud backup. Wiping it
   // on every sign-out and every "view as client" would be silent, permanent data
-  // loss on the most routine click in the app. contextText + result are what
-  // actually carried one person's financials onto the next person's screen and
-  // into "העתק למיפוי", so clearing those closes the leak.
-  useAutoMapStore.setState({ contextText: '', reportMonths: 1, result: null })
+  // loss on the most routine click in the app. Everything else here is one
+  // person's financials, which is exactly what carried onto the next person's
+  // screen and into "העתק למיפוי".
+  //
+  // ⚠️ Every field added to the live lab session must be listed here. annualItems
+  // and dismissedOneOffs were added 2026-08-07 and initially were not: confirmed
+  // annual expenses and dismissed merchant keys both carry the client's own
+  // merchant names and amounts, so they survived an identity switch and would
+  // have been sent to the AI as the NEXT client's context.
+  useAutoMapStore.setState({
+    contextText: '', reportMonths: 1, result: null,
+    annualItems: [], dismissedOneOffs: [],
+  })
 
   // Account deletion is the one boundary that must leave nothing behind at all —
   // that flow's stated contract. Here the archive goes too.
