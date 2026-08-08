@@ -711,8 +711,13 @@ export default function AutoMapPage() {
   // Block render for anyone who isn't the advisor (guard above handles the redirect).
   if (!isAdvisor) return null
 
+  // max-w-6xl, not 4xl: the result renders as two columns of mapping panels, and
+  // each row is name + category picker + source chip + drill + amount + delete.
+  // At 4xl each column was ~430px, narrower than the row's own minimum — the
+  // chips added 2026-08-07 pushed it past the edge and the content spilled
+  // outside the card border. ~576px per column fits.
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20 sm:pb-0">
+    <div className="max-w-6xl mx-auto space-y-6 pb-20 sm:pb-0">
 
       {/* Header */}
       <div className="rounded-xl border border-gold/40 bg-gold/5 p-6">

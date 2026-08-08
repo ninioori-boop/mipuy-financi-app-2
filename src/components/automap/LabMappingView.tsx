@@ -199,15 +199,24 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     const i = idxOf(row.id)
     const r = result[key][i]
     if (!r) return null
+    // SectionPanel's row is a non-wrapping flex: name (flex-1) · rowExtra ·
+    // amount group (shrink-0) · delete. Anything here marked shrink-0 cannot
+    // give way, so when the row exceeds the card it spills outside the border
+    // instead of compressing — which is exactly what these two chips did.
+    // `min-w-0` + capped widths let both truncate; the source chip, being
+    // informational rather than actionable, gives up its space first.
     return (
-      <span className="flex items-center gap-1 shrink-0">
+      <span className="flex items-center gap-1 min-w-0">
         <CategoryPicker
           value={r.category ?? ''}
           onChange={cat => setCategory(key, i, cat)}
           variant="chip"
           placeholder="קטגוריה"
+          className="max-w-[112px]"
         />
-        <RowMetaChip confidence={r.confidence} source={r.source} />
+        <span className="hidden sm:flex min-w-0">
+          <RowMetaChip confidence={r.confidence} source={r.source} />
+        </span>
       </span>
     )
   }
@@ -332,7 +341,19 @@ export function LabMappingView({ result, txns, onChange }: Props) {
         onDelete={id => delRow('bankAccounts', idxOf(id))}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* One column, not two.
+          SectionPanel's row is name + rowExtra + drill + amount + delete on a
+          single non-wrapping line, and the lab adds two more chips to it (the
+          category picker and the source). The name <input> will not shrink below
+          its intrinsic ~177px — that would need min-w-0 on SectionPanel, which
+          the real mapping tab shares — so the row needs roughly 620px. A
+          two-column layout gave it ~530px, and the overflow spilled outside the
+          card border: visibly crooked, cut-off rows.
+          Narrowing the chips instead would have made them unreadable, and they
+          are the point: the category is editable and the source is how the
+          advisor checks a number. Full width costs vertical scrolling on a
+          screen that is reviewed once per client. */}
+      <div className="grid grid-cols-1 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}
         <SectionPanel
@@ -513,6 +534,7 @@ export function LabMappingView({ result, txns, onChange }: Props) {
                             onChange={cat => setCategory('variable', r._idx, cat)}
                             variant="chip"
                             placeholder="קטגוריה"
+                            className="max-w-[112px]"
                           />
                           <RowMetaChip confidence={r.confidence} source={r.source} />
                           <input type="number" value={r.amount || ''} onChange={e => editVariable(r._idx, 'amount', e.target.value)} style={{ direction: 'ltr' }} className={`${inputCls} w-28 text-left tabular-nums`} placeholder="₪" />
