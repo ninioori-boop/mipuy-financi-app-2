@@ -5,6 +5,7 @@ import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { ALL_CATEGORIES } from '@/lib/constants'
 import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
+import { isAccountDeleted } from '@/lib/deletionTombstone'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
 export const runtime = 'nodejs'
@@ -51,6 +52,13 @@ export async function POST(req: NextRequest) {
     email = result.email ?? null
   } catch {
     return NextResponse.json({ error: 'פג תוקף הסשן — התחבר מחדש' }, { status: 401 })
+  }
+
+  // An ID token outlives account deletion by up to an hour — the same check
+  // the save/transaction/learn routes already make. Denied BEFORE any AI
+  // spend, and before the deleted uid can re-create a rate-limit counter.
+  if (await isAccountDeleted(uid)) {
+    return NextResponse.json({ error: 'account deleted' }, { status: 410 })
   }
 
   // App Check (gated): ensures the request comes from the real app, not a script.
