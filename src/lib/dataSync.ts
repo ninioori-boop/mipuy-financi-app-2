@@ -36,6 +36,7 @@ import { useRecurringStore, type RecurringRule } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore, type DismissedSub } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
 import { useBankStore } from '@/stores/bankStore'
+import { useImportStore } from '@/stores/importStore'
 import { useAutoMapStore, AUTOMAP_STORAGE_KEY } from '@/stores/autoMapStore'
 import type { Transaction } from '@/types/transaction'
 
@@ -85,6 +86,21 @@ export interface Snapshot {
     reportMonths:      number
     transactions:      Transaction[]    // persisted so the mapping breakdown survives refresh
     uploadedFileNames: string[]         // file chips shown above the credit table — kept in sync with `transactions`
+  }
+  // The import tab's analysis (2026-08-09) — persisted for the same reason as
+  // credit: re-running the upload + AI on every visit was the complaint.
+  // OWN arrays only — never a reference shared with creditStore (CLAUDE.md).
+  importTab: {
+    transactions:      Transaction[]
+    uploadedFileNames: string[]
+    reportMonths:      number
+  }
+  // The bank tab's extracted rows (2026-08-09) — same persistence rule.
+  bank: {
+    rawRows:      unknown[][]
+    fileName:     string
+    sentRows:     number[]
+    reportMonths: number
   }
   meetings: {
     meetings: ReturnType<typeof useMeetingsStore.getState>['meetings']
@@ -179,6 +195,17 @@ export function collectSnapshot(): Snapshot {
       reportMonths:      c.reportMonths,
       transactions:      c.transactions,
       uploadedFileNames: c.uploadedFileNames,
+    },
+    importTab: {
+      transactions:      useImportStore.getState().transactions,
+      uploadedFileNames: useImportStore.getState().uploadedFileNames,
+      reportMonths:      useImportStore.getState().reportMonths,
+    },
+    bank: {
+      rawRows:      useBankStore.getState().rawRows,
+      fileName:     useBankStore.getState().fileName,
+      sentRows:     useBankStore.getState().sentRows,
+      reportMonths: useBankStore.getState().reportMonths,
     },
     meetings: { meetings: mt.meetings },
     expenseLog: { entries: el.entries },
@@ -338,6 +365,28 @@ export function applySnapshot(raw: unknown): void {
       ...(typeof c.reportMonths === 'number' ? { reportMonths: c.reportMonths }                     : {}),
       ...(Array.isArray(c.transactions)      ? { transactions: c.transactions }                     : {}),
       ...(Array.isArray(c.uploadedFileNames) ? { uploadedFileNames: c.uploadedFileNames }           : {}),
+    })
+  }
+
+  // importTab — snapshots saved before it existed simply lack the key; the
+  // guards skip them and the store keeps its empty defaults.
+  if (isObject(raw.importTab)) {
+    const it = raw.importTab as Partial<Snapshot['importTab']>
+    useImportStore.setState({
+      ...(Array.isArray(it.transactions)       ? { transactions: it.transactions }           : {}),
+      ...(Array.isArray(it.uploadedFileNames)  ? { uploadedFileNames: it.uploadedFileNames } : {}),
+      ...(typeof it.reportMonths === 'number'  ? { reportMonths: it.reportMonths }           : {}),
+    })
+  }
+
+  // bank — same back-compat shape guards.
+  if (isObject(raw.bank)) {
+    const b = raw.bank as Partial<Snapshot['bank']>
+    useBankStore.setState({
+      ...(Array.isArray(b.rawRows)            ? { rawRows: b.rawRows }           : {}),
+      ...(typeof b.fileName === 'string'      ? { fileName: b.fileName }         : {}),
+      ...(Array.isArray(b.sentRows)           ? { sentRows: b.sentRows }         : {}),
+      ...(typeof b.reportMonths === 'number'  ? { reportMonths: b.reportMonths } : {}),
     })
   }
 
@@ -518,6 +567,8 @@ export function resetAllStores(): void {
     learnedDB: {}, sharedLearnedDB: {}, reportMonths: 3,
     isLoading: false, loadingMessage: '',
   })
+  useImportStore.setState({ transactions: [], uploadedFileNames: [], reportMonths: 1 })
+  useBankStore.setState({ rawRows: [], fileName: '', sentRows: [], reportMonths: 1 })
   useMeetingsStore.setState({ meetings: [] })
   useExpenseLogStore.setState({ entries: [] })
   useCategoryBudgetStore.setState({ budgets: {} })

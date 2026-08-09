@@ -34,6 +34,8 @@ import { useBusinessRosterStore } from '@/stores/businessRosterStore'
 import { useRecurringStore } from '@/stores/recurringStore'
 import { useSubscriptionPrefsStore } from '@/stores/subscriptionPrefsStore'
 import { useBudgetReminderStore } from '@/stores/budgetReminderStore'
+import { useImportStore } from '@/stores/importStore'
+import { useBankStore } from '@/stores/bankStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
 import { collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize } from '@/lib/dataSync'
@@ -172,6 +174,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   const lastFocusProbeAt = useRef<number>(0)
   const skipProbeOnce    = useRef<boolean>(false)          // set by "שמור בכל זאת"
   const conflictToastId  = useRef<string | number | null>(null)
+  // The "restore local backup?" offer — must not survive entering
+  // act-as-client (clicking it there would apply the ADVISOR's backup over
+  // the client session; 2026-08-09 audit finding).
+  const restoreToastId   = useRef<string | number | null>(null)
   const requestSaveRef   = useRef<() => void>(() => {})    // effect 2 exposes triggerSave here
   // ── Live-sync state (effect 2c) ──
   const syncBusyAt       = useRef<number>(0)   // epoch ms a write/apply started; 0 = idle
@@ -529,6 +535,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         toast.dismiss(conflictToastId.current)
         conflictToastId.current = null
       }
+      // The restore offer holds the SIGNED-OUT person's backup in its
+      // closure — it must die with their session (shared-computer case).
+      if (restoreToastId.current != null) {
+        toast.dismiss(restoreToastId.current)
+        restoreToastId.current = null
+      }
       return
     }
 
@@ -590,6 +602,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     if (conflictToastId.current != null) {
       toast.dismiss(conflictToastId.current)
       conflictToastId.current = null
+    }
+    if (restoreToastId.current != null) {
+      toast.dismiss(restoreToastId.current)
+      restoreToastId.current = null
     }
 
     // Shared cross-account category-learning pool — loaded silently, never blocks
@@ -653,7 +669,7 @@ export function DataSync({ children }: { children: React.ReactNode }) {
           const label = new Date(backup.ts).toLocaleString('he-IL', {
             hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit',
           })
-          toast.info(
+          restoreToastId.current = toast.info(
             `💾 נמצא גיבוי מקומי חדש יותר מהענן (${label}) — לשחזר?`,
             {
               duration: Infinity,
@@ -661,6 +677,21 @@ export function DataSync({ children }: { children: React.ReactNode }) {
               action: {
                 label: 'שחזר',
                 onClick: () => {
+                  restoreToastId.current = null
+                  // The toast is dismissed on entering act-as-client AND on
+                  // both identity branches, but a click racing a dismissal
+                  // must ALSO refuse: applying this closure's backup onto an
+                  // active client session (or onto a DIFFERENT signed-in
+                  // user on a shared computer) writes one person's portfolio
+                  // into another person's document. 2026-08-09 audit finding.
+                  if (useImpersonationStore.getState().client) {
+                    toast.error('שחזור הגיבוי בוטל — אתה כרגע בתוך חשבון של לקוח.')
+                    return
+                  }
+                  if (useAuthStore.getState().user?.uid !== uid) {
+                    toast.error('שחזור הגיבוי בוטל — הגיבוי שייך לחשבון אחר.')
+                    return
+                  }
                   applySnapshot(backup.snapshot)
                   // Force the next debounced save to push this restored state
                   // upstream so the local + cloud converge.
@@ -945,6 +976,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       useBusinessRosterStore.subscribe(triggerSave),
       useSubscriptionPrefsStore.subscribe(triggerSave),
       useBudgetReminderStore.subscribe(triggerSave),
+      // Snapshot-owned since 2026-08-09. A store that is COLLECTED but not
+      // SUBSCRIBED "persists" only via the pagehide beacon — a browser crash
+      // or a mobile process kill loses the whole analysis, the status pill
+      // lies ("נשמר"), and beforeunload sees isDirty=false. (Grill finding.)
+      useImportStore.subscribe(triggerSave),
+      useBankStore.subscribe(triggerSave),
     ]
 
     return () => {
@@ -967,6 +1004,13 @@ export function DataSync({ children }: { children: React.ReactNode }) {
   // also seeds the concurrent-edit baseline from the client doc's entry updatedAt.
   useEffect(() => {
     const unsub = useImpersonationStore.subscribe((state, prev) => {
+      // The restore offer dies on ANY act-as-client entry, view included —
+      // it must never float over a client session (the click guard would
+      // refuse anyway; this removes the misleading offer itself).
+      if (state.client && !prev.client && restoreToastId.current != null) {
+        toast.dismiss(restoreToastId.current)
+        restoreToastId.current = null
+      }
       const enteringEdit = !!state.client && state.mode === 'edit'
         && (state.startedAt !== prev.startedAt || prev.mode !== 'edit' || !prev.client)
       if (!enteringEdit) return
@@ -992,6 +1036,10 @@ export function DataSync({ children }: { children: React.ReactNode }) {
       if (conflictToastId.current != null) {
         toast.dismiss(conflictToastId.current)
         conflictToastId.current = null
+      }
+      if (restoreToastId.current != null) {
+        toast.dismiss(restoreToastId.current)
+        restoreToastId.current = null
       }
     })
     return () => unsub()

@@ -28,14 +28,19 @@ describe('resetSessionStores — the cross-client leak', () => {
     resetSessionStores()
   })
 
-  it('clears an uploaded bank statement, which resetAllStores does not', () => {
+  // Since 2026-08-09 the bank analysis is SNAPSHOT-OWNED (persisted like the
+  // credit tab), so resetAllStores clears it too. resetSessionStores keeps
+  // clearing it as well — identity boundaries run both, and belt-and-braces
+  // matters exactly here (the original cross-client leak was this store).
+  it('an uploaded bank statement is cleared by BOTH reset paths', () => {
     useBankStore.getState().setData([['ADVISOR ROW', 100]], 'my-own-statement.xlsx')
     useBankStore.getState().markSent(0)
 
-    // Snapshot reset alone leaves it behind — this is precisely the bug.
     resetAllStores()
-    expect(useBankStore.getState().fileName).toBe('my-own-statement.xlsx')
+    expect(useBankStore.getState().fileName).toBe('')
+    expect(useBankStore.getState().rawRows).toEqual([])
 
+    useBankStore.getState().setData([['ADVISOR ROW', 100]], 'my-own-statement.xlsx')
     resetSessionStores()
     expect(useBankStore.getState().rawRows).toEqual([])
     expect(useBankStore.getState().fileName).toBe('')

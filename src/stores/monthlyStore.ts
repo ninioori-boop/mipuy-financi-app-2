@@ -6,12 +6,25 @@ import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 function uid() { return Math.random().toString(36).slice(2) }
 
+/** One source transaction behind an imported ACTUAL — the drill-down the
+ *  mapping panels have, now carried into the month (Ori, 2026-08-09). */
+export interface BudgetTxn {
+  desc:      string
+  date:      string
+  amount:    number
+  isRefund?: boolean
+}
+
 export interface BudgetRow {
   id: string
   name: string
   plan: number
   actual: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
+  // Set by applyImport when the actual came from an imported report — lets the
+  // month show WHICH charges built the number. Optional: rows created before
+  // this existed, and hand-typed actuals, simply have none.
+  txns?: BudgetTxn[]
 }
 
 export interface InstRow {
@@ -157,7 +170,8 @@ interface MonthlyState {
     // matching NAMED rows in fixed/sub/ins by business name; unmatched businesses
     // fold into their category total. Optional — when omitted, actuals stay
     // category-level (backward-compatible with older callers/tests).
-    merchantSums?: { name: string; amount: number; category: string }[],
+    merchantSums?: { name: string; amount: number; category: string; txns?: BudgetTxn[] }[],
+    catTxns?: Record<string, BudgetTxn[]>,
   ) => void
 
   /**
@@ -349,7 +363,12 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         return { ...m, savings: filtered }
       }),
 
-    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths, merchantSums) => {
+    applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths, merchantSums, catTxns) => {
+      // Detail arrays are capped per row — they live inside the month, which
+      // lives inside the 900KB snapshot. 300 slim rows ≈ 20KB worst case.
+      const TXN_CAP = 300
+      const capTxns = (list?: BudgetTxn[]) =>
+        list && list.length ? list.slice(0, TXN_CAP) : undefined
       updateMonth(monthId, m => {
         const del = m.deletedFromMapping
         // Step 1: merge mapping plan rows. Skip rows already present by name OR
@@ -383,11 +402,20 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const names = new Set(rows.map(r => r.name))
           const updated = rows.map(r => {
             const s = catSums[r.name]
-            return (s !== undefined && cats.has(r.name)) ? { ...r, actual: Math.round(s) } : r
+            if (s === undefined || !cats.has(r.name)) return r
+            // Conditional spread, never an explicit undefined — Firestore
+            // rejects undefined values and would fail the whole snapshot save.
+            // STALE detail is dropped first: a re-send that fills this actual
+            // without new detail must not leave last report's charges shown.
+            const t = capTxns(catTxns?.[r.name])
+            const base = { ...r }; delete base.txns
+            return { ...base, actual: Math.round(s), ...(t ? { txns: t } : {}) }
           })
           Object.entries(catSums).forEach(([cat, sum]) => {
-            if (cats.has(cat) && !names.has(cat) && sum > 0)
-              updated.push({ id: uid(), name: cat, plan: 0, actual: Math.round(sum) })
+            if (cats.has(cat) && !names.has(cat) && sum > 0) {
+              const t = capTxns(catTxns?.[cat])
+              updated.push({ id: uid(), name: cat, plan: 0, actual: Math.round(sum), ...(t ? { txns: t } : {}) })
+            }
           })
           return updated
         }
@@ -405,15 +433,16 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         function fillActualPerItem(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
           // This section's businesses (selected by their category), summed per
           // normalized name so multiple charges of the same business collapse.
-          const byKey = new Map<string, { sum: number; category: string }>()
+          const byKey = new Map<string, { sum: number; category: string; txns: BudgetTxn[] }>()
           for (const mrc of merchants) {
             // amount 0 is allowed through (a merchant fully netted by refunds
             // must ZERO its named row's actual on re-send); negatives are not.
             if (!cats.has(mrc.category) || mrc.amount < 0) continue
             const k = normalizeForLookup(mrc.name)
             if (!k) continue
-            const e = byKey.get(k) ?? { sum: 0, category: mrc.category }
+            const e = byKey.get(k) ?? { sum: 0, category: mrc.category, txns: [] }
             e.sum += mrc.amount
+            if (mrc.txns) e.txns.push(...mrc.txns)
             byKey.set(k, e)
           }
           // Normalized names of this section's NAMED (non-category) rows.
@@ -430,21 +459,33 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           let out = rows.map(r => {
             if (cats.has(r.name)) return r
             const hit = byKey.get(normalizeForLookup(r.name))
-            return hit ? { ...r, actual: Math.round(hit.sum) } : r
+            if (!hit) return r
+            const t = capTxns(hit.txns)
+            const base = { ...r }; delete base.txns
+            return { ...base, actual: Math.round(hit.sum), ...(t ? { txns: t } : {}) }
           })
+          // Leftover detail for a category row = the category's transactions
+          // minus those consumed by named rows — mirrors the amount math.
+          const leftoverTxnsOf = (cat: string) =>
+            capTxns(catTxns?.[cat]?.filter(t => !namedKeys.has(normalizeForLookup(t.desc))))
           // Pass 2 — fill category rows from the leftover (total − consumed).
           const present = new Set(out.map(r => r.name))
           out = out.map(r => {
             if (!cats.has(r.name)) return r
             const total = catSums[r.name]
             if (total === undefined) return r
-            return { ...r, actual: Math.max(0, Math.round(total - (consumed[r.name] ?? 0))) }
+            const t = leftoverTxnsOf(r.name)
+            const base = { ...r }; delete base.txns
+            return { ...base, actual: Math.max(0, Math.round(total - (consumed[r.name] ?? 0))), ...(t ? { txns: t } : {}) }
           })
           // Category with leftover spending but no row yet → add it (plan 0).
           Object.entries(catSums).forEach(([cat, total]) => {
             if (!cats.has(cat) || present.has(cat)) return
             const leftover = Math.max(0, Math.round(total - (consumed[cat] ?? 0)))
-            if (leftover > 0) out.push({ id: uid(), name: cat, plan: 0, actual: leftover })
+            if (leftover > 0) {
+              const t = leftoverTxnsOf(cat)
+              out.push({ id: uid(), name: cat, plan: 0, actual: leftover, ...(t ? { txns: t } : {}) })
+            }
           })
           return out
         }

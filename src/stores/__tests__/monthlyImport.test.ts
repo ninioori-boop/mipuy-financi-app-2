@@ -582,3 +582,43 @@ describe('applyImport — per-business actual fills named rows in fixed/sub/ins'
     expect(ins.find(r => r.name === insCat)?.actual).toBe(500)
   })
 })
+
+describe('applyImport — imported transaction detail (txns) rides along', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  it('a named row gets its merchant txns; the category row gets leftover-only txns', () => {
+    const m = 'm-txns'
+    useMonthlyStore.getState().initMonth(m)
+    useMonthlyStore.setState(s => ({
+      months: { ...s.months, [m]: { ...s.months[m], sub: [
+        { id: 'n1', name: 'הולמס פלייס', plan: 50, actual: 0 },
+        { id: 'c1', name: 'מנויים', plan: 200, actual: 0 },
+      ] } },
+    }))
+    const netflixTx = { desc: 'הולמס פלייס', date: '2026-08-01', amount: 50 }
+    const spotifyTx = { desc: 'ספוטיפיי בע"מ', date: '2026-08-02', amount: 30 }
+    useMonthlyStore.getState().applyImport(
+      m, { 'מנויים': 80 }, [], [], [], [], [], [], [], 1,
+      [{ name: 'הולמס פלייס', amount: 50, category: 'מנויים', txns: [netflixTx] }],
+      { 'מנויים': [netflixTx, spotifyTx] },
+    )
+    const sub = useMonthlyStore.getState().months[m].sub
+    const named = sub.find(r => r.name === 'הולמס פלייס')!
+    const cat = sub.find(r => r.name === 'מנויים')!
+    expect(named.actual).toBe(50)
+    expect(named.txns?.map(t => t.desc)).toEqual(['הולמס פלייס'])
+    expect(cat.actual).toBe(30)
+    // The netflix charge is consumed by the named row — the category detail
+    // must show ONLY the leftover, or the drill-down double-counts on screen.
+    expect(cat.txns?.map(t => t.desc)).toEqual(['ספוטיפיי בע"מ'])
+  })
+
+  it('back-compat: without catTxns no row grows a txns field', () => {
+    const m = 'm-notx'
+    useMonthlyStore.getState().initMonth(m)
+    useMonthlyStore.getState().applyImport(m, { 'מנויים': 80 }, [], [], [], [], [], [], [], 1, [])
+    const cat = useMonthlyStore.getState().months[m].sub.find(r => r.name === 'מנויים')!
+    expect(cat.actual).toBe(80)
+    expect('txns' in cat).toBe(false)
+  })
+})

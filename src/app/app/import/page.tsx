@@ -7,7 +7,8 @@ import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
 import { useCreditStore } from '@/stores/creditStore'
 import { useMappingStore } from '@/stores/mappingStore'
-import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useImportStore } from '@/stores/importStore'
+import { useMonthlyStore, type BudgetTxn } from '@/stores/monthlyStore'
 import { parseExcelFile } from '@/lib/parseExcel'
 import { extractTransactions, isStandingOrderDesc, rowsToText } from '@/lib/parsing'
 import { normalizeForLookup, categorize } from '@/lib/categorize'
@@ -86,12 +87,18 @@ async function aiExtractCredit(content: unknown[]): Promise<AiCreditTxn[]> {
 }
 
 export default function ImportPage() {
-  // ── local state — מבודד לחלוטין מ-creditStore ──
-  const [transactions,     setTransactions]     = useState<Transaction[]>([])
-  const [uploadedNames,    setUploadedNames]     = useState<string[]>([])
+  // ── analysis state — PERSISTED via importStore (snapshot-owned, like the
+  // credit tab) so the parsed report survives navigation and refresh; still
+  // fully isolated from creditStore (own store, own arrays — CLAUDE.md).
+  // Transient UI state (loading, target month) stays local.
+  const transactions       = useImportStore(s => s.transactions)
+  const setTransactions    = useImportStore(s => s.setTransactions)
+  const uploadedNames      = useImportStore(s => s.uploadedFileNames)
+  const setUploadedNames   = useImportStore(s => s.setUploadedFileNames)
+  const reportMonths       = useImportStore(s => s.reportMonths)
+  const setReportMonths    = useImportStore(s => s.setReportMonths)
   const [isLoading,        setIsLoading]         = useState(false)
   const [loadingMessage,   setLoadingMessage]    = useState('')
-  const [reportMonths,     setReportMonths]      = useState(3)
   const [targetMonth,      setTargetMonth]       = useState('')
 
   const mapping = useMappingStore()
@@ -182,7 +189,8 @@ export default function ImportPage() {
   }
 
   function handleMonthsChange(delta: number) {
-    setReportMonths(prev => Math.max(1, Math.min(24, prev + delta)))
+    // Clamping (1..24) lives in the store setter.
+    setReportMonths(reportMonths + delta)
   }
 
   // ── AI categorization (same logic as credit page, updates local state) ──
@@ -281,6 +289,12 @@ export default function ImportPage() {
   }, [])
 
   // ── send to monthly budget ──
+  // Slim detail row for the month — only what the drill-down displays.
+  // Conditional isRefund: an explicit `undefined` would fail the Firestore save.
+  function toBudgetTxn(t: Transaction): BudgetTxn {
+    return { desc: t.desc, date: t.date, amount: t.amount, ...(t.isRefund ? { isRefund: true } : {}) }
+  }
+
   function sendToBudget() {
     if (!targetMonth) { toast.error('יש לבחור חודש יעד לפני השליחה'); return }
     if (!transactions.length) { toast.error('אין עסקאות — העלה קובץ קודם'); return }
@@ -306,17 +320,27 @@ export default function ImportPage() {
     // Per-business totals (name + category) so applyImport can fill the ACTUAL of
     // matching named rows in קבועות/מנויים/ביטוחים per specific business; anything
     // unmatched folds into its category total. Grouped by normalized business name.
-    const merchantMap = new Map<string, { name: string; amount: number; category: string }>()
+    const merchantMap = new Map<string, { name: string; amount: number; category: string; txns: BudgetTxn[] }>()
     transactions.forEach(t => {
       const k = normalizeForLookup(t.desc)
       if (!k) return
-      const e = merchantMap.get(k) ?? { name: t.desc, amount: 0, category: t.category }
+      const e = merchantMap.get(k) ?? { name: t.desc, amount: 0, category: t.category, txns: [] }
       e.amount += t.isRefund ? -t.amount : t.amount
+      e.txns.push(toBudgetTxn(t))
       merchantMap.set(k, e)
     })
     // Same clamp logic as catSums: a merchant netted to zero must zero its
     // named row's actual on re-send, not leave it stale.
     const merchantSums = [...merchantMap.values()].map(m => ({ ...m, amount: Math.max(0, m.amount) }))
+
+    // Per-category transaction detail (refunds included, marked — the
+    // drill-down must SHOW why a netted number is lower). The month keeps
+    // these on each imported row so the advisor can open a row and see the
+    // charges behind it, exactly like the mapping panels (Ori, 2026-08-09).
+    const catTxns: Record<string, BudgetTxn[]> = {}
+    transactions.forEach(t => {
+      (catTxns[t.category] ??= []).push(toBudgetTxn(t))
+    })
 
     initMonth(targetMonth)
     applyImport(
@@ -325,6 +349,7 @@ export default function ImportPage() {
       mapping.installments, mapping.debts, mapping.savings,
       mapping.varMonths,
       merchantSums,
+      catTxns,
     )
 
     const monthName = MONTHS_LIST.find(m => m.id === targetMonth)?.name

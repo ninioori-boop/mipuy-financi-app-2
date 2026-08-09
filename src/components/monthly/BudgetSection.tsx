@@ -21,6 +21,8 @@ interface Props {
 export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUpdate, onDelete }: Props) {
   const totalPlan   = rows.reduce((s, r) => s + r.plan, 0)
   const totalActual = rows.reduce((s, r) => s + r.actual, 0)
+  // Which row's imported-transaction detail is open (one at a time).
+  const [openTxns, setOpenTxns] = useState<string | null>(null)
   const hasActual   = totalActual > 0
   const diff        = isIncome ? totalActual - totalPlan : totalPlan - totalActual
   const diffOk      = diff >= 0
@@ -101,6 +103,43 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
                 </div>
               </div>
             </div>
+
+            {/* Imported-transaction detail — the charges behind this actual,
+                carried from the import tab (refunds shown green with +). */}
+            {!!row.txns?.length && (
+              <>
+                <button
+                  onClick={() => setOpenTxns(openTxns === row.id ? null : row.id)}
+                  className="mt-0.5 text-[11px] min-h-[44px] sm:min-h-0 px-2 py-0.5 inline-flex items-center rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors"
+                >
+                  {openTxns === row.id ? '▲' : '▶'} {row.txns.length} עסקאות מהדוח
+                </button>
+                {openTxns === row.id && (
+                  <div className="mt-1 mb-1 rounded-lg border border-line overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-surface2 border-b border-line">
+                        <tr>
+                          <th className="text-right px-3 py-1.5 font-medium text-muted-txt">תיאור</th>
+                          <th className="text-right px-3 py-1.5 font-medium text-muted-txt">תאריך</th>
+                          <th className="text-left px-3 py-1.5 font-medium text-muted-txt">סכום</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line/50">
+                        {[...row.txns].sort((a, b) => b.amount - a.amount).map((t, i) => (
+                          <tr key={i} className="hover:bg-surface2/40">
+                            <td className="px-3 py-1.5 max-w-[200px]"><div className="truncate text-txt">{t.desc}</div></td>
+                            <td className="px-3 py-1.5 text-muted-txt whitespace-nowrap">{t.date}</td>
+                            <td className={`px-3 py-1.5 text-left font-medium tabular-nums whitespace-nowrap ${t.isRefund ? 'text-green-400' : 'text-gold'}`}>
+                              {t.isRefund ? '+' : ''}{fmt(t.amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         ))}
         {rows.length === 0 && <p className="text-xs text-muted-txt py-2">אין שורות</p>}
