@@ -6,6 +6,7 @@ vi.mock('@/lib/firebase', () => ({ auth: {}, db: {}, storage: {} }))
 
 import {
   routeForQuestion, formatIntakeAnswers, countAnswered, groupIntakeQuestions,
+  creditScoreLine, LAB_QUESTIONS, LAB_EXTRA_QUESTIONS,
 } from '@/lib/automapIntake'
 import { INTAKE_QUESTIONS, type IntakeQuestion } from '@/lib/intakeForm'
 
@@ -93,16 +94,21 @@ describe('countAnswered', () => {
 describe('groupIntakeQuestions', () => {
   const flat = (qs?: IntakeQuestion[]) => groupIntakeQuestions(qs).flatMap(g => g.questions)
 
-  it('shows every question in the live form exactly once', () => {
+  it('shows every question the lab asks exactly once', () => {
     const shown = flat().map(q => q.id)
-    expect([...shown].sort()).toEqual(INTAKE_QUESTIONS.map(q => q.id).sort())
+    expect([...shown].sort()).toEqual(LAB_QUESTIONS.map(q => q.id).sort())
     expect(new Set(shown).size).toBe(shown.length)
+  })
+
+  it('includes every question of the live client form', () => {
+    const shown = new Set(flat().map(q => q.id))
+    for (const q of INTAKE_QUESTIONS) expect(shown.has(q.id)).toBe(true)
   })
 
   it('puts a question nobody grouped into a trailing group rather than dropping it', () => {
     const extra: IntakeQuestion = { id: 'brandNewQuestion', type: 'text', label: 'שאלה חדשה' }
-    const groups = groupIntakeQuestions([...INTAKE_QUESTIONS, extra])
-    expect(flat([...INTAKE_QUESTIONS, extra]).map(q => q.id)).toContain('brandNewQuestion')
+    const groups = groupIntakeQuestions([...LAB_QUESTIONS, extra])
+    expect(flat([...LAB_QUESTIONS, extra]).map(q => q.id)).toContain('brandNewQuestion')
     expect(groups[groups.length - 1].questions.map(q => q.id)).toContain('brandNewQuestion')
   })
 
@@ -114,5 +120,59 @@ describe('groupIntakeQuestions', () => {
   it('keeps a statement next to the question it answers', () => {
     const bank = groupIntakeQuestions().find(g => g.questions.some(q => q.id === 'oshReports'))!
     expect(bank.questions.map(q => q.id)).toContain('bankAccounts')
+  })
+})
+
+// A household has two people and two credit scores; the mapping carries one
+// number. The average is the answer — and the line says it is an average, so
+// nobody later mistakes it for one person's real score.
+describe('creditScoreLine', () => {
+  it('averages a couple and shows both numbers', () => {
+    expect(creditScoreLine({ creditScoreSelf: '700', creditScorePartner: '740' }))
+      .toBe('  - ציון דירוג אשראי: 720 (ממוצע של 700 ו‑740)')
+  })
+
+  it('rounds a half-point average rather than emitting a fraction', () => {
+    expect(creditScoreLine({ creditScoreSelf: '700', creditScorePartner: '741' }))
+      .toContain('721')
+  })
+
+  it('uses the single score when only one person has one', () => {
+    expect(creditScoreLine({ creditScoreSelf: '812' })).toBe('  - ציון דירוג אשראי: 812')
+    expect(creditScoreLine({ creditScorePartner: '812' })).toBe('  - ציון דירוג אשראי: 812')
+  })
+
+  it('reads a score the way a person types it', () => {
+    expect(creditScoreLine({ creditScoreSelf: '1,000' })).toContain('1000')
+    expect(creditScoreLine({ creditScoreSelf: '720 נקודות' })).toContain('720')
+  })
+
+  // A fabricated score is worse than no score: it would be shown to the client
+  // as fact and there is no file to check it against.
+  it('says nothing when neither was given', () => {
+    expect(creditScoreLine({})).toBeNull()
+    expect(creditScoreLine({ creditScoreSelf: '', creditScorePartner: '  ' })).toBeNull()
+    expect(creditScoreLine({ creditScoreSelf: 'לא יודע' })).toBeNull()
+  })
+})
+
+describe('the answers block carries the score once, averaged', () => {
+  it('emits one score line, never the two raw fields', () => {
+    const lines = formatIntakeAnswers({ creditScoreSelf: '700', creditScorePartner: '740' })
+    expect(lines.filter(l => l.includes('ציון דירוג אשראי'))).toHaveLength(1)
+    expect(lines.join('\n')).toContain('720')
+    expect(lines.some(l => l.includes('בן/בת הזוג'))).toBe(false)
+  })
+
+  it('counts each score field towards the progress meter', () => {
+    expect(countAnswered({ creditScoreSelf: '700', creditScorePartner: '740' })).toBe(2)
+  })
+})
+
+// The live client form must stay exactly as seven clients already filled it.
+describe('lab-only questions', () => {
+  it('are absent from the live client questionnaire', () => {
+    const live = new Set(INTAKE_QUESTIONS.map(q => q.id))
+    for (const q of LAB_EXTRA_QUESTIONS) expect(live.has(q.id)).toBe(false)
   })
 })

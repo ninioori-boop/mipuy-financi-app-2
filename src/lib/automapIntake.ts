@@ -87,23 +87,75 @@ export function routeForQuestion(questionId?: string): IntakeRoute {
   return (questionId && ROUTE_BY_QUESTION[questionId]) || 'document'
 }
 
+// ── questions the LAB asks and the live client form does not ──
+//
+// The lab renders the same list the client sees, so a question added to
+// intakeForm.ts would appear on a screen seven clients have already filled in.
+// These live here instead: asked in the lab, invisible to clients, and the live
+// form is not touched. Moving one into intakeForm.ts is a separate decision.
+//
+// The credit score is a number, and the live form only ever asked for a
+// SCREENSHOT of it ('creditScore', a file). A picture has to be read by the
+// model to become a number; typing it makes it certain. A household has two
+// people and two scores, and the mapping carries one — so both are asked and
+// the average is what the mapping gets.
+
+export const LAB_EXTRA_QUESTIONS: IntakeQuestion[] = [
+  { id: 'creditScoreSelf',    type: 'text', label: 'ציון דירוג האשראי (מספר)',
+    hint: 'מתוך דוח נתוני אשראי, בדרך כלל 0–1000' },
+  { id: 'creditScorePartner', type: 'text', label: 'ציון דירוג האשראי של בן/בת הזוג',
+    hint: 'אם יש שניים — המיפוי יקבל את הממוצע' },
+]
+
+/** Everything the lab asks: the live questionnaire plus its own additions. */
+export const LAB_QUESTIONS: IntakeQuestion[] = [...INTAKE_QUESTIONS, ...LAB_EXTRA_QUESTIONS]
+
+/** The two score fields are reported as one averaged line, not two raw ones. */
+const SCORE_IDS = new Set(['creditScoreSelf', 'creditScorePartner'])
+
+/** A score as a person types it: "720", "720 נקודות", "1,000". */
+function parseScore(v?: string): number | null {
+  const digits = String(v ?? '').replace(/[^\d]/g, '')
+  if (!digits) return null
+  const n = Number(digits)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/**
+ * The one credit score the mapping carries. Two people, two scores, one
+ * household — so the average, and the line says so rather than hiding it.
+ * Null when neither was given: a made-up score is worse than none.
+ */
+export function creditScoreLine(answers: Record<string, string>): string | null {
+  const self    = parseScore(answers.creditScoreSelf)
+  const partner = parseScore(answers.creditScorePartner)
+  if (self == null && partner == null) return null
+  if (self != null && partner != null) {
+    return `  - ציון דירוג אשראי: ${Math.round((self + partner) / 2)} (ממוצע של ${self} ו‑${partner})`
+  }
+  return `  - ציון דירוג אשראי: ${self ?? partner}`
+}
+
 // ── the answers block the model receives ──
 
 /** One label per answered question, in the questionnaire's own order. */
 export function formatIntakeAnswers(answers: Record<string, string>): string[] {
   const out: string[] = []
-  for (const q of INTAKE_QUESTIONS) {
+  for (const q of LAB_QUESTIONS) {
     if (q.type === 'file') continue                 // files travel as files
+    if (SCORE_IDS.has(q.id)) continue                // reported as one averaged line
     const v = (answers[q.id] ?? '').trim()
     if (!v) continue                                 // unanswered says nothing
     out.push(`  - ${q.label}: ${v}`)
   }
+  const score = creditScoreLine(answers)
+  if (score) out.push(score)
   return out
 }
 
-/** How many questions the client actually answered — for the banner. */
+/** How many questions were actually answered — for the banner and the meter. */
 export function countAnswered(answers: Record<string, string>): number {
-  return INTAKE_QUESTIONS.filter(q => q.type !== 'file' && (answers[q.id] ?? '').trim()).length
+  return LAB_QUESTIONS.filter(q => q.type !== 'file' && (answers[q.id] ?? '').trim()).length
 }
 
 // ── the questionnaire as the lab's INPUT surface ──
@@ -131,13 +183,13 @@ const GROUP_IDS: { title: string; ids: string[] }[] = [
   { title: 'מי הלקוח',        ids: ['fullNames', 'phone'] },
   { title: 'הכנסות',          ids: ['payslips', 'selfEmployedIncome'] },
   { title: 'חשבונות בנק',     ids: ['bankAccounts', 'oshBalance', 'oshReports', 'bankId'] },
-  { title: 'אשראי',           ids: ['creditCardsCount', 'creditLimits', 'creditReports', 'creditScore'] },
+  { title: 'אשראי',           ids: ['creditCardsCount', 'creditLimits', 'creditReports', 'creditScoreSelf', 'creditScorePartner', 'creditScore'] },
   { title: 'הלוואות',         ids: ['hasLoans', 'loanSchedules'] },
   { title: 'חסכונות ונכסים',  ids: ['checkedHarHaKesef', 'harHaKesefReports', 'securitiesPortfolio', 'otherAssets', 'realEstateDetails', 'cryptoDetails'] },
   { title: 'ביטוחים',         ids: ['checkedHarHaBituach', 'harHaBituachReport'] },
 ]
 
-export function groupIntakeQuestions(questions: IntakeQuestion[] = INTAKE_QUESTIONS): IntakeGroup[] {
+export function groupIntakeQuestions(questions: IntakeQuestion[] = LAB_QUESTIONS): IntakeGroup[] {
   const byId = new Map(questions.map(q => [q.id, q]))
   const used = new Set<string>()
   const groups: IntakeGroup[] = []
