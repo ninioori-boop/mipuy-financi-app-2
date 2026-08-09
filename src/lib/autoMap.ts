@@ -63,6 +63,20 @@ export interface GeneratedMapping {
   debts:        GenDebtRow[]
   installments: GenInstallmentRow[]
   savings:      GenSavingRow[]
+  /**
+   * Business activity, kept OUT of the household mapping.
+   *
+   * A self-employed client's data mixes two things that must not be summed
+   * together: the household's money and the business's turnover. A real run on
+   * 2026-08-07 produced ₪81,234 of "monthly income" — mostly customer receipts
+   * and cheque deposits — and put VAT, income tax and the accountant into the
+   * household's fixed expenses, where they were ₪9,464 of a ₪10,589 total.
+   *
+   * These rows are shown separately and are NOT copied into the mapping; the
+   * advisor moves them to the business tab.
+   */
+  businessIncome:   GenSimpleRow[]
+  businessExpenses: GenSimpleRow[]
   assessment:   string
 }
 
@@ -447,6 +461,16 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **בלוק הוראות הקבע** — בתי עסק שמחייבים בהוראת קבע. השתמש בזה כדי להכריע קבוע מול משתנה. הם **כן** נספרים בבלוק ההוצאות, זה רק סימון.
 - **בלוק ההוצאות השנתיות** — סכומים **שנתיים** שהיועץ אישר. זה המקור לסעיף annual. אל תחלק אותם ב‑12, ואל תוסיף אותם לשום סעיף חודשי. אלה שמסומנים "כבר הוסר" גם לא נמצאים בבלוק ההוצאות.
 
+## הפרדת עסק ממשק בית — קריטי כשהלקוח עצמאי
+מיפוי משק בית מתאר את הכסף של **המשפחה**, לא את המחזור של העסק. אם בנתונים יש פעילות עסקית (עוסק פטור/מורשה, חברה בבעלות הלקוח, תקבולים מלקוחות, מע"מ, מס הכנסה, רואה חשבון) — **אל תערבב אותה בסעיפים הרגילים.** הפרד אותה לשני סעיפים ייעודיים:
+- **businessIncome** — תקבולים מלקוחות, הפקדות שיקים עסקיות, תשלומי ביט/פייבוקס מלקוחות, הכנסות של חברה בבעלות הלקוח.
+- **businessExpenses** — מע"מ, מס הכנסה, ביטוח לאומי של העצמאי, רואה חשבון ויועץ מס, ספקים, ציוד ומשרד.
+
+- **income של משק הבית הוא רק מה שהבעלים מושך לעצמו** — משכורת (כולל משכורת מהחברה שלו), קצבאות, שכר דירה שהוא מקבל. מחזור העסק **אינו** הכנסה של משק הבית.
+- **מע"מ אינו הוצאה בכלל.** הוא נגבה מהלקוח ומועבר למדינה. לעולם אל תרשום אותו כהוצאה של משק הבית.
+- אם אינך יכול להכריע אם פריט הוא עסקי או פרטי — **השאר אותו במשק הבית וסמן אותו confidence "low"**, כדי שהיועץ יראה אותו ויכריע.
+- אם אין שום פעילות עסקית — החזר שני מערכים ריקים.
+
 ## כללי אנטי‑כפילות (קריטי)
 - התעלם מ: העברות בין חשבונות, ומשיכות מזומן ללא פירוט (אלא אם צוין).
 - **זיכויים כבר מקוזזים בנתונים שקיבלת** — אל תחסיר אותם שוב. שורה עם סכום שלילי או עם "זיכוי בלבד" פירושה שבתקופה הזו הוחזר יותר ממה שחויב. אל תיצור שורת הוצאה שלילית: החזר 0 לאותה שורה, וציין את זה ב‑assessment.
@@ -501,6 +525,8 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
   "debts":[{"name":"","originalBalance":0,"remainingBalance":0,"interestRate":0,"remainingMonths":0,"monthlyPayment":0,"confidence":"high","source":"","category":""}],
   "installments":[{"name":"","totalAmount":0,"monthlyPayment":0,"paidCount":0,"totalCount":0,"confidence":"high","source":"","category":""}],
   "savings":[{"name":"","monthlyContribution":0,"accumulated":0,"feeBalance":0,"feeDeposit":0,"confidence":"high","source":"","category":""}],
+  "businessIncome":[{"name":"","amount":0,"confidence":"high","source":""}],
+  "businessExpenses":[{"name":"","amount":0,"confidence":"high","source":""}],
   "assessment":"סיכום קצר בעברית: תזרים משוער, דגלים אדומים, והמלצות מרכזיות."
 }`
 
@@ -786,10 +812,18 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
       feeBalance: num(r.feeBalance), feeDeposit: num(r.feeDeposit),
       ...meta(r),
     })).filter(r => r.name || r.monthlyContribution || r.accumulated),
+    // Absent on drafts saved before business separation existed — `arr()`
+    // yields [] for anything that isn't an array, so they keep loading.
+    businessIncome:   simple(arr(raw.businessIncome)),
+    businessExpenses: simple(arr(raw.businessExpenses)),
     assessment: str(raw.assessment),
   }
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {
-  return { creditScore: 0, creditCards: [], bankAccounts: [], income: [], fixed: [], sub: [], ins: [], variable: [], annual: [], debts: [], installments: [], savings: [], assessment: '' }
+  return {
+    creditScore: 0, creditCards: [], bankAccounts: [], income: [], fixed: [], sub: [],
+    ins: [], variable: [], annual: [], debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '',
+  }
 }

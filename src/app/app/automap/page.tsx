@@ -1183,6 +1183,15 @@ export default function AutoMapPage() {
                       : 'החלפה: כל המיפוי הנוכחי יימחק ויוחלף בתוצאת ה‑AI. עריכות ידניות יאבדו.'}
                   </div>
 
+                  {/* Business rows are not part of the household mapping and
+                      doCopyToMapping never writes them. Say so, so their absence
+                      afterwards reads as intended rather than as a lost row. */}
+                  {((result.businessIncome?.length ?? 0) + (result.businessExpenses?.length ?? 0)) > 0 && (
+                    <div className="rounded-lg border border-line bg-surface px-3 py-2 text-xs text-muted-txt">
+                      🏢 {(result.businessIncome?.length ?? 0) + (result.businessExpenses?.length ?? 0)} שורות עסקיות לא יועתקו — הן שייכות לטאב העסקי, לא למשק הבית.
+                    </div>
+                  )}
+
                   {/* Merge keeps existing amounts by design. Say so when it
                       actually costs the advisor something, so a "refresh the
                       numbers" run can't look like it worked when it didn't. */}

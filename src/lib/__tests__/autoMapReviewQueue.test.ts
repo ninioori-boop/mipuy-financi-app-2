@@ -15,7 +15,7 @@ const queueOf = (r: GeneratedMapping) =>
 const empty = (): GeneratedMapping => ({
   creditScore: 0, creditCards: [], bankAccounts: [],
   income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
-  debts: [], installments: [], savings: [], assessment: '',
+  debts: [], installments: [], savings: [], businessIncome: [], businessExpenses: [], assessment: '',
 })
 
 describe('review queue selection', () => {

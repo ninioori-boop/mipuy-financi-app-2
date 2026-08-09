@@ -197,7 +197,7 @@ const emptyResult = (): GeneratedMapping => ({
   creditScore: 0, creditCards: [], bankAccounts: [],
   income: [{ name: 'משכורת', amount: 12000 }],
   fixed: [], sub: [], ins: [], variable: [], annual: [],
-  debts: [], installments: [], savings: [], assessment: '',
+  debts: [], installments: [], savings: [], businessIncome: [], businessExpenses: [], assessment: '',
 })
 const vtx = (amount: number, category: string, isRefund = false) => ({ amount, category, isRefund })
 

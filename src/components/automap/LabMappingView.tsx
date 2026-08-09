@@ -264,6 +264,72 @@ export function LabMappingView({ result, txns, onChange }: Props) {
   return (
     <div className="space-y-6">
 
+      {/* Business activity — shown, but deliberately outside the household
+          mapping and never copied into it. On a self-employed client the two
+          get mixed: a real run put ₪81,234 of customer receipts into "monthly
+          income" and made VAT + income tax + the accountant ₪9,464 of a
+          ₪10,589 fixed-expense total, which describes the business, not the
+          family. */}
+      {((result.businessIncome?.length ?? 0) > 0 || (result.businessExpenses?.length ?? 0) > 0) && (
+        <div className="rounded-xl border-2 border-line bg-surface2/60 p-3 sm:p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-sm font-semibold text-txt">🏢 פעילות עסקית — לא חלק ממשק הבית</div>
+            <div className="text-xs text-muted-txt">לא יועתק למיפוי · העבר לטאב העסקי</div>
+          </div>
+
+          {(['businessIncome', 'businessExpenses'] as const).map(key => {
+            const rows = result[key] ?? []
+            if (!rows.length) return null
+            const total = rows.reduce((s, r) => s + r.amount, 0)
+            const label = key === 'businessIncome' ? 'הכנסות העסק' : 'הוצאות העסק'
+            const tone  = key === 'businessIncome' ? 'text-income' : 'text-expense'
+            return (
+              <div key={key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-muted-txt">{label}</span>
+                  <span className={`text-sm font-bold tabular-nums ${tone}`}>{fmt(total)}<span className="text-xs font-normal text-muted-txt">/חודש</span></span>
+                </div>
+                {rows.map((r, i) => (
+                  <div key={`${key}-${i}`} className="flex items-center gap-2 flex-wrap">
+                    <input
+                      value={r.name}
+                      onChange={e => {
+                        const next = [...rows]
+                        next[i] = { ...next[i], name: e.target.value }
+                        patch(key, next)
+                      }}
+                      className={`${inputCls} flex-1 min-w-[120px]`}
+                      placeholder="שם"
+                    />
+                    <RowMetaChip confidence={r.confidence} source={r.source} />
+                    <input
+                      type="number"
+                      value={r.amount || ''}
+                      onChange={e => {
+                        const next = [...rows]
+                        next[i] = { ...next[i], amount: asNum(e.target.value) }
+                        patch(key, next)
+                      }}
+                      style={{ direction: 'ltr' }}
+                      className={`${inputCls} w-28 text-left tabular-nums shrink-0`}
+                      placeholder="₪"
+                    />
+                    <button
+                      onClick={() => patch(key, rows.filter((_, j) => j !== i))}
+                      className="size-7 flex items-center justify-center text-muted-txt hover:text-expense rounded shrink-0"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+
+          <p className="text-[11px] text-muted-txt leading-relaxed">
+            מע&quot;מ נגבה מהלקוח ומועבר למדינה — הוא אינו הוצאה של משק הבית. ההכנסה האישית של בעל עסק היא רק מה שהוא מושך לעצמו.
+          </p>
+        </div>
+      )}
+
       {reviewQueue.length > 0 && (
         <div className="rounded-xl border-2 border-gold/30 bg-gold/5 p-3 sm:p-4 space-y-2">
           <div className="text-sm font-semibold text-gold">
