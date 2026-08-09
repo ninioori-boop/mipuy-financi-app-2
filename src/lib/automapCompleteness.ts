@@ -42,9 +42,10 @@ export interface CompletenessInput {
   installments: unknown[]
   settlements:  unknown[]
   /**
-   * The client's questionnaire answers, once loaded. `null` when there is no
-   * questionnaire to speak of — which is a different statement from "the client
-   * left it blank", and the checks below keep the two apart.
+   * The questionnaire answers — filled in the lab, or loaded from what the
+   * client themself answered. `null` when nothing at all has been answered,
+   * which is a different statement from "answered and left these blank"; the
+   * checks below keep the two apart so this stays silent on an empty run.
    */
   intakeAnswers?: Record<string, string> | null
 }
@@ -179,8 +180,10 @@ export function buildCompletenessReport(input: CompletenessInput): CompletenessI
     if (!has('creditLimits'))  unanswered.push('מסגרות האשראי')
     if (unanswered.length) {
       items.push({
+        // Worded for whoever filled it — the advisor types into the same form
+        // the client answers, so "הלקוח לא ענה" would be wrong half the time.
         key: 'intake-blank', severity: 'gap',
-        title: 'הלקוח לא ענה בשאלון על:',
+        title: 'בשאלון עדיין חסר:',
         detail: `${unanswered.join(' · ')} — אלה דברים שהדוחות לא מכילים, אז אין מאיפה להשלים אותם.`,
       })
     }
