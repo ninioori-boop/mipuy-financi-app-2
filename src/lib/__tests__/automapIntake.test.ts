@@ -4,8 +4,10 @@ import { describe, it, expect, vi } from 'vitest'
 // app — which has no API key under test. Same stub the other suites use.
 vi.mock('@/lib/firebase', () => ({ auth: {}, db: {}, storage: {} }))
 
-import { routeForQuestion, formatIntakeAnswers, countAnswered } from '@/lib/automapIntake'
-import { INTAKE_QUESTIONS } from '@/lib/intakeForm'
+import {
+  routeForQuestion, formatIntakeAnswers, countAnswered, groupIntakeQuestions,
+} from '@/lib/automapIntake'
+import { INTAKE_QUESTIONS, type IntakeQuestion } from '@/lib/intakeForm'
 
 // The questionnaire tags every uploaded file with the question it answers, so we
 // KNOW what each file is instead of guessing. Guessing produced the worst bug of
@@ -81,5 +83,36 @@ describe('countAnswered', () => {
   it('counts only answered non-file questions', () => {
     expect(countAnswered({ bankAccounts: 'שניים', oshBalance: '', payslips: 'x' })).toBe(1)
     expect(countAnswered({})).toBe(0)
+  })
+})
+
+// The questionnaire is now the lab's INPUT surface, so its grouping decides what
+// the advisor can actually be asked. A question that exists in the live form but
+// appears in no group would silently vanish from the screen — the same failure
+// class as a silently dropped file, and just as invisible.
+describe('groupIntakeQuestions', () => {
+  const flat = (qs?: IntakeQuestion[]) => groupIntakeQuestions(qs).flatMap(g => g.questions)
+
+  it('shows every question in the live form exactly once', () => {
+    const shown = flat().map(q => q.id)
+    expect([...shown].sort()).toEqual(INTAKE_QUESTIONS.map(q => q.id).sort())
+    expect(new Set(shown).size).toBe(shown.length)
+  })
+
+  it('puts a question nobody grouped into a trailing group rather than dropping it', () => {
+    const extra: IntakeQuestion = { id: 'brandNewQuestion', type: 'text', label: 'שאלה חדשה' }
+    const groups = groupIntakeQuestions([...INTAKE_QUESTIONS, extra])
+    expect(flat([...INTAKE_QUESTIONS, extra]).map(q => q.id)).toContain('brandNewQuestion')
+    expect(groups[groups.length - 1].questions.map(q => q.id)).toContain('brandNewQuestion')
+  })
+
+  it('never emits an empty group', () => {
+    expect(groupIntakeQuestions().every(g => g.questions.length > 0)).toBe(true)
+    expect(groupIntakeQuestions([]).length).toBe(0)
+  })
+
+  it('keeps a statement next to the question it answers', () => {
+    const bank = groupIntakeQuestions().find(g => g.questions.some(q => q.id === 'oshReports'))!
+    expect(bank.questions.map(q => q.id)).toContain('bankAccounts')
   })
 })

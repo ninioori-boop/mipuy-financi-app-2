@@ -576,9 +576,11 @@ export function resetSessionStores(opts?: { purgeArchive?: boolean }): void {
   // annual expenses and dismissed merchant keys both carry the client's own
   // merchant names and amounts, so they survived an identity switch and would
   // have been sent to the AI as the NEXT client's context.
+  // intakeForm (2026-08-09) is the most identifying of all of them: names, phone,
+  // which banks, balances, credit limits — typed in about one specific person.
   useAutoMapStore.setState({
     contextText: '', reportMonths: 1, result: null,
-    annualItems: [], dismissedOneOffs: [],
+    annualItems: [], dismissedOneOffs: [], intakeForm: {},
   })
 
   // Account deletion is the one boundary that must leave nothing behind at all —

@@ -34,6 +34,7 @@ import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
+import IntakeFormPanel from '@/components/automap/IntakeFormPanel'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -82,9 +83,10 @@ export default function AutoMapPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const {
-    contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs,
+    contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs, intakeForm,
     setContextText, setReportMonths, setResult, updateResult, reset,
     setAnnualItem, removeAnnualItem, dismissOneOff,
+    setIntakeAnswer, setIntakeForm,
     saveDraft, loadDraft, deleteDraft,
   } = useAutoMapStore()
 
@@ -185,7 +187,10 @@ export default function AutoMapPage() {
             const bank = route === 'credit' ? [] : extractBankRows(rows)
             if (bank.length) {
               bankCount += bank.length
-              setBankRows(prev => [...prev, ...bank])
+              // Stamp the file each row came from, so detaching one statement
+              // removes its rows and leaves the other accounts alone.
+              const from = file.name
+              setBankRows(prev => [...prev, ...bank.map(b => ({ ...b, source: from }))])
             } else {
               all.push(...extractTransactions(rows, file.name, learned))
             }
@@ -222,6 +227,47 @@ export default function AutoMapPage() {
     }
   }, [])
 
+  // ── the questionnaire as the lab's input ──
+  //
+  // Files no longer arrive as an anonymous pile. Each one is attached to the
+  // question it answers, and that question decides which parser reads it — the
+  // format never gets a vote. `attachedByQ` is what the panel displays; the
+  // parsed data itself still lives in txns / bankRows / docs.
+  const [attachedByQ, setAttachedByQ] = useState<Record<string, string[]>>({})
+
+  const handleQuestionFiles = useCallback(async (files: File[], questionId: string) => {
+    const route = routeForQuestion(questionId)
+    const routes = new Map<string, IntakeRoute>(files.map(f => [f.name, route]))
+    setAttachedByQ(prev => {
+      const have = new Set(prev[questionId] ?? [])
+      const added = files.map(f => f.name).filter(n => !have.has(n))
+      return added.length ? { ...prev, [questionId]: [...(prev[questionId] ?? []), ...added] } : prev
+    })
+    await handleFiles(files, routes)
+  }, [handleFiles])
+
+  /** Detach one file: drop its chip AND everything that was parsed out of it. */
+  const removeAttached = useCallback((questionId: string, name: string) => {
+    setAttachedByQ(prev => {
+      const left = (prev[questionId] ?? []).filter(n => n !== name)
+      const next = { ...prev }
+      if (left.length) next[questionId] = left
+      else delete next[questionId]
+      return next
+    })
+    setTxns(prev => prev.filter(t => t.source !== name))
+    setBankRows(prev => prev.filter(b => b.source !== name))
+    setFileNames(prev => prev.filter(n => n !== name))
+    setDocs(prev => prev.filter(d => d.name !== name))
+  }, [])
+
+  const attachedNames = useMemo(
+    () => new Set(Object.values(attachedByQ).flat()),
+    [attachedByQ],
+  )
+  const intakeLines   = useMemo(() => formatIntakeAnswers(intakeForm), [intakeForm])
+  const answeredCount = useMemo(() => countAnswered(intakeForm), [intakeForm])
+
   // ── the client's questionnaire ──
   //
   // It has existed and been filled in for months, and nothing ever read it back:
@@ -253,18 +299,21 @@ export default function AutoMapPage() {
     if (!intake) return
     setLoadingIntake(true)
     try {
-      const answerLines = formatIntakeAnswers(intake.answers)
-      if (answerLines.length) {
-        const block = ['=== תשובות הלקוח מהשאלון ===', ...answerLines].join('\n')
-        setContextText(contextText.trim() ? `${contextText.trim()}\n\n${block}` : block)
-      }
+      // The client's own answers fill the same form the advisor types into —
+      // one questionnaire, whoever answered it. Only non-empty answers are
+      // copied, so a blank from the client never wipes something typed here.
+      const filled = Object.fromEntries(
+        Object.entries(intake.answers).filter(([, v]) => (v ?? '').trim()),
+      )
+      if (Object.keys(filled).length) setIntakeForm(filled)
 
       // Skip anything already uploaded by hand, by name — re-adding a file the
       // advisor just dragged in would double every transaction in it.
-      const have = new Set(fileNames)
+      const have = new Set([...fileNames, ...Object.values(attachedByQ).flat()])
       const fresh = intake.docs.filter(d => !have.has(d.name))
       const files: File[] = []
       const routes = new Map<string, IntakeRoute>()
+      const chips: Record<string, string[]> = {}
       for (const d of fresh) {
         try {
           const res = await fetch(await intakeFileUrl(d.path))
@@ -272,18 +321,28 @@ export default function AutoMapPage() {
           const blob = await res.blob()
           files.push(new File([blob], d.name, { type: d.type || blob.type }))
           routes.set(d.name, routeForQuestion(d.questionId))
+          // Show the file under the question it answered, exactly as if it had
+          // been attached there by hand. An untagged file has no slot to sit in.
+          if (d.questionId) chips[d.questionId] = [...(chips[d.questionId] ?? []), d.name]
         } catch { /* one unreadable file must not abort the rest */ }
+      }
+      if (Object.keys(chips).length) {
+        setAttachedByQ(prev => {
+          const next = { ...prev }
+          for (const [q, names] of Object.entries(chips)) next[q] = [...(next[q] ?? []), ...names]
+          return next
+        })
       }
       if (files.length) await handleFiles(files, routes)
 
       setIntakeLoaded(true)
-      toast.success(`📋 נטען מהשאלון: ${answerLines.length} תשובות · ${files.length} קבצים`)
+      toast.success(`📋 נטען מהשאלון: ${Object.keys(filled).length} תשובות · ${files.length} קבצים`)
     } catch (e) {
       toast.error('שגיאה בטעינת השאלון: ' + (e as Error).message)
     } finally {
       setLoadingIntake(false)
     }
-  }, [intake, contextText, setContextText, fileNames, handleFiles])
+  }, [intake, setIntakeForm, fileNames, attachedByQ, handleFiles])
 
   // Clipboard paste: capture screenshots / images directly with Ctrl+V.
   // Only activated on this page (window-level listener cleaned up on unmount).
@@ -420,10 +479,13 @@ export default function AutoMapPage() {
     () => buildCompletenessReport({
       expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
       annualItems, installments: installmentLines, settlements,
-      intakeAnswers: intakeLoaded ? (intake?.answers ?? null) : null,
+      // The questionnaire is now filled in here, so it is the one to check.
+      // Still null when nothing at all was answered: a blank form is not a
+      // client who skipped questions, and conflating them fires on every run.
+      intakeAnswers: answeredCount > 0 ? intakeForm : null,
     }),
     [expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
-     annualItems, installmentLines, settlements, intakeLoaded, intake],
+     annualItems, installmentLines, settlements, answeredCount, intakeForm],
   )
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
@@ -484,6 +546,16 @@ export default function AutoMapPage() {
       lines.push(`${settlements.length} תשלומים, ${Math.round(total)} ש"ח סך הכל. הפירוט האמיתי נמצא בבלוק ההוצאות.`)
       lines.push('')
     }
+    // The questionnaire goes LAST so it is the freshest thing in context, and it
+    // is marked as authoritative: it answers what no document can (which bank
+    // holds the account, the balances, the limits, whether loans exist at all).
+    // A statement header naming another bank is a clearing detail, not a fact —
+    // that is how a Yahav portfolio came back labelled Hapoalim.
+    if (intakeLines.length) {
+      lines.push('== השאלון — תשובות הלקוח. מקור מוסמך, גובר על כל הסקה מהנתונים ==')
+      lines.push(...intakeLines)
+      lines.push('')
+    }
     if (contextText.trim()) {
       lines.push('== נתונים נוספים מהיועץ (הכנסות, הלוואות, נכסים, חיסכון, מצב משפחתי) ==')
       lines.push(contextText.trim())
@@ -492,8 +564,8 @@ export default function AutoMapPage() {
   }
 
   async function generate() {
-    if (!txns.length && !bankRows.length && !contextText.trim() && !docs.length) {
-      toast.error('העלה קובץ/מסמך או הזן נתונים בטקסט קודם')
+    if (!txns.length && !bankRows.length && !contextText.trim() && !docs.length && !intakeLines.length) {
+      toast.error('מלא את השאלון או צרף קבצים קודם')
       return
     }
     if (tooBig) { toast.error('הקבצים גדולים מדי — הסר חלק או הקטן תמונות'); return }
@@ -858,7 +930,50 @@ export default function AutoMapPage() {
       <div className="rounded-xl border border-line bg-surface2 p-4 sm:p-5 space-y-4">
         <div className="text-sm font-semibold text-txt">1️⃣ נתונים</div>
 
-        {/* Drag-and-drop zone — keyboard-equivalent click triggers the hidden input */}
+        {/* The client may have answered this very questionnaire already, on the
+            "העלאת מסמכים" screen, and until now nothing ever read it back. One
+            button fills the form below from their answers and files. A button
+            rather than an auto-load: the files cost bandwidth. */}
+        {intake && !intakeLoaded && (
+          <div className="rounded-xl border border-income/40 bg-income/5 p-3 flex items-center gap-3 flex-wrap">
+            <span className="text-sm text-txt flex-1 min-w-[200px]">
+              📋 <strong>{impersonated?.name || 'הלקוח'}</strong> כבר מילא את השאלון הזה
+              <span className="text-muted-txt">
+                {' · '}{countAnswered(intake.answers)} תשובות
+                {intake.docs.length > 0 && ` · ${intake.docs.length} מסמכים`}
+              </span>
+            </span>
+            <button
+              onClick={loadIntakeIntoLab}
+              disabled={loadingIntake}
+              className="shrink-0 rounded-lg border border-income/50 bg-income/10 px-3 py-1.5 text-sm font-semibold text-income hover:bg-income/20 transition-colors disabled:opacity-60"
+            >
+              {loadingIntake ? 'טוען…' : 'מלא מהתשובות שלו'}
+            </button>
+          </div>
+        )}
+        {intakeLoaded && (
+          <div className="rounded-xl border border-line bg-surface2/60 px-3 py-2 text-xs text-income">
+            ✓ השאלון מולא מתשובות הלקוח, וכל מסמך נכנס לשאלה שהוא עונה עליה. אפשר להשלים ולתקן ידנית.
+          </div>
+        )}
+
+        {/* The questionnaire IS the input. Each answer and each attached file is
+            tagged with the question it belongs to, so the mapping is built from
+            known material instead of from a guess at what each file is. */}
+        <IntakeFormPanel
+          answers={intakeForm}
+          onAnswer={setIntakeAnswer}
+          onFiles={handleQuestionFiles}
+          attached={attachedByQ}
+          onRemoveAttached={removeAttached}
+          parseStatus={parseStatus}
+          disabled={isParsing}
+        />
+
+        {/* Catch-all for anything the questionnaire has no slot for. Kept small
+            and last on purpose: a file dropped here is un-tagged, so its type is
+            sniffed — the old behaviour, and the old risk. */}
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
           onDragLeave={() => setIsDragging(false)}
@@ -870,7 +985,7 @@ export default function AutoMapPage() {
           }}
           onClick={() => fileInputRef.current?.click()}
           className={[
-            'relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors text-center select-none',
+            'relative flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed p-4 cursor-pointer transition-colors text-center select-none',
             isDragging
               ? 'border-gold bg-gold/15 ring-2 ring-gold/40'
               : 'border-line bg-surface hover:border-gold/50 hover:bg-surface/70',
@@ -884,12 +999,11 @@ export default function AutoMapPage() {
             className="hidden"
             onChange={e => { const input = e.currentTarget; const fs = Array.from(input.files ?? []); input.value = ''; if (fs.length) handleFiles(fs) }}
           />
-          <span className="text-3xl">{isDragging ? '⬇️' : '📎'}</span>
-          <span className="text-sm font-medium text-txt">
-            {isDragging ? 'שחרר כאן' : 'גרור קבצים לכאן, או לחץ לבחירה'}
+          <span className="text-sm text-muted-txt">
+            {isDragging ? '⬇️ שחרר כאן' : '📎 קבצים נוספים — משהו שאין לו שאלה'}
           </span>
-          <span className="text-xs text-muted-txt/70">
-            Excel · PDF · תמונות · צילומי מסך · <kbd dir="ltr" className="px-1 py-0.5 rounded bg-line text-[10px]">Ctrl+V</kbd> להדבקה
+          <span className="text-xs text-muted-txt/60">
+            Excel · PDF · תמונות · <kbd dir="ltr" className="px-1 py-0.5 rounded bg-line text-[10px]">Ctrl+V</kbd> להדבקה
           </span>
         </div>
 
@@ -908,9 +1022,11 @@ export default function AutoMapPage() {
 
         {/* Per-file parse status strip — shows ✓/⏳/✗ next to each filename
             during a batch and lingers ~3s after the batch ends. */}
-        {Object.keys(parseStatus).length > 0 && (
+        {/* Only files with no question of their own — the ones attached to a
+            question already show their status on their own row. */}
+        {Object.keys(parseStatus).some(n => !attachedNames.has(n)) && (
           <div className="rounded-lg border border-line bg-surface px-3 py-2 space-y-1">
-            {Object.entries(parseStatus).map(([name, status]) => (
+            {Object.entries(parseStatus).filter(([name]) => !attachedNames.has(name)).map(([name, status]) => (
               <div key={name} className="flex items-center gap-2 text-xs">
                 <span className="shrink-0">
                   {status === 'parsing' ? <span className="inline-block size-3 animate-spin rounded-full border-2 border-gold border-t-transparent align-middle" /> : status === 'done' ? '✓' : '✗'}
@@ -1012,34 +1128,6 @@ export default function AutoMapPage() {
             </div>
           )}
         </div>
-
-        {/* The client already answered a questionnaire and uploaded documents,
-            tagged with the question each one answers. Until now nothing read it
-            back. Offered as a button rather than auto-loaded: the files cost
-            bandwidth and the advisor should choose. */}
-        {intake && !intakeLoaded && (
-          <div className="rounded-xl border border-income/40 bg-income/5 p-3 flex items-center gap-3 flex-wrap">
-            <span className="text-sm text-txt flex-1 min-w-[200px]">
-              📋 <strong>{impersonated?.name || 'הלקוח'}</strong> מילא שאלון
-              <span className="text-muted-txt">
-                {' · '}{countAnswered(intake.answers)} תשובות
-                {intake.docs.length > 0 && ` · ${intake.docs.length} מסמכים`}
-              </span>
-            </span>
-            <button
-              onClick={loadIntakeIntoLab}
-              disabled={loadingIntake}
-              className="shrink-0 rounded-lg border border-income/50 bg-income/10 px-3 py-1.5 text-sm font-semibold text-income hover:bg-income/20 transition-colors disabled:opacity-60"
-            >
-              {loadingIntake ? 'טוען…' : 'טען לתוך המעבדה'}
-            </button>
-          </div>
-        )}
-        {intakeLoaded && (
-          <div className="rounded-xl border border-line bg-surface2/60 px-3 py-2 text-xs text-income">
-            ✓ השאלון של הלקוח נטען — התשובות נוספו להקשר, והמסמכים נותבו לפי השאלה שהם עונים עליה.
-          </div>
-        )}
 
         {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
             of a client's life looks identical to one built from 95% — every

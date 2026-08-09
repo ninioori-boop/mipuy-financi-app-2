@@ -20,7 +20,7 @@
 import { collection, doc, getDoc, getDocs, orderBy, query } from 'firebase/firestore'
 import { getDownloadURL, ref } from 'firebase/storage'
 import { db, storage } from './firebase'
-import { INTAKE_QUESTIONS } from './intakeForm'
+import { INTAKE_QUESTIONS, type IntakeQuestion } from './intakeForm'
 
 export interface IntakeDoc {
   id:          string
@@ -104,4 +104,54 @@ export function formatIntakeAnswers(answers: Record<string, string>): string[] {
 /** How many questions the client actually answered — for the banner. */
 export function countAnswered(answers: Record<string, string>): number {
   return INTAKE_QUESTIONS.filter(q => q.type !== 'file' && (answers[q.id] ?? '').trim()).length
+}
+
+// ── the questionnaire as the lab's INPUT surface ──
+//
+// The lab used to open with one dropzone: drag everything in, and the model
+// works out what each file is. That is backwards — it made the format the
+// source of truth for what a file MEANS, and the format cannot carry that.
+//
+// So the input is the questionnaire itself. Each question is its own slot, and
+// a file dropped into a slot is tagged with that question before it is parsed.
+// Same 22 questions the client sees; here the advisor fills them in.
+//
+// Grouping is presentation only, and is DELIBERATELY not exhaustive: a question
+// added to intakeForm.ts that nobody listed here lands in the trailing group
+// rather than disappearing from the screen. A silently missing question is the
+// same failure class as a silently dropped file.
+
+export interface IntakeGroup {
+  title:     string
+  questions: IntakeQuestion[]
+}
+
+/** Ordered display groups, by question id. Ids that don't exist are ignored. */
+const GROUP_IDS: { title: string; ids: string[] }[] = [
+  { title: 'מי הלקוח',        ids: ['fullNames', 'phone'] },
+  { title: 'הכנסות',          ids: ['payslips', 'selfEmployedIncome'] },
+  { title: 'חשבונות בנק',     ids: ['bankAccounts', 'oshBalance', 'oshReports', 'bankId'] },
+  { title: 'אשראי',           ids: ['creditCardsCount', 'creditLimits', 'creditReports', 'creditScore'] },
+  { title: 'הלוואות',         ids: ['hasLoans', 'loanSchedules'] },
+  { title: 'חסכונות ונכסים',  ids: ['checkedHarHaKesef', 'harHaKesefReports', 'securitiesPortfolio', 'otherAssets', 'realEstateDetails', 'cryptoDetails'] },
+  { title: 'ביטוחים',         ids: ['checkedHarHaBituach', 'harHaBituachReport'] },
+]
+
+export function groupIntakeQuestions(questions: IntakeQuestion[] = INTAKE_QUESTIONS): IntakeGroup[] {
+  const byId = new Map(questions.map(q => [q.id, q]))
+  const used = new Set<string>()
+  const groups: IntakeGroup[] = []
+
+  for (const g of GROUP_IDS) {
+    const qs = g.ids.map(id => byId.get(id)).filter((q): q is IntakeQuestion => !!q)
+    for (const q of qs) used.add(q.id)
+    if (qs.length) groups.push({ title: g.title, questions: qs })
+  }
+
+  // Anything the lists above never mentioned — including a question added to the
+  // live form after this file was written. It must still be askable.
+  const rest = questions.filter(q => !used.has(q.id))
+  if (rest.length) groups.push({ title: 'נוסף', questions: rest })
+
+  return groups
 }

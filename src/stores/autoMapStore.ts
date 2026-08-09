@@ -37,7 +37,20 @@ interface AutoMapState {
   /** One-off charges the advisor said are not annual; never offered again. */
   dismissedOneOffs: string[]
 
+  /**
+   * The questionnaire, filled in inside the lab — question id → answer. This is
+   * the lab's primary input: what a client's documents cannot say (which banks,
+   * what balances, whether there are loans at all) and what tags every uploaded
+   * file with the question it answers.
+   *
+   * ⚠️ Client data. It is cleared in dataSync's resetSessionStores() at every
+   * identity change, and storeCoverage.test.ts fails if a new field here is not.
+   */
+  intakeForm: Record<string, string>
+
   setContextText: (t: string) => void
+  setIntakeAnswer: (id: string, value: string) => void
+  setIntakeForm: (answers: Record<string, string>) => void
   setReportMonths: (n: number) => void
   setResult: (r: GeneratedMapping | null) => void
   updateResult: (patch: Partial<GeneratedMapping>) => void
@@ -75,8 +88,11 @@ export const useAutoMapStore = create<AutoMapState>()(
       drafts: [],
       annualItems: [],
       dismissedOneOffs: [],
+      intakeForm: {},
 
       setContextText:  (contextText) => set({ contextText }),
+      setIntakeAnswer: (id, value) => set(s => ({ intakeForm: { ...s.intakeForm, [id]: value } })),
+      setIntakeForm:   (answers) => set(s => ({ intakeForm: { ...s.intakeForm, ...answers } })),
       setReportMonths: (n) => set({ reportMonths: Math.max(1, Math.min(24, Math.floor(n || 1))) }),
       setResult:       (result) => set({ result }),
       updateResult:    (patch) => set(s => ({ result: s.result ? { ...s.result, ...patch } : s.result })),
@@ -93,7 +109,7 @@ export const useAutoMapStore = create<AutoMapState>()(
 
       reset: () => set({
         contextText: '', reportMonths: 1, result: null,
-        annualItems: [], dismissedOneOffs: [],
+        annualItems: [], dismissedOneOffs: [], intakeForm: {},
       }),
 
       saveDraft: (name) => {

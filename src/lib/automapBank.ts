@@ -25,6 +25,12 @@ export interface BankRow {
   amount: number   // always positive; `dir` carries the direction
   date:   string   // YYYY-MM-DD, or '' when the row had no real Date cell
   dir:    Dir
+  /**
+   * The file this row came from. Not set by the extractor — the caller stamps it
+   * so detaching one statement can drop exactly its rows. Optional so every
+   * existing caller and test is unaffected.
+   */
+  source?: string
 }
 
 /** How many leading rows to scan for a header before giving up. */
