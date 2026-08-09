@@ -3386,6 +3386,14 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   ["analyst", "השקעות"],
   ["הראל פנסיה", "השקעות"],
   ["מגדל פנסיה", "השקעות"],
+  // Money-market funds and investment platforms: a transfer here is SAVING, not
+  // spending. Ori, 2026-08-09. Each key must out-length the generic house name
+  // above it ("מגדל" → ביטוח), or a קרן כספית gets filed as insurance.
+  ["מגדל כספית", "חסכונות"],
+  ["קסם אקטיב", "חסכונות"],
+  ["ksm active", "חסכונות"],
+  ["קרן כספית", "חסכונות"],
+  ["גמל להשקעה", "חסכונות"],
   ["כלל פנסיה", "השקעות"],
   ["מנורה פנסיה", "השקעות"],
   ["הפניקס פנסיה", "השקעות"],
