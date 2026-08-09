@@ -41,6 +41,12 @@ export interface CompletenessInput {
   annualItems:  AnnualItem[]
   installments: unknown[]
   settlements:  unknown[]
+  /**
+   * The client's questionnaire answers, once loaded. `null` when there is no
+   * questionnaire to speak of — which is a different statement from "the client
+   * left it blank", and the checks below keep the two apart.
+   */
+  intakeAnswers?: Record<string, string> | null
 }
 
 /** Categories whose spend is real but whose detail was never captured. */
@@ -158,6 +164,35 @@ export function buildCompletenessReport(input: CompletenessInput): CompletenessI
       title: 'לא הוזנו הוצאות שנתיות',
       detail: 'ביטוחים, ארנונה, אגרות חינוך וחופשות לא יופיעו בחלון קצר. מלא את הצ\'קליסט או סמן חיובים חשודים.',
     })
+  }
+
+  // 6b. What the client was ASKED and left blank. This is the half a document
+  //     can never supply, and the questionnaire turns it from an unknown into a
+  //     follow-up: the advisor can go back and ask. Only runs when there IS a
+  //     questionnaire — a client who was never sent one has not "skipped" it.
+  const ans = input.intakeAnswers
+  if (ans) {
+    const has = (id: string) => (ans[id] ?? '').trim().length > 0
+    const unanswered: string[] = []
+    if (!has('bankAccounts'))  unanswered.push('באילו בנקים מתנהלים החשבונות')
+    if (!has('oshBalance'))    unanswered.push('יתרות העו"ש')
+    if (!has('creditLimits'))  unanswered.push('מסגרות האשראי')
+    if (unanswered.length) {
+      items.push({
+        key: 'intake-blank', severity: 'gap',
+        title: 'הלקוח לא ענה בשאלון על:',
+        detail: `${unanswered.join(' · ')} — אלה דברים שהדוחות לא מכילים, אז אין מאיפה להשלים אותם.`,
+      })
+    }
+    // A loan he confirmed having, with no schedule attached, is the single most
+    // common hole: the repayment shows in the bank, the balance and rate never do.
+    if (ans.hasLoans === 'כן' && !docs.length) {
+      items.push({
+        key: 'loans-no-schedule', severity: 'gap',
+        title: 'הלקוח ציין שיש הלוואות, אבל לא צורף לוח סילוקין',
+        detail: 'ההחזר החודשי נראה בעו"ש; היתרה, הריבית ומספר התשלומים שנותרו לא.',
+      })
+    }
   }
 
   // 7. What was deliberately moved out of the monthly picture. Informational —

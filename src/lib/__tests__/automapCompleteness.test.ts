@@ -127,6 +127,38 @@ describe('buildCompletenessReport — each check fires only on its own condition
     expect(report.find(i => i.key === 'moved-out')?.detail).toContain('1 חיובים שסומנו כשנתיים')
   })
 
+  // The questionnaire turns an unknown into a follow-up: the advisor can go
+  // back and ask. But a client who was never SENT one has not skipped it, and
+  // conflating the two would fire this on every single run.
+  it('says nothing about the questionnaire when there is none', () => {
+    expect(keys({ intakeAnswers: null })).not.toContain('intake-blank')
+    expect(keys()).not.toContain('intake-blank')
+  })
+
+  it('names the questions the client left blank', () => {
+    const report = buildCompletenessReport(base({ intakeAnswers: { bankAccounts: 'יהב' } }))
+    const item = report.find(i => i.key === 'intake-blank')!
+    expect(item.detail).toContain('יתרות העו"ש')
+    expect(item.detail).toContain('מסגרות האשראי')
+    expect(item.detail).not.toContain('באילו בנקים')   // that one was answered
+  })
+
+  it('stays quiet once the client answered them', () => {
+    expect(keys({
+      intakeAnswers: { bankAccounts: 'יהב', oshBalance: '12,000', creditLimits: '30,000' },
+    })).not.toContain('intake-blank')
+  })
+
+  it('flags a confirmed loan with no schedule attached', () => {
+    const withLoan = { bankAccounts: 'א', oshBalance: 'ב', creditLimits: 'ג', hasLoans: 'כן' }
+    expect(keys({ intakeAnswers: withLoan })).toContain('loans-no-schedule')
+    // A document was attached — we cannot tell which, so we stop asking.
+    expect(keys({ intakeAnswers: withLoan, docs: [{ name: 'סילוקין.pdf' }] }))
+      .not.toContain('loans-no-schedule')
+    // And no loans means no question.
+    expect(keys({ intakeAnswers: { ...withLoan, hasLoans: 'לא' } })).not.toContain('loans-no-schedule')
+  })
+
   it('nets refunds when judging whether an amount is material', () => {
     const report = buildCompletenessReport(base({
       expenseTxns: [

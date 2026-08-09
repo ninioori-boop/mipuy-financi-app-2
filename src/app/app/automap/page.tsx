@@ -24,6 +24,11 @@ import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
+import {
+  loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
+  formatIntakeAnswers, countAnswered, type IntakeDoc, type IntakeRoute,
+} from '@/lib/automapIntake'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { VAR_CATEGORIES } from '@/lib/constants'
@@ -152,7 +157,7 @@ export default function AutoMapPage() {
   // PDF + images → base64 blocks the AI reads directly.
   // parseStatus is updated per-file so the user sees ✓/⏳/✗ next to each one
   // during a multi-file batch instead of a single global spinner.
-  const handleFiles = useCallback(async (files: File[]) => {
+  const handleFiles = useCallback(async (files: File[], routes?: Map<string, IntakeRoute>) => {
     setIsParsing(true)
     setParseStatus(Object.fromEntries(files.map(f => [f.name, 'parsing'])))
     try {
@@ -163,16 +168,21 @@ export default function AutoMapPage() {
       let bankCount = 0
       for (const file of files) {
         try {
-          const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
+          // A file that came from the questionnaire carries the question it
+          // answered, so we KNOW what it is. Sniffing the format is what made a
+          // bank export go through the credit parser and count a salary as an
+          // expense; when the client told us, we don't guess.
+          const route   = routes?.get(file.name)
+          const isExcel = route === 'bank' || route === 'credit' || (!route && /\.(xlsx|xls|csv)$/i.test(file.name))
           const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
           const isImage = file.type.startsWith('image/')
           if (isExcel) {
             const rows = await parseExcelFile(file, { allSheets: true })
             // A bank statement must NOT go through the credit parser: it has no
             // concept of חובה/זכות, so it read a salary deposit as an expense.
-            // detectBankHeader keys on words a credit export never contains, so
-            // credit files stay on exactly the path they use today.
-            const bank = extractBankRows(rows)
+            // When the questionnaire told us which this is, honour that; only a
+            // manual upload falls back to sniffing the header.
+            const bank = route === 'credit' ? [] : extractBankRows(rows)
             if (bank.length) {
               bankCount += bank.length
               setBankRows(prev => [...prev, ...bank])
@@ -211,6 +221,69 @@ export default function AutoMapPage() {
       setTimeout(() => setParseStatus({}), 3000)
     }
   }, [])
+
+  // ── the client's questionnaire ──
+  //
+  // It has existed and been filled in for months, and nothing ever read it back:
+  // the client screen only loads the SIGNED-IN user's own intake, so the advisor
+  // had no view of it at all. Everything here is read-only; the rules already
+  // grant the advisor access through ownsClient().
+  const impersonated = useImpersonationStore(s => s.client)
+  const [intake, setIntake] = useState<{ answers: Record<string, string>; docs: IntakeDoc[] } | null>(null)
+  const [intakeLoaded, setIntakeLoaded] = useState(false)
+  const [loadingIntake, setLoadingIntake] = useState(false)
+
+  useEffect(() => {
+    const uid = impersonated?.uid
+    if (!uid) { setIntake(null); return }
+    let alive = true
+    ;(async () => {
+      try {
+        const [answers, docs] = await Promise.all([loadIntakeAnswers(uid), listIntakeDocs(uid)])
+        if (alive && (Object.keys(answers).length || docs.length)) setIntake({ answers, docs })
+      } catch { /* no intake, or not permitted — the banner simply won't show */ }
+    })()
+    return () => { alive = false }
+  }, [impersonated?.uid])
+
+  // Pull the questionnaire in: answers become a block in the prompt, files go
+  // through the SAME pipeline as a manual upload but routed by the question they
+  // answered rather than by sniffing the format.
+  const loadIntakeIntoLab = useCallback(async () => {
+    if (!intake) return
+    setLoadingIntake(true)
+    try {
+      const answerLines = formatIntakeAnswers(intake.answers)
+      if (answerLines.length) {
+        const block = ['=== תשובות הלקוח מהשאלון ===', ...answerLines].join('\n')
+        setContextText(contextText.trim() ? `${contextText.trim()}\n\n${block}` : block)
+      }
+
+      // Skip anything already uploaded by hand, by name — re-adding a file the
+      // advisor just dragged in would double every transaction in it.
+      const have = new Set(fileNames)
+      const fresh = intake.docs.filter(d => !have.has(d.name))
+      const files: File[] = []
+      const routes = new Map<string, IntakeRoute>()
+      for (const d of fresh) {
+        try {
+          const res = await fetch(await intakeFileUrl(d.path))
+          if (!res.ok) continue
+          const blob = await res.blob()
+          files.push(new File([blob], d.name, { type: d.type || blob.type }))
+          routes.set(d.name, routeForQuestion(d.questionId))
+        } catch { /* one unreadable file must not abort the rest */ }
+      }
+      if (files.length) await handleFiles(files, routes)
+
+      setIntakeLoaded(true)
+      toast.success(`📋 נטען מהשאלון: ${answerLines.length} תשובות · ${files.length} קבצים`)
+    } catch (e) {
+      toast.error('שגיאה בטעינת השאלון: ' + (e as Error).message)
+    } finally {
+      setLoadingIntake(false)
+    }
+  }, [intake, contextText, setContextText, fileNames, handleFiles])
 
   // Clipboard paste: capture screenshots / images directly with Ctrl+V.
   // Only activated on this page (window-level listener cleaned up on unmount).
@@ -347,9 +420,10 @@ export default function AutoMapPage() {
     () => buildCompletenessReport({
       expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
       annualItems, installments: installmentLines, settlements,
+      intakeAnswers: intakeLoaded ? (intake?.answers ?? null) : null,
     }),
     [expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
-     annualItems, installmentLines, settlements],
+     annualItems, installmentLines, settlements, intakeLoaded, intake],
   )
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
@@ -938,6 +1012,34 @@ export default function AutoMapPage() {
             </div>
           )}
         </div>
+
+        {/* The client already answered a questionnaire and uploaded documents,
+            tagged with the question each one answers. Until now nothing read it
+            back. Offered as a button rather than auto-loaded: the files cost
+            bandwidth and the advisor should choose. */}
+        {intake && !intakeLoaded && (
+          <div className="rounded-xl border border-income/40 bg-income/5 p-3 flex items-center gap-3 flex-wrap">
+            <span className="text-sm text-txt flex-1 min-w-[200px]">
+              📋 <strong>{impersonated?.name || 'הלקוח'}</strong> מילא שאלון
+              <span className="text-muted-txt">
+                {' · '}{countAnswered(intake.answers)} תשובות
+                {intake.docs.length > 0 && ` · ${intake.docs.length} מסמכים`}
+              </span>
+            </span>
+            <button
+              onClick={loadIntakeIntoLab}
+              disabled={loadingIntake}
+              className="shrink-0 rounded-lg border border-income/50 bg-income/10 px-3 py-1.5 text-sm font-semibold text-income hover:bg-income/20 transition-colors disabled:opacity-60"
+            >
+              {loadingIntake ? 'טוען…' : 'טען לתוך המעבדה'}
+            </button>
+          </div>
+        )}
+        {intakeLoaded && (
+          <div className="rounded-xl border border-line bg-surface2/60 px-3 py-2 text-xs text-income">
+            ✓ השאלון של הלקוח נטען — התשובות נוספו להקשר, והמסמכים נותבו לפי השאלה שהם עונים עליה.
+          </div>
+        )}
 
         {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
             of a client's life looks identical to one built from 95% — every
