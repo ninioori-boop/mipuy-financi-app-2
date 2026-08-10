@@ -199,6 +199,26 @@ describe('formatCategoryBreakdown', () => {
     expect(lines.find(l => l.startsWith('[משתנות]'))).toContain('400 ש"ח לחודש')
   })
 
+  // ⚠️ annualAmount is a YEARLY sum, so a monthly average is the wrong unit for
+  // it. Printing one would leave the model to guess whether to multiply back
+  // up, and either guess it makes is wrong by a factor of 12.
+  it('does NOT divide an annual-section category, and says which unit it is', () => {
+    const lines = formatCategoryBreakdown(buildCategoryBreakdown([tx('אל על', 6000, 'חופשה וטיול')]), 3)
+    const line = lines.find(l => l.startsWith('[שנתיות]'))!
+    expect(line).toContain('6000 ש"ח')       // the period total, not 2000
+    expect(line).toContain('שנתי')
+    expect(line).toContain('אל תחלק ב‑12')
+  })
+
+  it('still divides every other section in the same run', () => {
+    const lines = formatCategoryBreakdown(buildCategoryBreakdown([
+      tx('אל על', 6000, 'חופשה וטיול'),
+      tx('שופרסל', 6000, 'מזון לבית'),
+    ]), 3)
+    expect(lines.find(l => l.startsWith('[שנתיות]'))).toContain('6000')
+    expect(lines.find(l => l.startsWith('[משתנות]'))).toContain('2000 ש"ח לחודש')
+  })
+
   it('never prints "(0)" for a refund-only merchant, and flags a negative category', () => {
     const lines = formatCategoryBreakdown(buildCategoryBreakdown([
       tx('כלי בית', 200, 'ריהוט וציוד לבית'),

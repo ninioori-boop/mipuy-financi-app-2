@@ -464,6 +464,18 @@ export function formatCategoryBreakdown(rows: CategoryBreakdown[], months = 1): 
     // The [tag] is the category's section, stated rather than left to memory.
     const sec = sectionOfCategory(r.category)
     const tag = sec ? `[${SECTION_LABEL_HE[sec]}] ` : ''
+
+    // ⚠️ The annual section stores a YEARLY sum, so a monthly average is the
+    // wrong unit for it — and printing one leaves the model to guess whether to
+    // multiply back up, which is a 12x error either way it guesses. An annual
+    // charge that landed inside the window IS the yearly amount, which is
+    // exactly how the advisor's own one-off confirmation treats it, so the
+    // period total is printed and labelled as such.
+    if (sec === 'annual') {
+      lines.push(`${tag}${r.category}: ${Math.round(r.sum)} ש"ח — זהו הסכום שחויב בתקופה, והוא הסכום ה**שנתי** לשדה annualAmount. אל תחלק ב‑12 ואל תכפיל ב‑12. (${r.count} עסקאות)${neg}`)
+      continue
+    }
+
     lines.push(`${tag}${r.category}: ${Math.round(r.sum / m)} ש"ח לחודש (${r.count} עסקאות ב‑${m} חודשים)${neg}`)
     for (const mr of r.merchants) {
       lines.push(`  - ${short(mr.name)}: ${Math.round(mr.sum / m)} לחודש (${countLabel(mr.count)})`)
@@ -505,7 +517,7 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 ## כללי חישוב
 - כל הסכומים ב‑income/fixed/sub/ins/variable הם **חודשיים**.
 - 🔴 **הסכומים בבלוקים שאתה מקבל כבר מחולקים למספר החודשים. אל תחלק אותם שוב ואל תכפיל אותם.** העתק את המספר החודשי כמו שהוא.
-- annual: סכום **שנתי** (הסכום בפועל לשנה, לא ×12 של חד‑פעמי).
+- **annual הוא היוצא מן הכלל היחיד:** בשדה annualAmount נכנס סכום **שנתי**. שורות שמסומנות \`[שנתיות]\` מגיעות אליך כסכום התקופה ולא כממוצע חודשי, והן כבר הסכום השנתי — קח אותן כמו שהן. אל תחלק ב‑12 (המערכת מציגה ליועץ את החלוקה בעצמה) ואל תכפיל ב‑12 חיוב חד‑פעמי.
 - מספרים בלבד (ללא ₪ וללא פסיקים).
 
 ## מבנה הנתונים שאתה מקבל
