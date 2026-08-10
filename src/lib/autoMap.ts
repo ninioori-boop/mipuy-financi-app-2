@@ -92,7 +92,7 @@ const list = (s: Set<string>) => [...s].join(', ')
 // lab's row editor (picking a category moves the row). One source of truth for
 // both, so the tag the model reads and the move the advisor makes cannot drift.
 
-export type MappingSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | 'skip'
+export type MappingSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins' | 'annual' | 'debts' | 'skip'
 
 export const SECTION_LABEL_HE: Record<MappingSection, string> = {
   income:   'הכנסה',
@@ -101,6 +101,7 @@ export const SECTION_LABEL_HE: Record<MappingSection, string> = {
   sub:      'מנויים',
   ins:      'ביטוחים',
   annual:   'שנתיות',
+  debts:    'הלוואות',
   skip:     'לא הוצאה',
 }
 
@@ -110,6 +111,12 @@ export function sectionOfCategory(cat: string): MappingSection | null {
   // 'הכנסות' lives in SKIP_CATEGORIES (it is not an expense) but it IS the
   // income section — checked first so a misfiled salary row can be moved there.
   if (cat === 'הכנסות')            return 'income'
+  // 🔴 'החזר הלוואות' is in FIXED_CATEGORIES, so this used to tag a mortgage
+  // repayment "[קבועות]" and the model dutifully filed it there. A repayment is
+  // not a fixed expense: it has a balance, a rate and an end date, and the whole
+  // point of the debts section is that those are tracked. Checked before FIXED
+  // so the more specific answer wins.
+  if (cat === 'החזר הלוואות')      return 'debts'
   if (FIXED_CATEGORIES.has(cat))    return 'fixed'
   if (VAR_CATEGORIES.has(cat))      return 'variable'
   if (SUB_CATEGORIES.has(cat))      return 'sub'
@@ -325,19 +332,41 @@ export function buildCategoryBreakdown(
 // which is meaningless for a salary. Settlements are shown so the advisor can
 // see what was excluded rather than having it vanish silently.
 
-export interface NamedTotal { name: string; sum: number; count: number }
+export interface NamedTotal {
+  name: string; sum: number; count: number
+  /**
+   * How many DISTINCT calendar months this source appeared in.
+   *
+   * Dividing a period total by the window is not enough on its own. A reserve
+   * duty grant of ₪5,808 paid once in three months is not ₪1,936 of monthly
+   * income; it is a one-off that happens to sit inside the window. Without this
+   * number the only choice is between two wrong answers, and the model has no
+   * way to tell a salary from a windfall.
+   */
+  months: number
+}
 
 /** Group by merchant (same normalization as everywhere else), biggest first. */
-export function groupByName(rows: { desc: string; amount: number }[], cap = 25): NamedTotal[] {
+export function groupByName(
+  rows: { desc: string; amount: number; date?: string }[],
+  cap = 25,
+): NamedTotal[] {
   const map = new Map<string, NamedTotal>()
+  const monthsSeen = new Map<string, Set<string>>()
   for (const r of rows) {
     const key = normalizeForLookup(r.desc) || r.desc.trim()
     if (!key) continue
-    const line = map.get(key) ?? { name: r.desc.trim() || key, sum: 0, count: 0 }
+    const line = map.get(key) ?? { name: r.desc.trim() || key, sum: 0, count: 0, months: 0 }
     line.sum += r.amount
     line.count++
     map.set(key, line)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(r.date ?? '')) {
+      const set = monthsSeen.get(key) ?? new Set<string>()
+      set.add(r.date!.slice(0, 7))
+      monthsSeen.set(key, set)
+    }
   }
+  for (const [key, line] of map) line.months = monthsSeen.get(key)?.size ?? 0
   const all = [...map.values()].sort((a, b) => b.sum - a.sum)
   if (all.length <= cap) return all
   const rest = all.slice(cap)
@@ -347,16 +376,36 @@ export function groupByName(rows: { desc: string; amount: number }[], cap = 25):
       name:  `שאר ההפקדות (${rest.length})`,
       sum:   rest.reduce((s, m) => s + m.sum, 0),
       count: rest.reduce((s, m) => s + m.count, 0),
+      months: Math.max(0, ...rest.map(m => m.months)),
     },
   ]
 }
 
-/** Renders deposits as the income block. Amounts are PERIOD totals, like everything else. */
+/**
+ * The income block — MONTHLY figures, divided here.
+ *
+ * 🔴 This block used to send period totals with a written instruction to divide
+ * by the window. On a real 3-month run the model divided the expenses and did
+ * not divide the income, and a household came out with ₪59,807 of "monthly"
+ * income: reserve-duty payments summed over three months and presented as if
+ * they arrived every month. Asking a model to do arithmetic the code can do is
+ * a bug in the code, not in the model. We do the division.
+ *
+ * Each line also says how many distinct months the source appeared in, because
+ * dividing alone converts one wrong answer into another: a one-off grant spread
+ * over three months is not monthly income either.
+ */
 export function formatIncomeBreakdown(lines: NamedTotal[], months = 1): string[] {
   if (!lines.length) return []
-  const span = months > 1 ? `על פני ${months} חודשים` : 'על פני חודש אחד'
-  const out = [`(סך ההפקדות ${span}. חלק במספר החודשים כדי לקבל הכנסה חודשית)`]
-  for (const l of lines) out.push(`  - ${short(l.name)}: ${Math.round(l.sum)} (${l.count} הפקדות)`)
+  const m = Math.max(1, months)
+  const out = [
+    `(הסכומים כאן הם כבר ממוצע חודשי — סך ההפקדות חולק ב‑${m}. אל תחלק שוב.)`,
+    '(שים לב לשדה "הופיע ב": מקור שהופיע בחודש אחד מתוך ' + m + ' הוא כנראה חד־פעמי ולא הכנסה חודשית.)',
+  ]
+  for (const l of lines) {
+    const seen = l.months > 0 ? `, הופיע ב‑${l.months} מתוך ${m} חודשים` : ''
+    out.push(`  - ${short(l.name)}: ${Math.round(l.sum / m)} לחודש (סה"כ ${Math.round(l.sum)} ב‑${l.count} הפקדות${seen})`)
+  }
   return out
 }
 
@@ -401,21 +450,26 @@ const countLabel = (c: number) => (c > 0 ? `${c}` : 'זיכוי בלבד')
  * `months` is stated on the header because every figure here is a PERIOD total
  * across the uploaded files, while the mapping the model returns is monthly.
  */
+/**
+ * The expense block — MONTHLY figures, divided here, for the same reason the
+ * income block is. Handing the model a period total plus "divide by 3" makes
+ * the whole mapping depend on the model remembering to, in every single line.
+ */
 export function formatCategoryBreakdown(rows: CategoryBreakdown[], months = 1): string[] {
   const lines: string[] = []
-  const span = months > 1 ? `סך הכל על פני ${months} חודשים` : 'סך הכל על פני חודש אחד'
-  lines.push(`(כל הסכומים כאן הם ${span}, אחרי קיזוז זיכויים)`)
+  const m = Math.max(1, months)
+  lines.push(`(כל הסכומים כאן הם ממוצע חודשי — כבר חולקו ב‑${m} ואחרי קיזוז זיכויים. אל תחלק שוב.)`)
   for (const r of rows) {
     const neg = r.sum < 0 ? ' — נטו שלילי: הוחזר יותר ממה שחויב בתקופה' : ''
     // The [tag] is the category's section, stated rather than left to memory.
     const sec = sectionOfCategory(r.category)
     const tag = sec ? `[${SECTION_LABEL_HE[sec]}] ` : ''
-    lines.push(`${tag}${r.category}: ${Math.round(r.sum)} ש"ח (${r.count} עסקאות)${neg}`)
-    for (const m of r.merchants) {
-      lines.push(`  - ${short(m.name)}: ${Math.round(m.sum)} (${countLabel(m.count)})`)
+    lines.push(`${tag}${r.category}: ${Math.round(r.sum / m)} ש"ח לחודש (${r.count} עסקאות ב‑${m} חודשים)${neg}`)
+    for (const mr of r.merchants) {
+      lines.push(`  - ${short(mr.name)}: ${Math.round(mr.sum / m)} לחודש (${countLabel(mr.count)})`)
     }
     if (r.other) {
-      lines.push(`  - שאר בתי העסק (${r.other.merchants}): ${Math.round(r.other.sum)} (${countLabel(r.other.count)})`)
+      lines.push(`  - שאר בתי העסק (${r.other.merchants}): ${Math.round(r.other.sum / m)} לחודש (${countLabel(r.other.count)})`)
     }
   }
   return lines
@@ -435,7 +489,7 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **ins (ביטוחים)**: ${list(INSURANCE_CATEGORIES)}
 - **annual (שנתיות)**: ${list(ANNUAL_CATEGORIES)}
 - **income (הכנסות)**: משכורות, קצבאות, הכנסה נוספת.
-- **debts (חובות)**: הלוואות עם יתרה והחזר חודשי.
+- **debts (חובות)**: הלוואות ומשכנתאות. 🔴 **כל החזר הלוואה או משכנתה הולך לכאן, לעולם לא ל‑fixed.** גם כשהקטגוריה "החזר הלוואות" מופיעה בבלוק ההוצאות — היא שייכת ל‑debts. החזר הוא לא הוצאה קבועה: יש לו יתרה, ריבית ותאריך סיום, וזה כל מה שהסעיף הזה קיים בשבילו. אם היתרה, הריבית או מספר התשלומים לא ידועים — השאר 0, **אל תמציא אותם**, ומלא רק monthlyPayment.
 - **installments (תשלומים)**: רכישות בתשלומים (X מתוך Y).
 - **savings (חיסכון)**: הפקדות לחיסכון/פנסיה/קרנות.
 
@@ -449,13 +503,16 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 השתמש אך ורק בשמות קטגוריות מתוך הרשימה הבאה כשמתאים: ${ALL_CATEGORIES.join(', ')}. אל תמציא קטגוריות.
 
 ## כללי חישוב
-- כל הסכומים ב‑income/fixed/sub/ins/variable הם **חודשיים** (ממוצע). אם הנתונים מכסים כמה חודשים — חלק במספר החודשים שצויין.
+- כל הסכומים ב‑income/fixed/sub/ins/variable הם **חודשיים**.
+- 🔴 **הסכומים בבלוקים שאתה מקבל כבר מחולקים למספר החודשים. אל תחלק אותם שוב ואל תכפיל אותם.** העתק את המספר החודשי כמו שהוא.
 - annual: סכום **שנתי** (הסכום בפועל לשנה, לא ×12 של חד‑פעמי).
 - מספרים בלבד (ללא ₪ וללא פסיקים).
 
 ## מבנה הנתונים שאתה מקבל
 - **בלוק ההוצאות** — קטגוריות ובתי עסק. לפני כל קטגוריה מופיע תג בסוגריים מרובעות, למשל \`[קבועות]\` או \`[משתנות]\`. **התג הוא הסעיף שאליו הקטגוריה שייכת. השתמש בו כמו שהוא ואל תחליט לבד** לאיזה סעיף שורה הולכת.
-- **בלוק ההכנסות** — הפקדות שזוהו בעו"ש. זה המקור העיקרי לסעיף income. אם הוא קיים, אל תנחש הכנסות ממקום אחר.
+- **בלוק ההכנסות** — הפקדות שזוהו בעו"ש, כבר כממוצע חודשי. זה המקור העיקרי לסעיף income. אם הוא קיים, אל תנחש הכנסות ממקום אחר.
+  🔴 **לכל הפקדה כתוב "הופיע ב‑X מתוך Y חודשים". זה מפריד הכנסה מכסף חד‑פעמי.** מקור שהופיע בחודש אחד מתוך שלושה — מענק, החזר, פיצוי, מכירה, העברה מקרוב משפחה — **אינו הכנסה חודשית**. אל תכניס אותו ל‑income ואל תפרוס אותו על החודשים. אם הוא משמעותי, ציין אותו ב‑assessment כתקבול חד‑פעמי. רק מקור שחוזר כמעט בכל חודשי החלון הוא הכנסה שוטפת.
+  שים לב גם: תשלומי מילואים (ביטוח לאומי, מופ"ת, מענק) הם כמעט תמיד תקבול זמני ולא שכר קבוע.
 - **בלוק תשלומי הריכוז** — תשלומים לחברות האשראי. הם **כבר הוסרו** מבלוק ההוצאות, כי הפירוט האמיתי שלהם נמצא שם. הם מוצגים לידיעה בלבד — **אל תוסיף אותם כהוצאה**.
 - **בלוק התשלומים** — עסקאות בתשלומים, עם מספר התשלום מתוך הסך ועם הסכום המלא. זה המקור לסעיף installments. הם **כבר הוסרו** מבלוק ההוצאות — אל תכניס אותם גם ל‑variable או ל‑fixed.
 - **בלוק הוראות הקבע** — בתי עסק שמחייבים בהוראת קבע. השתמש בזה כדי להכריע קבוע מול משתנה. הם **כן** נספרים בבלוק ההוצאות, זה רק סימון.
@@ -796,12 +853,47 @@ export function extractJsonObject(text: string): string {
   return head + closers.join('')
 }
 
+/**
+ * Move loan repayments out of the expense sections and into `debts`.
+ *
+ * A repayment filed under "קבועות" loses everything that makes it a debt: the
+ * balance, the rate, the number of payments left, and the fact that it ends.
+ * The prompt says so, the category tag now says so — and this says so a third
+ * time, because a rule that only holds when the model cooperates is not a rule.
+ * What we do not know (balance, rate, term) stays 0 rather than invented.
+ */
+export function moveLoansToDebts(m: GeneratedMapping): GeneratedMapping {
+  const sections: ('fixed' | 'variable' | 'sub' | 'ins')[] = ['fixed', 'variable', 'sub', 'ins']
+  const moved: GenDebtRow[] = []
+  const out = { ...m }
+
+  for (const key of sections) {
+    const keep: GenSimpleRow[] = []
+    for (const row of out[key]) {
+      if (row.category === 'החזר הלוואות') {
+        moved.push({
+          name: row.name, monthlyPayment: row.amount,
+          originalBalance: 0, remainingBalance: 0, interestRate: 0, remainingMonths: 0,
+          confidence: row.confidence, source: row.source, reviewed: row.reviewed,
+        })
+      } else keep.push(row)
+    }
+    out[key] = keep
+  }
+
+  // A repayment the model already put in debts must not be duplicated by a
+  // same-named row it also left in קבועות.
+  const have = new Set(out.debts.map(d => normalizeForLookup(d.name) || d.name.trim()))
+  out.debts = [...out.debts, ...moved.filter(d => !have.has(normalizeForLookup(d.name) || d.name.trim()))]
+  return out
+}
+
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)
   const raw = obj(JSON.parse(json.replace(/,\s*([}\]])/g, '$1')))
 
-  return {
+  return moveLoansToDebts({
     creditScore:  num(raw.creditScore),
     creditCards:  arr(raw.creditCards).map(obj).map(r => ({
       name: str(r.name), limit: num(r.limit), chargeDay: num(r.chargeDay) || 2, ...meta(r),
@@ -835,7 +927,7 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
     businessIncome:   simple(arr(raw.businessIncome)),
     businessExpenses: simple(arr(raw.businessExpenses)),
     assessment: str(raw.assessment),
-  }
+  })
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {

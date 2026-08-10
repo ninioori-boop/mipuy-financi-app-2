@@ -14,6 +14,7 @@ import type {
   MappingRow, AnnualRow, DebtRow, InstallmentRow, SavingRow, CreditCardRow, BankAccountRow,
 } from '@/stores/mappingStore'
 import { sectionOfCategory, SECTION_LABEL_HE, type GeneratedMapping, type MappingSection } from '@/lib/autoMap'
+import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import type { Transaction } from '@/types/transaction'
 
 // The auto-mapping lab renders the AI result through the EXACT same panels as
@@ -64,13 +65,18 @@ function RowMetaChip({ confidence, source }: { confidence?: 'high' | 'medium' | 
 
 interface Props {
   result: GeneratedMapping
+  /** Everything parsed, credit AND bank — a bank-only category needs detail too. */
   txns: Transaction[]
+  /** Deposits, so an income row can show which ones it was built from. */
+  incomeRows?: { desc: string; amount: number; date: string }[]
+  /** Window length, so a period total can be shown as the monthly figure. */
+  months?: number
   onChange: (patch: Partial<GeneratedMapping>) => void
 }
 
 type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins'
 
-export function LabMappingView({ result, txns, onChange }: Props) {
+export function LabMappingView({ result, txns, incomeRows = [], months = 1, onChange }: Props) {
   // Which variable-category group has its underlying transactions expanded.
   const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
 
@@ -181,6 +187,22 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     const target  = sectionOfCategory(cat)
     const destKey = target ? MOVABLE[target] : undefined
 
+    // debts has its own row shape, so it cannot ride the generic move above.
+    // What we do not know about the loan stays 0 rather than invented — the
+    // advisor fills the balance and rate in, or leaves them empty.
+    if (target === 'debts') {
+      onChange({
+        [key]: rows.filter((_, i) => i !== idx),
+        debts: [...result.debts, {
+          name: row.name, monthlyPayment: row.amount,
+          originalBalance: 0, remainingBalance: 0, interestRate: 0, remainingMonths: 0,
+          confidence: row.confidence, source: row.source, reviewed: row.reviewed,
+        }],
+      } as Partial<GeneratedMapping>)
+      toast.success(`"${row.name || 'השורה'}" הועברה להלוואות`)
+      return
+    }
+
     if (destKey && destKey !== key) {
       onChange({
         [key]:     rows.filter((_, i) => i !== idx),
@@ -229,6 +251,26 @@ export function LabMappingView({ result, txns, onChange }: Props) {
     cat ? txns.filter(t => !t.isRefund && t.category === cat) : []
   const resolveTxnsFor = (key: SimpleKey) => (row: MappingRow): Transaction[] =>
     txnsForCategory(result[key][idxOf(row.id)]?.category)
+
+  // Income has no category to match on — its rows are named after the payer.
+  // Matching on the normalized name is how a row of ₪23,671 finally admits it
+  // is two reserve-duty deposits summed over three months. This was the single
+  // hardest number in the mapping to check, because it was the only one with no
+  // way to open it up at all.
+  const resolveIncomeTxns = (row: MappingRow): Transaction[] => {
+    const key = normalizeForLookup(row.name)
+    if (!key) return []
+    return incomeRows
+      .filter(r => {
+        const k = normalizeForLookup(r.desc)
+        return !!k && (k === key || k.includes(key) || key.includes(k))
+      })
+      .map(r => ({
+        desc: r.desc, amount: r.amount, originalAmount: null, category: 'הכנסות',
+        source: 'עו"ש', notes: '', date: r.date,
+        installment: null, isStandingOrder: false, isRefund: false,
+      }))
+  }
 
   const totalAnnualMo = Math.round(result.annual.reduce((s, r) => s + r.annualAmount, 0) / 12)
 
@@ -419,6 +461,15 @@ export function LabMappingView({ result, txns, onChange }: Props) {
           are the point: the category is editable and the source is how the
           advisor checks a number. Full width costs vertical scrolling on a
           screen that is reviewed once per client. */}
+      {/* Said once, up front: the rows are monthly averages and the פירוט lists
+          the whole window. Without this the advisor opens a ₪1,547 row, counts
+          ₪4,600 of charges, and reasonably concludes the mapping is broken. */}
+      {months > 1 && (
+        <div className="rounded-lg border border-line bg-surface2/60 px-3 py-2 text-xs text-muted-txt">
+          השורות הן <strong className="text-txt">ממוצע חודשי</strong>. הפירוט מתחתן מציג את העסקאות של כל {months} החודשים, ולכן סכומו גדול פי {months} בערך.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}
@@ -430,6 +481,7 @@ export function LabMappingView({ result, txns, onChange }: Props) {
           totalColor="text-income"
           colName="מקור הכנסה"
           rowExtra={chipFor('income')}
+          resolveTxns={resolveIncomeTxns}
           onAdd={() => addSimple('income')}
           onUpdate={(id, field, value) => editSimple('income', idxOf(id), field, value)}
           onDelete={id => delRow('income', idxOf(id))}

@@ -1620,7 +1620,17 @@ export default function AutoMapPage() {
               same panels as the manual mapping tab. Edits flow back into the
               isolated autoMapStore via updateResult; nothing touches the real
               mapping until "העתק למיפוי". */}
-          <LabMappingView result={result} txns={txns} onChange={updateResult} />
+          {/* allTxns, not txns: the credit-only list left every bank-sourced
+              category (health fund, mortgage, standing orders) with no פירוט at
+              all, which is exactly where the advisor most needs to see what the
+              row is made of. incomeRows does the same for the income section. */}
+          <LabMappingView
+            result={result}
+            txns={allTxns}
+            incomeRows={incomeRows}
+            months={detectedMonths || reportMonths}
+            onChange={updateResult}
+          />
 
         </div>
       )}
