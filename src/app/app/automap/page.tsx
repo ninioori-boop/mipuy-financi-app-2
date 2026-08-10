@@ -24,6 +24,7 @@ import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
+import { reconcile } from '@/lib/automapReconcile'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
   formatIntakeAnswers, countAnswered, type IntakeDoc, type IntakeRoute,
@@ -265,6 +266,11 @@ export default function AutoMapPage() {
     () => new Set(Object.values(attachedByQ).flat()),
     [attachedByQ],
   )
+  /** How many files each question got — the basis of "you said 3, I have 1". */
+  const intakeFiles = useMemo(
+    () => Object.fromEntries(Object.entries(attachedByQ).map(([q, names]) => [q, names.length])),
+    [attachedByQ],
+  )
   const intakeLines   = useMemo(() => formatIntakeAnswers(intakeForm), [intakeForm])
   const answeredCount = useMemo(() => countAnswered(intakeForm), [intakeForm])
 
@@ -483,9 +489,31 @@ export default function AutoMapPage() {
       // Still null when nothing at all was answered: a blank form is not a
       // client who skipped questions, and conflating them fires on every run.
       intakeAnswers: answeredCount > 0 ? intakeForm : null,
+      intakeFiles,
     }),
     [expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
-     annualItems, installmentLines, settlements, answeredCount, intakeForm],
+     annualItems, installmentLines, settlements, answeredCount, intakeForm, intakeFiles],
+  )
+
+  // ── the mapping against the account ──
+  //
+  // Every other check asks whether the mapping is consistent with ITSELF, which
+  // a mapping built from two thirds of a client's life passes cleanly — the
+  // missing third is missing from both sides of every comparison. The bank
+  // account is the one thing that cannot be argued with.
+  const flows = useMemo(() => ({
+    bankIn:  incomeRows.reduce((s, r) => s + r.amount, 0),
+    // Settlements are already out when a credit file supplied the detail; when
+    // it did not, they are still here and cardCharges is 0. Either way the card
+    // spend is counted exactly once.
+    bankOut: bankExpenses.reduce((s, r) => s + r.amount, 0),
+    cardCharges: txns.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0),
+    months: detectedMonths || reportMonths,
+  }), [incomeRows, bankExpenses, txns, detectedMonths, reportMonths])
+
+  const reconciliation = useMemo(
+    () => (result ? reconcile(result, flows) : null),
+    [result, flows],
   )
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
@@ -546,6 +574,21 @@ export default function AutoMapPage() {
       lines.push(`${settlements.length} תשלומים, ${Math.round(total)} ש"ח סך הכל. הפירוט האמיתי נמצא בבלוק ההוצאות.`)
       lines.push('')
     }
+    // The target the answer has to hit. Grading the mapping after the fact only
+    // catches the error; stating the number up front lets the model produce a
+    // mapping that reconciles in the first place. The last line matters most:
+    // without it the model closes the gap by inventing a row, which is the
+    // failure mode this whole panel exists to prevent.
+    if (flows.bankIn > 0 || flows.bankOut > 0) {
+      const net = (flows.bankIn - flows.bankOut - flows.cardCharges) / Math.max(1, flows.months)
+      lines.push('== מבחן ההצלבה — המיפוי חייב לעמוד בו ==')
+      lines.push(`בחלון שהועלה נכנסו לעו"ש ${Math.round(flows.bankIn)} ש"ח, יצאו ממנו ${Math.round(flows.bankOut)} ש"ח (בלי תשלומי ריכוז אשראי), וחיובי האשראי היו ${Math.round(flows.cardCharges)} ש"ח.`)
+      lines.push(`כלומר בפועל החשבון נע ב‑${Math.round(net)} ש"ח לחודש.`)
+      lines.push('העודף החודשי של המיפוי שלך (הכנסות, פחות קבועות+משתנות+מנויים+ביטוחים+החזרי הלוואות+תשלומים+חיסכון+שנתיות חלקי 12) צריך לצאת קרוב למספר הזה.')
+      lines.push('🔴 אם אתה לא מגיע לשם — אל תמציא שורה כדי לסגור את הפער ואל תנפח סכום. כתוב ב‑assessment מה לדעתך חסר.')
+      lines.push('')
+    }
+
     // The questionnaire goes LAST so it is the freshest thing in context, and it
     // is marked as authoritative: it answers what no document can (which bank
     // holds the account, the balances, the limits, whether loans exist at all).
@@ -1490,6 +1533,50 @@ export default function AutoMapPage() {
               </div>
             )}
           </div>
+
+          {/* The account's verdict on the mapping. Shown FIRST and always —
+              including when it passes, because "this reconciles" is the one
+              statement that lets the advisor stop gathering. Everything below
+              only checks the mapping against itself. */}
+          {reconciliation && (
+            <div className={`rounded-xl border-2 p-3 sm:p-4 space-y-2 ${
+              reconciliation.verdict === 'ok'          ? 'border-income/40 bg-income/5'
+              : reconciliation.verdict === 'no-bank-data' ? 'border-line bg-surface2'
+              : 'border-expense/40 bg-expense/5'
+            }`}>
+              <div className={`text-sm font-semibold ${
+                reconciliation.verdict === 'ok'          ? 'text-income'
+                : reconciliation.verdict === 'no-bank-data' ? 'text-muted-txt'
+                : 'text-expense'
+              }`}>
+                {reconciliation.verdict === 'ok' ? '✓' : reconciliation.verdict === 'no-bank-data' ? '○' : '⚠️'}
+                {' '}{reconciliation.title}
+              </div>
+              <div className="text-xs text-txt leading-relaxed">{reconciliation.detail}</div>
+              {reconciliation.verdict !== 'no-bank-data' && (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-surface border border-line rounded-lg p-2">
+                    <div className="text-[10px] text-muted-txt">בפועל בחשבון</div>
+                    <div className={`text-sm font-bold tabular-nums ${reconciliation.actualPerMonth >= 0 ? 'text-income' : 'text-expense'}`}>
+                      {fmt(reconciliation.actualPerMonth)}
+                    </div>
+                  </div>
+                  <div className="bg-surface border border-line rounded-lg p-2">
+                    <div className="text-[10px] text-muted-txt">לפי המיפוי</div>
+                    <div className={`text-sm font-bold tabular-nums ${reconciliation.mappingPerMonth >= 0 ? 'text-income' : 'text-expense'}`}>
+                      {fmt(reconciliation.mappingPerMonth)}
+                    </div>
+                  </div>
+                  <div className="bg-surface border border-line rounded-lg p-2">
+                    <div className="text-[10px] text-muted-txt">פער</div>
+                    <div className={`text-sm font-bold tabular-nums ${reconciliation.verdict === 'ok' ? 'text-muted-txt' : 'text-expense'}`}>
+                      {fmt(Math.abs(reconciliation.gapPerMonth))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Local validation panel — surfaces any sanity-check issues found
               in the result. Pure heuristics, no AI call. Errors (red) vs

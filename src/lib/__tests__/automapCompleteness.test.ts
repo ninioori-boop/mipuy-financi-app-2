@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCompletenessReport, missingMonths, type CompletenessInput } from '@/lib/automapCompleteness'
+import { buildCompletenessReport, missingMonths, parseCount, type CompletenessInput } from '@/lib/automapCompleteness'
 
 const tx = (amount: number, category: string, date = '2026-06-05') =>
   ({ amount, category, isRefund: false, date })
@@ -168,5 +168,96 @@ describe('buildCompletenessReport — each check fires only on its own condition
       ],
     }))
     expect(report.map(i => i.key)).not.toContain('untracked-cash')   // ₪50 net, not ₪4,000
+  })
+})
+
+describe('parseCount — how many did they say', () => {
+  it('reads a digit anywhere in the answer', () => {
+    expect(parseCount('3')).toBe(3)
+    expect(parseCount('2 חשבונות בבנק הפועלים')).toBe(2)
+    expect(parseCount('יש לנו 4 כרטיסים')).toBe(4)
+  })
+
+  it('reads a Hebrew number word', () => {
+    expect(parseCount('שלושה')).toBe(3)
+    expect(parseCount('שני חשבונות')).toBe(2)
+    expect(parseCount('אחד בלבד')).toBe(1)
+  })
+
+  // Inventing a number here would invent a gap that does not exist, and the
+  // advisor would go chasing a file nobody was ever missing.
+  it('returns null rather than guessing', () => {
+    expect(parseCount('')).toBeNull()
+    expect(parseCount(undefined)).toBeNull()
+    expect(parseCount('כמה שצריך')).toBeNull()
+  })
+})
+
+// A mapping built from one of three credit cards balances perfectly, reads
+// perfectly, and understates spending by two thirds. The questionnaire is the
+// only place that knows how many there should have been.
+describe('buildCompletenessReport — what was promised vs what arrived', () => {
+  const full  = { bankAccounts: '1', oshBalance: '5,000', creditLimits: '30,000', creditCardsCount: '1' }
+  const files = { oshReports: 1, creditReports: 1, payslips: 1 }
+
+  const withFiles = (
+    answers: Record<string, string>,
+    intakeFiles: Record<string, number>,
+  ) => buildCompletenessReport(base({ intakeAnswers: answers, intakeFiles })).map(i => i.key)
+
+  it('is silent when the counts match', () => {
+    const k = withFiles(full, files)
+    expect(k).not.toContain('cards-missing')
+    expect(k).not.toContain('accounts-missing')
+    expect(k).not.toContain('no-payslip')
+  })
+
+  it('flags cards that were declared but never uploaded', () => {
+    const item = buildCompletenessReport(base({
+      intakeAnswers: { ...full, creditCardsCount: '3' }, intakeFiles: files,
+    })).find(i => i.key === 'cards-missing')!
+    expect(item.title).toContain('3')
+    expect(item.title).toContain('1')
+  })
+
+  it('says "no report at all" differently from "not enough reports"', () => {
+    const none = buildCompletenessReport(base({
+      intakeAnswers: { ...full, creditCardsCount: '2' }, intakeFiles: { ...files, creditReports: 0 },
+    })).find(i => i.key === 'cards-missing')!
+    expect(none.title).toContain('לא צורף אף דוח')
+  })
+
+  it('flags a bank account that was declared but never uploaded', () => {
+    expect(withFiles({ ...full, bankAccounts: 'שניים' }, files)).toContain('accounts-missing')
+  })
+
+  it('does not flag when MORE files arrived than declared', () => {
+    expect(withFiles(full, { ...files, creditReports: 3 })).not.toContain('cards-missing')
+  })
+
+  it('stays silent when the count cannot be read at all', () => {
+    expect(withFiles({ ...full, creditCardsCount: 'כמה' }, { ...files, creditReports: 0 }))
+      .not.toContain('cards-missing')
+  })
+
+  it('flags income with neither a payslip nor a self-employed figure', () => {
+    expect(withFiles(full, { ...files, payslips: 0 })).toContain('no-payslip')
+    expect(withFiles({ ...full, selfEmployedIncome: '18,000 בחודש' }, { ...files, payslips: 0 }))
+      .not.toContain('no-payslip')
+  })
+
+  // Per-question files turn "was any document attached" into "was a SCHEDULE
+  // attached" — a payslip no longer silences the loan question.
+  it('knows a payslip is not a loan schedule', () => {
+    const answers = { ...full, hasLoans: 'כן' }
+    expect(withFiles(answers, { ...files, loanSchedules: 0 })).toContain('loans-no-schedule')
+    expect(withFiles(answers, { ...files, loanSchedules: 1 })).not.toContain('loans-no-schedule')
+  })
+
+  it('asks none of this when no questionnaire was filled', () => {
+    const k = buildCompletenessReport(base({ intakeAnswers: null, intakeFiles: {} })).map(i => i.key)
+    expect(k).not.toContain('cards-missing')
+    expect(k).not.toContain('accounts-missing')
+    expect(k).not.toContain('no-payslip')
   })
 })

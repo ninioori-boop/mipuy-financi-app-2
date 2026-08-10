@@ -48,6 +48,35 @@ export interface CompletenessInput {
    * checks below keep the two apart so this stays silent on an empty run.
    */
   intakeAnswers?: Record<string, string> | null
+  /**
+   * How many files are attached to each question, by question id. This is what
+   * makes "you said three cards and gave me one report" answerable at all: a
+   * plain file count cannot tell a payslip from a statement, but a file sitting
+   * in a question's own slot names itself.
+   */
+  intakeFiles?: Record<string, number>
+}
+
+/**
+ * The number a person wrote, in digits or in Hebrew words. Returns null when
+ * there is no countable answer — "כמה שצריך" is not a number, and guessing one
+ * would invent a gap that does not exist.
+ */
+export function parseCount(text?: string): number | null {
+  const s = (text ?? '').trim()
+  if (!s) return null
+  const digits = s.match(/\d+/)
+  if (digits) {
+    const n = Number(digits[0])
+    return Number.isFinite(n) ? n : null
+  }
+  const words: Record<string, number> = {
+    'אחד': 1, 'אחת': 1, 'שניים': 2, 'שתיים': 2, 'שני': 2, 'שתי': 2,
+    'שלושה': 3, 'שלוש': 3, 'ארבעה': 4, 'ארבע': 4, 'חמישה': 5, 'חמש': 5,
+    'שישה': 6, 'שש': 6, 'שבעה': 7, 'שבע': 7, 'שמונה': 8, 'תשעה': 9, 'תשע': 9, 'עשרה': 10, 'עשר': 10,
+  }
+  for (const [w, n] of Object.entries(words)) if (s.includes(w)) return n
+  return null
 }
 
 /** Categories whose spend is real but whose detail was never captured. */
@@ -189,12 +218,55 @@ export function buildCompletenessReport(input: CompletenessInput): CompletenessI
     }
     // A loan he confirmed having, with no schedule attached, is the single most
     // common hole: the repayment shows in the bank, the balance and rate never do.
-    if (ans.hasLoans === 'כן' && !docs.length) {
+    // Once files sit in their own question, "was a schedule attached" is a fact
+    // rather than the old guess of "was any document attached at all".
+    const files = input.intakeFiles
+    const hasSchedule = files ? (files.loanSchedules ?? 0) > 0 : docs.length > 0
+    if (ans.hasLoans === 'כן' && !hasSchedule) {
       items.push({
         key: 'loans-no-schedule', severity: 'gap',
-        title: 'הלקוח ציין שיש הלוואות, אבל לא צורף לוח סילוקין',
+        title: 'צוין שיש הלוואות, אבל לא צורף לוח סילוקין',
         detail: 'ההחזר החודשי נראה בעו"ש; היתרה, הריבית ומספר התשלומים שנותרו לא.',
       })
+    }
+
+    // ── "you said N, you gave me M" ──
+    //
+    // The most dangerous gap in the whole tool, because it is invisible: a
+    // mapping built from one of three credit cards balances perfectly, reads
+    // perfectly, and understates the household's spending by two thirds. The
+    // questionnaire is the only place that knows how many there should be.
+    if (files) {
+      const cardsSaid  = parseCount(ans.creditCardsCount)
+      const cardsGot   = files.creditReports ?? 0
+      if (cardsSaid !== null && cardsSaid > cardsGot) {
+        items.push({
+          key: 'cards-missing', severity: 'gap',
+          title: `${cardsSaid} כרטיסי אשראי, ${cardsGot === 0 ? 'ולא צורף אף דוח' : `אבל צורפו ${cardsGot} דוחות`}`,
+          detail: 'הוצאות של כרטיס שלא הועלה פשוט לא קיימות במיפוי, והוא ייראה תקין בלעדיהן.',
+        })
+      }
+
+      const banksSaid = parseCount(ans.bankAccounts)
+      const banksGot  = files.oshReports ?? 0
+      if (banksSaid !== null && banksSaid > banksGot) {
+        items.push({
+          key: 'accounts-missing', severity: 'gap',
+          title: `${banksSaid} חשבונות בנק, ${banksGot === 0 ? 'ולא צורף אף דוח עו"ש' : `אבל צורפו ${banksGot} דוחות`}`,
+          detail: 'חשבון חסר מסתיר גם הכנסות וגם הוצאות, ומבטל את ההצלבה מול התנועה בחשבון.',
+        })
+      }
+
+      // Income has two legal shapes: a payslip, or a self-employed client
+      // stating the figure. Neither present means the mapping's income is a
+      // guess from deposits, which is exactly where gross/net goes wrong.
+      if (!(files.payslips ?? 0) && !(ans.selfEmployedIncome ?? '').trim()) {
+        items.push({
+          key: 'no-payslip', severity: 'gap',
+          title: 'לא צורף תלוש ולא פורטה הכנסה של עצמאי',
+          detail: 'בלי אחד מהם ההכנסה נגזרת מהפקדות בלבד, ואין דרך לדעת אם היא ברוטו, נטו, או שתי משכורות שהתערבבו.',
+        })
+      }
     }
   }
 
