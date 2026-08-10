@@ -74,7 +74,7 @@ interface Props {
   months?: number
   /** Move one transaction to another category, adjusting the rows it feeds. */
   onRecategorize?: (txn: Transaction, category: string) => void
-  onChange: (patch: Partial<GeneratedMapping>) => void
+  onChange: (patch: Partial<GeneratedMapping> | ((prev: GeneratedMapping) => Partial<GeneratedMapping>)) => void
 }
 
 type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins'
@@ -93,26 +93,35 @@ export function LabMappingView({
   const patch = <K extends keyof GeneratedMapping>(key: K, rows: GeneratedMapping[K]) =>
     onChange({ [key]: rows } as Partial<GeneratedMapping>)
 
-  // ── edit / add / delete helpers (index-based, mirror the old lab logic) ──
+  // ── edit / add / delete helpers ──
+  //
+  // ⚠️ Every edit below goes through the UPDATER form of onChange, reading the
+  // freshest result rather than the one this render closed over. DebtPanel
+  // writes twice in a single tick (the balance, then the recomputed payment),
+  // and with a plain object patch the second write rebuilt its rows from the
+  // pre-balance state and silently discarded the first. Typing a loan balance
+  // in the lab did nothing at all, while the very same panel worked in the
+  // mapping tab because its target is a Zustand store.
+  const editRow = <K extends keyof GeneratedMapping>(
+    key: K, idx: number, field: string, value: string | number, textFields: string[],
+  ) => onChange(prev => {
+    const rows = [...(prev[key] as unknown as Record<string, unknown>[])]
+    if (!rows[idx]) return {}
+    rows[idx] = { ...rows[idx], [field]: textFields.includes(field) ? String(value) : asNum(value) }
+    return { [key]: rows } as Partial<GeneratedMapping>
+  })
+
   function editSimple(key: SimpleKey, idx: number, field: 'name' | 'amount', value: string | number) {
-    const rows = [...result[key]]
-    rows[idx] = { ...rows[idx], [field]: field === 'amount' ? asNum(value) : String(value) }
-    patch(key, rows)
+    editRow(key, idx, field, value, ['name'])
   }
   function editVariable(idx: number, field: 'name' | 'amount', value: string | number) {
-    const rows = [...result.variable]
-    rows[idx] = { ...rows[idx], [field]: field === 'amount' ? asNum(value) : String(value) }
-    patch('variable', rows)
+    editRow('variable', idx, field, value, ['name'])
   }
   function editAnnual(idx: number, field: 'name' | 'annualAmount', value: string | number) {
-    const rows = [...result.annual]
-    rows[idx] = { ...rows[idx], [field]: field === 'annualAmount' ? asNum(value) : String(value) }
-    patch('annual', rows)
+    editRow('annual', idx, field, value, ['name'])
   }
   function editComplex<K extends 'debts' | 'installments' | 'savings'>(key: K, idx: number, field: string, value: string | number) {
-    const rows = [...(result[key] as unknown as Record<string, unknown>[])]
-    rows[idx] = { ...rows[idx], [field]: field === 'name' ? String(value) : asNum(value) }
-    patch(key, rows as unknown as GeneratedMapping[K])
+    editRow(key, idx, field, value, ['name'])
   }
   function delRow<K extends keyof GeneratedMapping>(key: K, idx: number) {
     if (!Array.isArray(result[key])) return
@@ -290,12 +299,23 @@ export function LabMappingView({
   // rows it was unsure of, and that turns a seven-screen read into a handful of
   // questions. It is also the precondition for ever opening this tool up: the
   // review has to be short before it can be someone else's job.
+  // ⚠️ 25 rows is not a queue, it is the mapping again with a border around it —
+  // and a queue that long gets approved wholesale, which is worse than none.
+  // Two filters keep it short and keep the RIGHT things in it:
+  //   · only 'low' — 'medium' meant "reasonably sure", and it was most of them.
+  //   · money, not doubt alone: a ₪57 row nobody is certain about does not
+  //     deserve the same attention as a ₪7,890 one. Ordered by amount, because
+  //     a queue read top-down should spend the advisor's time worst-first.
   const QUEUE_SECTIONS: (SimpleKey | 'variable')[] = ['income', 'fixed', 'variable', 'sub', 'ins']
-  const reviewQueue = QUEUE_SECTIONS.flatMap(key =>
+  const QUEUE_MIN = 300
+  const QUEUE_CAP = 8
+  const queueAll = QUEUE_SECTIONS.flatMap(key =>
     result[key]
       .map((r, i) => ({ key, idx: i, row: r }))
-      .filter(({ row }) => !row.reviewed && (row.confidence === 'low' || row.confidence === 'medium')),
-  )
+      .filter(({ row }) => !row.reviewed && row.confidence === 'low' && Math.abs(row.amount) >= QUEUE_MIN),
+  ).sort((a, b) => Math.abs(b.row.amount) - Math.abs(a.row.amount))
+  const reviewQueue = queueAll.slice(0, QUEUE_CAP)
+  const queueHidden = queueAll.length - reviewQueue.length
 
   function markReviewed(key: SimpleKey | 'variable', idx: number) {
     const rows = [...result[key]]
@@ -385,7 +405,9 @@ export function LabMappingView({
             🔎 שורות לבדיקה ({reviewQueue.length})
           </div>
           <p className="text-xs text-muted-txt">
-            רק השורות שה‑AI לא היה בטוח בהן. תקן או אשר, והן ייעלמו מכאן. שאר השורות סומנו כאמינות.
+            רק שורות שה‑AI לא היה בטוח בהן ושיש בהן כסף ({fmt(QUEUE_MIN)} ומעלה), מהגדולה לקטנה.
+            תקן או אשר, והן ייעלמו מכאן.
+            {queueHidden > 0 && ` עוד ${queueHidden} ממתינות ויופיעו אחרי שתסיים.`}
           </p>
           <div className="space-y-1.5">
             {reviewQueue.map(({ key, idx, row }) => (

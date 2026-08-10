@@ -551,22 +551,17 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **זיכויים כבר מקוזזים בנתונים שקיבלת** — אל תחסיר אותם שוב. שורה עם סכום שלילי או עם "זיכוי בלבד" פירושה שבתקופה הזו הוחזר יותר ממה שחויב. אל תיצור שורת הוצאה שלילית: החזר 0 לאותה שורה, וציין את זה ב‑assessment.
 - קטגוריות שאינן הוצאה (${list(SKIP_CATEGORIES)}) — אל תכניס כהוצאה; הכנסות לך ל‑income.
 
-## פירוט הוצאות משתנות (variable)
-שבר כל קטגוריה גדולה של variable למספר שורות מפורטות לפי תת‑סוג / סוג ספק / הקשר — לא שורה אחת כללית. זה נותן ליועץ תמונה ברורה של איפה הכסף הולך בפועל.
+## שורה אחת לכל קטגוריה — בכל הסעיפים
+🔴 **החזר שורה אחת בדיוק לכל קטגוריה, ובשדה name כתוב את שם הקטגוריה.** אל תפצל קטגוריה לשורה לכל בית עסק ואל תמציא תת‑סוגים.
 
-דוגמאות:
-- במקום "מזון לבית 2500" → "סופרמרקטים 1800", "פירות וירקות 400", "מאפיות 300".
-- במקום "אוכל בחוץ ובילויים 1200" → "מסעדות 600", "משלוחים 350", "בתי קפה 150", "בילויים 100".
-- במקום "דלק וחניה 900" → "תדלוק 700", "חניונים 200".
-- במקום "תחביבים 600" → אם ניתן, לזהות את הסוג: "ספרים 200", "מנוי לקולנוע 50", "חוגים 350".
+- ❌ "שונות — עמית כלים 87", "שונות — פרחי רונית 67", "שונות — יאוארדי 57", "שונות — שאר 267"
+- ✅ "שונות 478"
+- ❌ "ביגוד והנעלה (בהצדעה) 1547" ו‑"שאר ביגוד 18"
+- ✅ "ביגוד והנעלה 1565"
 
-חוקי שבירה:
-- **שבור אך ורק קטגוריות של variable.** ל‑fixed/sub/ins/annual החזר תמיד שורה אחת לקטגוריה, גם אם במקרה קיבלת עבורן פירוט (חיובים מובהקים).
-- **בסס את השבירה אך ורק על רשימת בתי העסק שקיבלת תחת אותה קטגוריה.** מתחת לכל קטגוריה מופיעות שורות "- שם בית עסק: סכום (מספר עסקאות)" — אלה הנתונים האמיתיים. קבץ אותן לתת‑סוגים הגיוניים (למשל שופרסל + רמי לוי + ויקטורי → "סופרמרקטים") וסכם את הסכומים שלהן.
-- **אם לקטגוריה לא מופיעה רשימת בתי עסק — אל תשבור אותה.** החזר שורה אחת ברמת הקטגוריה. אסור להמציא חלוקה שאין לה כיסוי בנתונים, גם אם הסכומים מסתכמים נכון.
-- השורה "שאר בתי העסק (N)" מייצגת זנב של בתי עסק קטנים שלא פורטו. שים אותה בשורה כללית של הקטגוריה, אל תנחש מה יש בתוכה.
-- שייך כל שורה לאותה קטגוריה ראשית (השם בעמודת ה‑name יכול להיות תיאורי, אבל הסיווג נשאר משתנה).
-- **שמור על היחס, לא על המספר.** הסכומים ברשימה הם סך התקופה. סכום השורות המפורטות של "מזון לבית" **חלקי מספר החודשים** הוא הסכום החודשי שאתה מחזיר. אם קיבלת "מזון לבית: 7500" על פני 3 חודשים — השורות שתחזיר חייבות להסתכם ל‑2500, לא ל‑7500.
+הפירוט של בתי העסק **כן** מוצג ליועץ, אבל מתוך העסקאות עצמן ולא מתוך המיפוי: הוא פותח קטגוריה ורואה את כל החיובים שלה עם התאריכים. לכן שורה לכל בית עסק לא מוסיפה מידע, רק מאריכה רשימה שצריך לקרוא ולאשר שורה‑שורה. שורות רבות מדי הן הסיבה שיועץ מפסיק לקרוא את המיפוי.
+
+רשימת בתי העסק שאתה מקבל תחת כל קטגוריה נועדה לשני דברים בלבד: להחליט לאיזה סעיף הקטגוריה שייכת, ולזהות חיוב חריג שראוי לציון ב‑assessment. היא **אינה** הזמנה לפצל שורות.
 
 ## אמינות ומקור (confidence + source) — שדות חובה בכל שורה
 לכל שורה הוסף שני שדות אופציונליים שעוזרים ליועץ לדעת איפה לבדוק לעומק:
@@ -976,12 +971,92 @@ export function applyTxnRecategorization(m: GeneratedMapping, move: RecatMove): 
   return { mapping: out, nothingDebited }
 }
 
+/**
+ * One row per category.
+ *
+ * The model liked to carve a category into a row per merchant: eight separate
+ * "שונות — ..." lines, "ביגוד והנעלה (בהצדעה)" beside "שאר ביגוד". Every one of
+ * them is a row to read, judge and possibly review, and together they turned
+ * the result into something nobody would go through twice.
+ *
+ * The split is unnecessary now that the transactions themselves are listed and
+ * editable: the rows say WHAT the household spends on, and the פירוט says where
+ * it went. Merging is safe in a way collapsing detail usually is not, because
+ * no information is lost — it just moved to the place built to hold it.
+ *
+ * Rows with no category are left alone: there is nothing to merge them ON, and
+ * guessing would fold unrelated things together.
+ */
+export function consolidateByCategory(m: GeneratedMapping): GeneratedMapping {
+  const out = { ...m }
+  for (const key of SIMPLE_KEYS) {
+    const merged: GenSimpleRow[] = []
+    const byCat = new Map<string, number>()   // category → index in `merged`
+    for (const row of out[key]) {
+      const cat = row.category?.trim()
+      if (!cat) { merged.push(row); continue }
+      const at = byCat.get(cat)
+      if (at === undefined) {
+        byCat.set(cat, merged.length)
+        merged.push({ ...row, name: cat })
+      } else {
+        const prev = merged[at]
+        merged[at] = {
+          ...prev,
+          amount: prev.amount + row.amount,
+          // The merged row is only as trustworthy as its least certain part.
+          confidence: prev.confidence === 'low' || row.confidence === 'low' ? 'low'
+            : prev.confidence === 'medium' || row.confidence === 'medium' ? 'medium'
+            : prev.confidence,
+          reviewed: prev.reviewed && row.reviewed,
+        }
+      }
+    }
+    out[key] = merged
+  }
+  return out
+}
+
+/**
+ * Make sure every annual expense the advisor confirmed is actually IN the
+ * result, as a yearly amount in the annual section.
+ *
+ * A confirmed one-off is removed from the monthly expense block on purpose —
+ * counting a ₪3,700 charge as if it recurred every month would be far worse.
+ * But removing it was only ever half the job: the other half was the model
+ * putting it back into `annual`, and when it did not, the expense disappeared
+ * from the mapping altogether without a word. Money that leaves silently is the
+ * failure mode this whole tool keeps running into.
+ */
+export function ensureAnnualItems(
+  m: GeneratedMapping,
+  items: { name: string; category: string; annualAmount: number }[],
+): GeneratedMapping {
+  if (!items.length) return m
+  const have = new Set(m.annual.map(a => normalizeForLookup(a.name) || a.name.trim()))
+  const missing = items.filter(i => !have.has(normalizeForLookup(i.name) || i.name.trim()))
+  if (!missing.length) return m
+  return {
+    ...m,
+    annual: [
+      ...m.annual,
+      ...missing.map(i => ({
+        name: i.name,
+        annualAmount: i.annualAmount,
+        category: i.category,
+        confidence: 'high' as const,
+        source: 'אישור היועץ',
+      })),
+    ],
+  }
+}
+
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)
   const raw = obj(JSON.parse(json.replace(/,\s*([}\]])/g, '$1')))
 
-  return moveLoansToDebts({
+  return consolidateByCategory(moveLoansToDebts({
     creditScore:  num(raw.creditScore),
     creditCards:  arr(raw.creditCards).map(obj).map(r => ({
       name: str(r.name), limit: num(r.limit), chargeDay: num(r.chargeDay) || 2, ...meta(r),
@@ -1015,7 +1090,7 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
     businessIncome:   simple(arr(raw.businessIncome)),
     businessExpenses: simple(arr(raw.businessExpenses)),
     assessment: str(raw.assessment),
-  })
+  }))
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {

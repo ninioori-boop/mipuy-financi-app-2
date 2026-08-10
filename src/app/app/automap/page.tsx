@@ -17,7 +17,7 @@ import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   groupByName, formatIncomeBreakdown,
   buildInstallments, buildStandingOrders, formatInstallments, formatStandingOrders, isInstallment,
-  applyTxnRecategorization,
+  applyTxnRecategorization, ensureAnnualItems,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
@@ -713,7 +713,11 @@ export default function AutoMapPage() {
       const rawText: string = (data as { text?: string }).text ?? ''
       const stopReason = (data as { stopReason?: string | null }).stopReason ?? null
       try {
-        const parsed = parseGeneratedMapping(rawText)
+        // Annual items the advisor confirmed were pulled OUT of the monthly
+        // expenses on purpose; if the model then failed to put them into the
+        // annual section, they left the mapping entirely. Put them back here so
+        // that cannot happen — they show at annualAmount/12 per month.
+        const parsed = ensureAnnualItems(parseGeneratedMapping(rawText), annualItems)
         setResult(parsed)
         // A truncated reply still parses now (extractJsonObject repairs it), but
         // the tail sections are missing — say so rather than let it pass as a

@@ -53,7 +53,14 @@ interface AutoMapState {
   setIntakeForm: (answers: Record<string, string>) => void
   setReportMonths: (n: number) => void
   setResult: (r: GeneratedMapping | null) => void
-  updateResult: (patch: Partial<GeneratedMapping>) => void
+  /**
+   * Patch the result. Accepts an updater because panels fire two writes in one
+   * tick — DebtPanel saves the balance and then recomputes the payment — and a
+   * plain object patch built from a stale `result` loses the first one. That is
+   * exactly why typing a loan balance in the lab did nothing while the same
+   * panel worked in the mapping tab, where the target is a Zustand store.
+   */
+  updateResult: (patch: Partial<GeneratedMapping> | ((prev: GeneratedMapping) => Partial<GeneratedMapping>)) => void
   setAnnualItem: (item: AnnualItem) => void
   removeAnnualItem: (key: string) => void
   dismissOneOff: (key: string) => void
@@ -95,7 +102,11 @@ export const useAutoMapStore = create<AutoMapState>()(
       setIntakeForm:   (answers) => set(s => ({ intakeForm: { ...s.intakeForm, ...answers } })),
       setReportMonths: (n) => set({ reportMonths: Math.max(1, Math.min(24, Math.floor(n || 1))) }),
       setResult:       (result) => set({ result }),
-      updateResult:    (patch) => set(s => ({ result: s.result ? { ...s.result, ...patch } : s.result })),
+      updateResult:    (patch) => set(s => ({
+        result: s.result
+          ? { ...s.result, ...(typeof patch === 'function' ? patch(s.result) : patch) }
+          : s.result,
+      })),
 
       // Upsert by key: re-confirming an item updates its amount rather than
       // adding a second row for the same expense.

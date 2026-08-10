@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
   sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
+  consolidateByCategory, ensureAnnualItems,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 
@@ -353,6 +354,104 @@ describe('moveLoansToDebts', () => {
     const out = moveLoansToDebts(input)
     expect(out.fixed).toEqual(input.fixed)
     expect(out.debts).toEqual([])
+  })
+})
+
+// Eight "שונות — ..." rows are eight things to read, judge and approve, and
+// together they are why an advisor stops reading the mapping. Nothing is lost:
+// the merchants live in the transaction detail, which is where they belong.
+describe('consolidateByCategory', () => {
+  const withRows = (over: Partial<GeneratedMapping>): GeneratedMapping => ({
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '', ...over,
+  })
+
+  it('merges every row of a category into one named after it', () => {
+    const out = consolidateByCategory(withRows({
+      variable: [
+        { name: 'שונות — עמית כלים', amount: 87,  category: 'שונות' },
+        { name: 'שונות — פרחי רונית', amount: 67, category: 'שונות' },
+        { name: 'שונות — שאר',        amount: 267, category: 'שונות' },
+        { name: 'מזון',               amount: 2000, category: 'מזון לבית' },
+      ],
+    }))
+    expect(out.variable).toHaveLength(2)
+    expect(out.variable.find(r => r.category === 'שונות')).toMatchObject({ name: 'שונות', amount: 421 })
+    expect(out.variable.find(r => r.category === 'מזון לבית')!.amount).toBe(2000)
+  })
+
+  it('keeps the section total unchanged', () => {
+    const before = withRows({
+      variable: [
+        { name: 'א', amount: 1547, category: 'ביגוד והנעלה' },
+        { name: 'ב', amount: 18,   category: 'ביגוד והנעלה' },
+      ],
+    })
+    const sum = (m: GeneratedMapping) => m.variable.reduce((s, r) => s + r.amount, 0)
+    expect(sum(consolidateByCategory(before))).toBe(sum(before))
+  })
+
+  // A merged row is only as trustworthy as its least certain part — otherwise a
+  // doubtful row hides inside a confident one and never reaches the queue.
+  it('takes the lowest confidence of the rows it merged', () => {
+    const out = consolidateByCategory(withRows({
+      variable: [
+        { name: 'א', amount: 100, category: 'שונות', confidence: 'high', reviewed: true },
+        { name: 'ב', amount: 100, category: 'שונות', confidence: 'low',  reviewed: false },
+      ],
+    }))
+    expect(out.variable[0]).toMatchObject({ confidence: 'low', reviewed: false })
+  })
+
+  it('leaves rows with no category alone rather than folding them together', () => {
+    const out = consolidateByCategory(withRows({
+      variable: [{ name: 'א', amount: 10 }, { name: 'ב', amount: 20 }],
+    }))
+    expect(out.variable).toHaveLength(2)
+  })
+
+  it('merges within a section, never across sections', () => {
+    const out = consolidateByCategory(withRows({
+      fixed:    [{ name: 'א', amount: 100, category: 'ארנונה' }],
+      variable: [{ name: 'ב', amount: 200, category: 'ארנונה' }],
+    }))
+    expect(out.fixed).toHaveLength(1)
+    expect(out.variable).toHaveLength(1)
+  })
+})
+
+// A confirmed annual charge is pulled OUT of the monthly expenses on purpose.
+// Removing it was only half the job: when the model failed to put it back into
+// the annual section, the expense left the mapping without a word.
+describe('ensureAnnualItems', () => {
+  const base: GeneratedMapping = {
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '',
+  }
+  const items = [{ name: 'העברה/אלוף הספות', category: 'ריהוט והבית', annualAmount: 3700 }]
+
+  it('adds a confirmed annual expense the model dropped', () => {
+    const out = ensureAnnualItems(base, items)
+    expect(out.annual).toHaveLength(1)
+    expect(out.annual[0]).toMatchObject({ annualAmount: 3700, source: 'אישור היועץ' })
+  })
+
+  it('does not duplicate one the model already returned', () => {
+    const withIt = { ...base, annual: [{ name: 'העברה/אלוף הספות', annualAmount: 3700 }] }
+    expect(ensureAnnualItems(withIt, items).annual).toHaveLength(1)
+  })
+
+  it('matches on the normalized name, not the exact string', () => {
+    const withIt = { ...base, annual: [{ name: 'העברה/אלוף הספות בע"מ', annualAmount: 3700 }] }
+    expect(ensureAnnualItems(withIt, items).annual).toHaveLength(1)
+  })
+
+  it('does nothing when there is nothing confirmed', () => {
+    expect(ensureAnnualItems(base, [])).toBe(base)
   })
 })
 
