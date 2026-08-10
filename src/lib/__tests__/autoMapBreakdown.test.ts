@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
-  sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts,
+  sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 
@@ -353,6 +353,92 @@ describe('moveLoansToDebts', () => {
     const out = moveLoansToDebts(input)
     expect(out.fixed).toEqual(input.fixed)
     expect(out.debts).toEqual([])
+  })
+})
+
+// Reading the פירוט without being able to change it is half a tool. The rule is
+// deliberately boring: take the transaction's MONTHLY share out of the row it
+// was counted in, and put it into a row of the destination category.
+describe('applyTxnRecategorization', () => {
+  const withRows = (over: Partial<GeneratedMapping>): GeneratedMapping => ({
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '', ...over,
+  })
+
+  const clothes = () => withRows({
+    variable: [
+      { name: 'ביגוד והנעלה (בהצדעה)', amount: 1547, category: 'ביגוד והנעלה' },
+      { name: 'שאר ביגוד',             amount: 18,   category: 'ביגוד והנעלה' },
+      { name: 'מסעדות',                amount: 900,  category: 'אוכל בחוץ ובילויים' },
+    ],
+  })
+
+  it('debits the source and credits the destination by the monthly share', () => {
+    const { mapping } = applyTxnRecategorization(clothes(), {
+      from: 'ביגוד והנעלה', to: 'אוכל בחוץ ובילויים', monthlyDelta: 6, merchant: 'דרייב קפה שורש',
+    })
+    expect(mapping.variable.find(r => r.name === 'ביגוד והנעלה (בהצדעה)')!.amount).toBe(1541)
+    expect(mapping.variable.find(r => r.name === 'מסעדות')!.amount).toBe(906)
+  })
+
+  it('prefers the row named after the merchant over the biggest one', () => {
+    const m = withRows({
+      variable: [
+        { name: 'כללי',      amount: 1000, category: 'ביגוד והנעלה' },
+        { name: 'דרייב קפה', amount: 50,   category: 'ביגוד והנעלה' },
+      ],
+    })
+    const { mapping } = applyTxnRecategorization(m, {
+      from: 'ביגוד והנעלה', to: 'אוכל בחוץ ובילויים', monthlyDelta: 6, merchant: 'דרייב קפה',
+    })
+    expect(mapping.variable.find(r => r.name === 'דרייב קפה')!.amount).toBe(44)
+    expect(mapping.variable.find(r => r.name === 'כללי')!.amount).toBe(1000)
+  })
+
+  it('creates a row in the destination when that category has none', () => {
+    const { mapping } = applyTxnRecategorization(clothes(), {
+      from: 'ביגוד והנעלה', to: 'מזון לבית', monthlyDelta: 30, merchant: 'שופרסל',
+    })
+    const created = mapping.variable.find(r => r.category === 'מזון לבית')!
+    expect(created).toMatchObject({ name: 'שופרסל', amount: 30, source: 'תיקון ידני' })
+  })
+
+  it('moves a row across sections when the destination lives in another one', () => {
+    const { mapping } = applyTxnRecategorization(clothes(), {
+      from: 'ביגוד והנעלה', to: 'ארנונה', monthlyDelta: 100, merchant: 'עיריית תל אביב',
+    })
+    expect(mapping.fixed.find(r => r.category === 'ארנונה')!.amount).toBe(100)
+    expect(mapping.variable.find(r => r.name === 'ביגוד והנעלה (בהצדעה)')!.amount).toBe(1447)
+  })
+
+  // A row driven negative would quietly inflate the household's surplus, which
+  // is the one direction of error nothing downstream can see.
+  it('never drives a row below zero, and removes it when it empties', () => {
+    const { mapping } = applyTxnRecategorization(clothes(), {
+      from: 'ביגוד והנעלה', to: 'מזון לבית', monthlyDelta: 99999, merchant: 'בהצדעה',
+    })
+    expect(mapping.variable.every(r => r.amount >= 0)).toBe(true)
+    expect(mapping.variable.find(r => r.name === 'ביגוד והנעלה (בהצדעה)')).toBeUndefined()
+  })
+
+  // Silence here would show the advisor a total that grew out of nowhere.
+  it('reports when there was nothing to debit', () => {
+    const { nothingDebited } = applyTxnRecategorization(clothes(), {
+      from: 'קטגוריה שאין לה שורה', to: 'מזון לבית', monthlyDelta: 30, merchant: 'שופרסל',
+    })
+    expect(nothingDebited).toBe(true)
+  })
+
+  it('does nothing at all for a no-op move or a zero amount', () => {
+    const before = clothes()
+    expect(applyTxnRecategorization(before, {
+      from: 'ביגוד והנעלה', to: 'ביגוד והנעלה', monthlyDelta: 10, merchant: 'x',
+    }).mapping.variable).toEqual(before.variable)
+    expect(applyTxnRecategorization(before, {
+      from: 'ביגוד והנעלה', to: 'מזון לבית', monthlyDelta: 0, merchant: 'x',
+    }).mapping.variable).toEqual(before.variable)
   })
 })
 

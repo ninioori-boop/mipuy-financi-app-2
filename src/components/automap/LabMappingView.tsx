@@ -15,6 +15,7 @@ import type {
 } from '@/stores/mappingStore'
 import { sectionOfCategory, SECTION_LABEL_HE, type GeneratedMapping, type MappingSection } from '@/lib/autoMap'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
+import { TxnDetailTable } from '@/components/automap/TxnDetailTable'
 import type { Transaction } from '@/types/transaction'
 
 // The auto-mapping lab renders the AI result through the EXACT same panels as
@@ -71,14 +72,20 @@ interface Props {
   incomeRows?: { desc: string; amount: number; date: string }[]
   /** Window length, so a period total can be shown as the monthly figure. */
   months?: number
+  /** Move one transaction to another category, adjusting the rows it feeds. */
+  onRecategorize?: (txn: Transaction, category: string) => void
   onChange: (patch: Partial<GeneratedMapping>) => void
 }
 
 type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins'
 
-export function LabMappingView({ result, txns, incomeRows = [], months = 1, onChange }: Props) {
+export function LabMappingView({
+  result, txns, incomeRows = [], months = 1, onRecategorize, onChange,
+}: Props) {
   // Which variable-category group has its underlying transactions expanded.
   const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
+  /** Which category is expanded in the all-transactions panel at the bottom. */
+  const [openAllTxns, setOpenAllTxns] = useState<string | null>(null)
 
   const idxOf = (id: string) => Number(id.slice(id.lastIndexOf('-') + 1))
   const asNum = (v: string | number) => (typeof v === 'number' ? v : parseFloat(v) || 0)
@@ -670,26 +677,11 @@ export function LabMappingView({ result, txns, incomeRows = [], months = 1, onCh
                             <span>{isOpen ? '▲' : '▶'}</span>
                           </button>
                           {isOpen && (
-                            <div className="rounded-lg border border-line overflow-x-auto">
-                              <table className="w-full text-[11px]">
-                                <thead className="bg-surface2 border-b border-line">
-                                  <tr>
-                                    <th className="text-start px-2 py-1 font-medium text-muted-txt">תיאור</th>
-                                    <th className="text-start px-2 py-1 font-medium text-muted-txt whitespace-nowrap">תאריך</th>
-                                    <th className="text-end px-2 py-1 font-medium text-muted-txt">סכום</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-line/50">
-                                  {[...matchingTxns].sort((a, b) => b.amount - a.amount).map((t, i) => (
-                                    <tr key={i} className="hover:bg-surface2/40">
-                                      <td className="px-2 py-1 max-w-[200px] truncate text-txt">{t.desc}</td>
-                                      <td className="px-2 py-1 text-muted-txt whitespace-nowrap">{t.date}</td>
-                                      <td className="px-2 py-1 text-end font-medium text-gold tabular-nums whitespace-nowrap">{fmt(t.amount)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                            <TxnDetailTable
+                              txns={matchingTxns}
+                              months={months}
+                              onRecategorize={onRecategorize ?? (() => {})}
+                            />
                           )}
                         </>
                       )}
@@ -741,6 +733,55 @@ export function LabMappingView({ result, txns, incomeRows = [], months = 1, onCh
         savings={savingRows}
         varMonths={1}
       />
+
+      {/* Every parsed transaction, by category, with the category editable.
+          The panels above render their פירוט read-only (SectionPanel is the
+          mapping tab's, and live for every client), so this is where a charge
+          in the wrong category actually gets fixed — and it covers the bank
+          rows and the fixed/מנויים/ביטוחים sections those panels cannot. */}
+      {onRecategorize && txns.length > 0 && (() => {
+        const byCat = new Map<string, Transaction[]>()
+        for (const t of txns) {
+          if (t.isRefund) continue
+          const c = t.category?.trim() || 'ללא קטגוריה'
+          byCat.set(c, [...(byCat.get(c) ?? []), t])
+        }
+        const cats = [...byCat.entries()]
+          .sort((a, b) => b[1].reduce((s, t) => s + t.amount, 0) - a[1].reduce((s, t) => s + t.amount, 0))
+
+        return (
+          <div className="rounded-xl border border-line bg-surface2 p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="font-semibold text-txt">🧾 כל העסקאות</h2>
+              <span className="text-xs text-muted-txt">
+                {txns.filter(t => !t.isRefund).length} עסקאות · {cats.length} קטגוריות · שנה קטגוריה כאן והמיפוי יתעדכן
+              </span>
+            </div>
+            {cats.map(([cat, list]) => {
+              const sum    = list.reduce((s, t) => s + t.amount, 0)
+              const isOpen = openAllTxns === cat
+              return (
+                <div key={cat} className="rounded-lg border border-line/60 bg-surface/40 p-2 space-y-2">
+                  <button
+                    onClick={() => setOpenAllTxns(isOpen ? null : cat)}
+                    className="w-full flex items-center justify-between gap-2 text-start text-xs hover:text-gold transition-colors"
+                  >
+                    <span className="font-semibold text-gold">{cat}</span>
+                    <span className="text-muted-txt tabular-nums">
+                      {list.length} עסקאות · {fmt(sum)}
+                      {months > 1 && ` · ${fmt(sum / months)}/חודש`}
+                      <span className="ms-2">{isOpen ? '▲' : '▶'}</span>
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <TxnDetailTable txns={list} months={months} onRecategorize={onRecategorize} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
     </div>
   )
 }

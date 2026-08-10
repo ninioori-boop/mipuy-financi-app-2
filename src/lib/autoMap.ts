@@ -888,6 +888,94 @@ export function moveLoansToDebts(m: GeneratedMapping): GeneratedMapping {
   return out
 }
 
+// ── moving one transaction between categories ──
+//
+// Reading the פירוט without being able to change it is only half a tool: the
+// advisor spots "דרייב קפה" sitting under ביגוד והנעלה and can do nothing about
+// it except edit two aggregate rows by hand and hope the arithmetic lands.
+//
+// The rule is deliberately boring, because a clever one would be unexplainable:
+// take the transaction's MONTHLY share out of the row it was counted in, and
+// put it into a row of the destination category — reusing a row with that
+// category if one exists, creating one named after the merchant if not.
+
+export interface RecatMove {
+  /** Category the transaction is leaving. */
+  from: string
+  /** Category it is joining. */
+  to: string
+  /** The transaction's monthly share — period amount divided by the window. */
+  monthlyDelta: number
+  /** Merchant name, used to pick the best row and to name a new one. */
+  merchant: string
+}
+
+export interface RecatResult {
+  mapping: GeneratedMapping
+  /** True when nothing could be debited — the advisor must be told, not guessed at. */
+  nothingDebited: boolean
+}
+
+const SIMPLE_KEYS = ['income', 'fixed', 'variable', 'sub', 'ins'] as const
+type SimpleSectionKey = typeof SIMPLE_KEYS[number]
+
+const keyOfSection = (s: MappingSection | null): SimpleSectionKey | null =>
+  s && (SIMPLE_KEYS as readonly string[]).includes(s) ? (s as SimpleSectionKey) : null
+
+export function applyTxnRecategorization(m: GeneratedMapping, move: RecatMove): RecatResult {
+  const out: GeneratedMapping = { ...m }
+  const delta = Math.abs(move.monthlyDelta)
+  if (!delta || move.from === move.to) return { mapping: out, nothingDebited: false }
+
+  const merchantKey = normalizeForLookup(move.merchant) || move.merchant.trim()
+
+  // ── debit ──
+  // Prefer the row whose name IS this merchant (the model often carves a big
+  // merchant into its own row); otherwise the largest row of that category,
+  // which is the one the charge was folded into.
+  let nothingDebited = true
+  const fromKey = keyOfSection(sectionOfCategory(move.from))
+  if (fromKey) {
+    const rows = [...out[fromKey]]
+    const candidates = rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.category === move.from)
+    const exact = candidates.find(({ r }) => (normalizeForLookup(r.name) || '') === merchantKey)
+    const pick  = exact ?? candidates.sort((a, b) => b.r.amount - a.r.amount)[0]
+    if (pick) {
+      // Never below zero: a row that cannot absorb the debit would otherwise
+      // turn negative and quietly inflate the household's surplus.
+      rows[pick.i] = { ...pick.r, amount: Math.max(0, pick.r.amount - delta) }
+      // A row emptied by the move disappears; an empty row left behind reads as
+      // a real ₪0 expense the advisor then has to wonder about.
+      out[fromKey] = rows.filter((r, i) => i !== pick.i || r.amount > 0)
+      nothingDebited = false
+    }
+  }
+
+  // ── credit ──
+  const toKey = keyOfSection(sectionOfCategory(move.to))
+  if (toKey) {
+    const rows = [...out[toKey]]
+    const sameCat = rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.category === move.to)
+    const exact = sameCat.find(({ r }) => (normalizeForLookup(r.name) || '') === merchantKey)
+    const pick  = exact ?? sameCat[0]
+    if (pick) rows[pick.i] = { ...pick.r, amount: pick.r.amount + delta }
+    else rows.push({
+      name: move.merchant.trim() || move.to,
+      amount: delta,
+      category: move.to,
+      confidence: 'high',
+      source: 'תיקון ידני',
+    })
+    out[toKey] = rows
+  }
+
+  return { mapping: out, nothingDebited }
+}
+
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)

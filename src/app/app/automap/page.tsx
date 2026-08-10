@@ -17,6 +17,7 @@ import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   groupByName, formatIncomeBreakdown,
   buildInstallments, buildStandingOrders, formatInstallments, formatStandingOrders, isInstallment,
+  applyTxnRecategorization,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
@@ -238,14 +239,21 @@ export default function AutoMapPage() {
 
   const handleQuestionFiles = useCallback(async (files: File[], questionId: string) => {
     const route = routeForQuestion(questionId)
-    const routes = new Map<string, IntakeRoute>(files.map(f => [f.name, route]))
-    setAttachedByQ(prev => {
-      const have = new Set(prev[questionId] ?? [])
-      const added = files.map(f => f.name).filter(n => !have.has(n))
-      return added.length ? { ...prev, [questionId]: [...(prev[questionId] ?? []), ...added] } : prev
-    })
-    await handleFiles(files, routes)
-  }, [handleFiles])
+    // The same file attached to two questions would be parsed twice and double
+    // every charge in it. Names are checked across ALL slots, not just this one.
+    const taken = new Set(Object.values(attachedByQ).flat())
+    const fresh = files.filter(f => !taken.has(f.name))
+    const dupes = files.length - fresh.length
+    if (dupes) toast.warning(`${dupes === 1 ? 'קובץ כבר צורף' : `${dupes} קבצים כבר צורפו`} — לא נטענו שוב`)
+    if (!fresh.length) return
+
+    const routes = new Map<string, IntakeRoute>(fresh.map(f => [f.name, route]))
+    setAttachedByQ(prev => ({
+      ...prev,
+      [questionId]: [...(prev[questionId] ?? []), ...fresh.map(f => f.name)],
+    }))
+    await handleFiles(fresh, routes)
+  }, [handleFiles, attachedByQ])
 
   /** Detach one file: drop its chip AND everything that was parsed out of it. */
   const removeAttached = useCallback((questionId: string, name: string) => {
@@ -414,6 +422,13 @@ export default function AutoMapPage() {
     return { incomeRows: income, bankExpenses: expenses, settlements: settled }
   }, [bankRows, txns])
 
+  // Corrections made from the פירוט. Keyed on description+date+amount, which
+  // means two genuinely identical charges move together — the right call: the
+  // same merchant on the same day is the same kind of spending.
+  const [txnOverrides, setTxnOverrides] = useState<Record<string, string>>({})
+  const txnKey = (t: { desc: string; date: string; amount: number }) =>
+    `${t.desc}|${t.date}|${t.amount}`
+
   // Every transaction we know about. Bank charges become ordinary categorized
   // expenses, so a mortgage or a standing order that never touches the credit
   // card still reaches the mapping.
@@ -424,8 +439,51 @@ export default function AutoMapPage() {
       category: categorize(r.desc, learned), source: 'עו"ש', notes: '',
       date: r.date, installment: null, isStandingOrder: false, isRefund: false,
     }))
-    return [...txns, ...fromBank]
-  }, [txns, bankExpenses])
+    return [...txns, ...fromBank].map(t => {
+      const override = txnOverrides[txnKey(t)]
+      return override ? { ...t, category: override } : t
+    })
+  }, [txns, bankExpenses, txnOverrides])
+
+  // ── the same charge, twice ──
+  //
+  // An .xlsx whose sheets overlap (a per-card sheet plus a combined one) is read
+  // whole, so a charge present on both is counted twice. Nothing downstream can
+  // see it: the totals stay self-consistent, the mapping balances, and the
+  // household simply appears to spend more than it does. So it is named, with
+  // the money attached, and removing it is one click rather than a silent fix —
+  // two identical charges on one day are also a thing that really happens.
+  const duplicates = useMemo(() => {
+    const seen = new Map<string, { n: number; amount: number }>()
+    for (const t of allTxns) {
+      if (t.isRefund) continue
+      const k = txnKey(t)
+      const cur = seen.get(k)
+      seen.set(k, { n: (cur?.n ?? 0) + 1, amount: t.amount })
+    }
+    let extra = 0, amount = 0, groups = 0
+    for (const { n, amount: a } of seen.values()) {
+      if (n > 1) { groups++; extra += n - 1; amount += (n - 1) * a }
+    }
+    return { groups, extra, amount }
+  }, [allTxns])
+
+  /** Keep the first of each identical charge, drop the rest. */
+  const removeDuplicates = useCallback(() => {
+    const keep = <T extends { desc: string; date: string; amount: number }>(rows: T[]) => {
+      const seen = new Set<string>()
+      return rows.filter(r => {
+        const k = txnKey(r)
+        if (seen.has(k)) return false
+        seen.add(k)
+        return true
+      })
+    }
+    const beforeTx = txns.length, beforeBank = bankRows.length
+    setTxns(prev => keep(prev))
+    setBankRows(prev => keep(prev))
+    toast.success(`הוסרו ${beforeTx + beforeBank - keep(txns).length - keep(bankRows).length} עסקאות כפולות`)
+  }, [txns, bankRows])
 
   const installmentLines = useMemo(() => buildInstallments(allTxns), [allTxns])
   const standingOrders   = useMemo(() => buildStandingOrders(allTxns), [allTxns])
@@ -515,6 +573,32 @@ export default function AutoMapPage() {
     () => (result ? reconcile(result, flows) : null),
     [result, flows],
   )
+
+  /**
+   * Move one transaction to another category, from the פירוט.
+   *
+   * Two things happen and both matter: the transaction itself changes category
+   * (so the next generation sees the correction), and the already-generated
+   * mapping is adjusted by the charge's MONTHLY share — otherwise the advisor
+   * fixes the detail and the totals above it keep telling the old story.
+   */
+  const recategorizeTxn = useCallback((t: Transaction, to: string) => {
+    const from = t.category
+    if (!to || from === to) return
+    setTxnOverrides(prev => ({ ...prev, [txnKey(t)]: to }))
+
+    if (!result || !from) { toast.success(`"${t.desc}" סווג כ${to}`); return }
+    const months = Math.max(1, detectedMonths || reportMonths)
+    const { mapping, nothingDebited } = applyTxnRecategorization(result, {
+      from, to, monthlyDelta: t.amount / months, merchant: t.desc,
+    })
+    setResult(mapping)
+    toast.success(
+      nothingDebited
+        ? `"${t.desc}" נוסף ל${to}. לא נמצאה שורה של ${from} לגרוע ממנה — בדוק את הסכומים`
+        : `"${t.desc}" הועבר מ${from} ל${to}`,
+    )
+  }, [result, detectedMonths, reportMonths, setResult])
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
     setAnnualItem({
@@ -1172,6 +1256,27 @@ export default function AutoMapPage() {
           )}
         </div>
 
+        {/* Identical charges. Not auto-removed: two ₪16 pastries on one day are
+            also real. Three or more is where coincidence stops explaining it. */}
+        {duplicates.extra >= 3 && (
+          <div className="rounded-xl border-2 border-expense/40 bg-expense/5 p-3 space-y-2">
+            <div className="text-sm font-semibold text-expense">
+              ⚠️ {duplicates.extra} עסקאות מופיעות פעמיים
+            </div>
+            <div className="text-xs text-txt leading-relaxed">
+              {duplicates.groups} חיובים חוזרים על עצמם עם אותו תיאור, תאריך וסכום, בסך {fmt(duplicates.amount)}.
+              זה קורה כשלקובץ אקסל יש כמה גיליונות חופפים (למשל גיליון לכל כרטיס ועוד גיליון מרכז), וכולם נקראים.
+              המיפוי ייראה תקין לגמרי עם הכפילות הזאת בפנים.
+            </div>
+            <button
+              onClick={removeDuplicates}
+              className="rounded-lg border border-expense/50 bg-expense/10 px-3 py-1.5 text-xs font-semibold text-expense hover:bg-expense/20 transition-colors"
+            >
+              השאר עותק אחד מכל חיוב
+            </button>
+          </div>
+        )}
+
         {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
             of a client's life looks identical to one built from 95% — every
             number present reconciles and nothing says otherwise. Shown before
@@ -1629,6 +1734,7 @@ export default function AutoMapPage() {
             txns={allTxns}
             incomeRows={incomeRows}
             months={detectedMonths || reportMonths}
+            onRecategorize={recategorizeTxn}
             onChange={updateResult}
           />
 
