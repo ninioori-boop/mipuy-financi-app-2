@@ -629,9 +629,14 @@ export function resetSessionStores(opts?: { purgeArchive?: boolean }): void {
   // have been sent to the AI as the NEXT client's context.
   // intakeForm (2026-08-09) is the most identifying of all of them: names, phone,
   // which banks, balances, credit limits — typed in about one specific person.
+  // The parsed upload (2026-08-10) is client data of the heaviest kind: one
+  // person's entire transaction history, their bank rows, and the corrections
+  // typed about them. It is persisted now so a refresh keeps the פירוט, which
+  // is exactly why it must be cleared here.
   useAutoMapStore.setState({
     contextText: '', reportMonths: 1, result: null,
     annualItems: [], dismissedOneOffs: [], intakeForm: {},
+    txns: [], bankRows: [], fileNames: [], attachedByQ: {}, txnOverrides: {}, docNames: [],
   })
 
   // Account deletion is the one boundary that must leave nothing behind at all —

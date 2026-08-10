@@ -102,7 +102,11 @@ describe('store reset coverage', () => {
     // Split on the value, not a lookahead: `\s*(?!\()` backtracks to zero-width
     // and then happily passes on `reset: () => void`, so every action leaked in.
     const fields = [...iface.matchAll(/^ {2}(\w+):(.*)$/gm)]
-      .filter(m => !/^\s*\(/.test(m[2]))          // drop actions — `name: (args) => …`
+      // Drop actions. Two shapes: `name: (args) => …` and the generic
+      // `name: <K extends …>(args) => …` — setLab is the second, and without
+      // the `<` it was read as a data field the reset had failed to clear.
+      // A real data field's type never begins with `(` or `<`.
+      .filter(m => !/^\s*[(<]/.test(m[2]))
       .map(m => m[1])
 
     expect(fields.length, 'could not read AutoMapState fields — did the store move?').toBeGreaterThan(3)

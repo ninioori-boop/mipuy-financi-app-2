@@ -86,9 +86,10 @@ export default function AutoMapPage() {
   const { user } = useAuthStore()
   const {
     contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs, intakeForm,
+    txns, bankRows, fileNames, attachedByQ, txnOverrides, docNames,
     setContextText, setReportMonths, setResult, updateResult, reset,
     setAnnualItem, removeAnnualItem, dismissOneOff,
-    setIntakeAnswer, setIntakeForm,
+    setIntakeAnswer, setIntakeForm, setLab, clearLabData,
     saveDraft, loadDraft, deleteDraft,
   } = useAutoMapStore()
 
@@ -100,11 +101,23 @@ export default function AutoMapPage() {
     if (user && ready && !isAdvisor) router.replace('/app/credit')
   }, [user, ready, isAdvisor, router])
 
-  const [txns, setTxns]           = useState<Transaction[]>([])
+  // The parsed upload lives in the store, not here: a refresh used to keep the
+  // generated mapping and discard everything it was built from, so the פירוט
+  // went blank and every manual re-categorisation was lost. These wrappers keep
+  // the useState call signature (value or updater) so nothing below changed.
+  const setTxns        = useCallback((v: Transaction[] | ((p: Transaction[]) => Transaction[])) => setLab('txns', v), [setLab])
+  const setBankRows    = useCallback((v: BankRow[] | ((p: BankRow[]) => BankRow[])) => setLab('bankRows', v), [setLab])
+  const setFileNames   = useCallback((v: string[] | ((p: string[]) => string[])) => setLab('fileNames', v), [setLab])
+  const setAttachedByQ = useCallback((v: Record<string, string[]> | ((p: Record<string, string[]>) => Record<string, string[]>)) => setLab('attachedByQ', v), [setLab])
+  const setTxnOverrides = useCallback((v: Record<string, string> | ((p: Record<string, string>) => Record<string, string>)) => setLab('txnOverrides', v), [setLab])
+
   // Bank rows are kept apart from credit transactions: they carry a direction
   // (money in vs out), which is the whole reason income used to be wrong.
-  const [bankRows, setBankRows]   = useState<BankRow[]>([])
-  const [fileNames, setFileNames] = useState<string[]>([])
+  //
+  // Documents stay LOCAL on purpose: they are base64, up to 4MB, and would blow
+  // the localStorage quota. Only their names are persisted (docNames), so after
+  // a refresh the UI can say which ones need attaching again rather than let a
+  // mapping be generated quietly without them.
   const [docs, setDocs]           = useState<AttachedDoc[]>([])
   const [isParsing, setIsParsing] = useState(false)
   const [isGenerating, setIsGen]  = useState(false)
@@ -213,7 +226,12 @@ export default function AutoMapPage() {
         }
       }
       if (all.length)     { setTxns(prev => [...prev, ...all]); setFileNames(prev => [...prev, ...names]) }
-      if (newDocs.length) setDocs(prev => [...prev, ...newDocs])
+      if (newDocs.length) {
+        setDocs(prev => [...prev, ...newDocs])
+        // Names only — the base64 content is far too big for localStorage, so
+        // this is what lets the page say "these need attaching again".
+        setLab('docNames', prev => [...prev, ...newDocs.map(d => d.name)])
+      }
       const parts: string[] = []
       if (all.length)      parts.push(`${all.length} עסקאות אשראי`)
       if (bankCount)       parts.push(`${bankCount} תנועות עו"ש`)
@@ -235,8 +253,6 @@ export default function AutoMapPage() {
   // question it answers, and that question decides which parser reads it — the
   // format never gets a vote. `attachedByQ` is what the panel displays; the
   // parsed data itself still lives in txns / bankRows / docs.
-  const [attachedByQ, setAttachedByQ] = useState<Record<string, string[]>>({})
-
   const handleQuestionFiles = useCallback(async (files: File[], questionId: string) => {
     const route = routeForQuestion(questionId)
     // The same file attached to two questions would be parsed twice and double
@@ -422,10 +438,9 @@ export default function AutoMapPage() {
     return { incomeRows: income, bankExpenses: expenses, settlements: settled }
   }, [bankRows, txns])
 
-  // Corrections made from the פירוט. Keyed on description+date+amount, which
+  // Corrections made from the פירוט are keyed on description+date+amount, which
   // means two genuinely identical charges move together — the right call: the
   // same merchant on the same day is the same kind of spending.
-  const [txnOverrides, setTxnOverrides] = useState<Record<string, string>>({})
   const txnKey = (t: { desc: string; date: string; amount: number }) =>
     `${t.desc}|${t.date}|${t.amount}`
 
@@ -800,7 +815,7 @@ export default function AutoMapPage() {
   function handleReset() {
     if (confirming !== 'reset') { setConfirming('reset'); return }
     setConfirming(null)
-    reset(); setTxns([]); setBankRows([]); setFileNames([]); setDocs([])
+    reset(); clearLabData(); setDocs([])
   }
 
   // Pre-fill the context textarea from the client's existing mapping rows.
@@ -1180,7 +1195,7 @@ export default function AutoMapPage() {
                   than a visible one the advisor can argue with. */}
               {settlements.length > 0 && <> · {settlements.length} תשלומי ריכוז אשראי (לא נספרו)</>}
             </span>
-            <button onClick={() => { setTxns([]); setBankRows([]); setFileNames([]) }}
+            <button onClick={() => { setTxns([]); setBankRows([]); setFileNames([]); setTxnOverrides({}) }}
               className="me-auto text-xs px-2 py-0.5 rounded border border-line hover:text-expense hover:border-expense/40 transition-colors">נקה</button>
           </div>
         )}
@@ -1259,6 +1274,28 @@ export default function AutoMapPage() {
             </div>
           )}
         </div>
+
+        {/* A PDF or screenshot cannot survive a refresh — it is base64 and the
+            quota is a few megabytes for the whole origin. Saying which ones are
+            gone is the difference between the advisor re-attaching them and
+            generating a mapping that silently lost a payslip. */}
+        {docNames.length > docs.length && (
+          <div className="rounded-xl border border-gold/40 bg-gold/5 p-3 space-y-1">
+            <div className="text-sm font-semibold text-gold">
+              📎 {docNames.length - docs.length} מסמכים לא שרדו את הרענון
+            </div>
+            <div className="text-xs text-txt leading-relaxed">
+              {docNames.filter(n => !docs.some(d => d.name === n)).join(' · ')} — קבצי PDF ותמונות
+              גדולים מכדי להישמר בדפדפן, בניגוד לעסקאות. צרף אותם שוב לפני יצירת מיפוי, אחרת הם פשוט לא ייכללו.
+            </div>
+            <button
+              onClick={() => setLab('docNames', docs.map(d => d.name))}
+              className="text-xs px-2 py-1 rounded border border-line text-muted-txt hover:text-txt transition-colors"
+            >
+              הבנתי, אל תזכיר שוב
+            </button>
+          </div>
+        )}
 
         {/* Identical charges. Not auto-removed: two ₪16 pastries on one day are
             also real. Three or more is where coincidence stops explaining it. */}

@@ -4,6 +4,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { GeneratedMapping } from '@/lib/autoMap'
 import type { AnnualItem } from '@/lib/automapAnnual'
+import type { BankRow } from '@/lib/automapBank'
+import type { Transaction } from '@/types/transaction'
 
 // A saved AutoMap session. Captures everything needed to reload a past
 // generation in full — context + months + the full editable result — so
@@ -48,9 +50,40 @@ interface AutoMapState {
    */
   intakeForm: Record<string, string>
 
+  // ── the parsed upload ──
+  //
+  // These used to live in the page's own useState, so a refresh kept the
+  // generated mapping and threw away everything it was built from: the פירוט
+  // went blank, the drill-downs emptied, and every manual re-categorisation was
+  // gone. The result outliving its own evidence is the worst of both.
+  //
+  // ⚠️ This is the most identifying data the lab has ever held — one person's
+  // entire transaction history. resetSessionStores() clears all of it at an
+  // identity change, and storeCoverage.test.ts fails if a new field here is not
+  // listed there.
+  txns:       Transaction[]        // credit-report rows
+  bankRows:   BankRow[]            // עו"ש rows, with the source file stamped on
+  fileNames:  string[]             // Excel files whose transactions are loaded
+  attachedByQ: Record<string, string[]>   // question id → attached file names
+  txnOverrides: Record<string, string>    // txn key → the category the advisor set
+  /**
+   * Files that became PDFs/images for the model. Only the NAMES are kept: the
+   * content is base64 up to 4MB and would blow the localStorage quota, so after
+   * a refresh these have to be attached again — and the UI says so by name
+   * rather than letting the advisor generate without them.
+   */
+  docNames:   string[]
+
   setContextText: (t: string) => void
   setIntakeAnswer: (id: string, value: string) => void
   setIntakeForm: (answers: Record<string, string>) => void
+  /** Set one upload field, by value or by updater (mirrors useState). */
+  setLab: <K extends LabDataKey>(
+    key: K,
+    value: AutoMapState[K] | ((prev: AutoMapState[K]) => AutoMapState[K]),
+  ) => void
+  /** Drop the upload but keep the questionnaire and the generated result. */
+  clearLabData: () => void
   setReportMonths: (n: number) => void
   setResult: (r: GeneratedMapping | null) => void
   /**
@@ -78,6 +111,9 @@ interface AutoMapState {
 
 const mkId = () => 'd' + Math.random().toString(36).slice(2, 11)
 
+/** The upload fields — the ones setLab can write and clearLabData empties. */
+type LabDataKey = 'txns' | 'bankRows' | 'fileNames' | 'attachedByQ' | 'txnOverrides' | 'docNames'
+
 /**
  * localStorage key for the persisted lab session. Exported so dataSync's
  * resetSessionStores() can clear it at an identity change — this store holds the
@@ -96,10 +132,24 @@ export const useAutoMapStore = create<AutoMapState>()(
       annualItems: [],
       dismissedOneOffs: [],
       intakeForm: {},
+      txns: [],
+      bankRows: [],
+      fileNames: [],
+      attachedByQ: {},
+      txnOverrides: {},
+      docNames: [],
 
       setContextText:  (contextText) => set({ contextText }),
       setIntakeAnswer: (id, value) => set(s => ({ intakeForm: { ...s.intakeForm, [id]: value } })),
       setIntakeForm:   (answers) => set(s => ({ intakeForm: { ...s.intakeForm, ...answers } })),
+      setLab: (key, value) => set(s => ({
+        [key]: typeof value === 'function'
+          ? (value as (prev: AutoMapState[typeof key]) => AutoMapState[typeof key])(s[key])
+          : value,
+      } as Pick<AutoMapState, typeof key>)),
+      clearLabData: () => set({
+        txns: [], bankRows: [], fileNames: [], attachedByQ: {}, txnOverrides: {}, docNames: [],
+      }),
       setReportMonths: (n) => set({ reportMonths: Math.max(1, Math.min(24, Math.floor(n || 1))) }),
       setResult:       (result) => set({ result }),
       updateResult:    (patch) => set(s => ({
@@ -121,6 +171,7 @@ export const useAutoMapStore = create<AutoMapState>()(
       reset: () => set({
         contextText: '', reportMonths: 1, result: null,
         annualItems: [], dismissedOneOffs: [], intakeForm: {},
+        txns: [], bankRows: [], fileNames: [], attachedByQ: {}, txnOverrides: {}, docNames: [],
       }),
 
       saveDraft: (name) => {
@@ -152,6 +203,23 @@ export const useAutoMapStore = create<AutoMapState>()(
         drafts: s.drafts.map(d => d.id === id ? { ...d, name: name.trim() || d.name } : d),
       })),
     }),
-    { name: AUTOMAP_STORAGE_KEY },
+    {
+      name: AUTOMAP_STORAGE_KEY,
+      /**
+       * localStorage is a few megabytes for the whole origin, and the drafts
+       * archive already lives in here. A routine 3-month upload is a few hundred
+       * rows (~50KB); an unusual one could be thousands. Past the cap the rows
+       * are simply not persisted — a refresh then behaves exactly as it did
+       * before, which is far better than a quota error that loses the drafts
+       * archive along with them.
+       */
+      partialize: (s) => {
+        const rows = s.txns.length + s.bankRows.length
+        return rows > MAX_PERSISTED_ROWS ? { ...s, txns: [], bankRows: [] } : s
+      },
+    },
   ),
 )
+
+/** ~900KB of JSON at ~150 bytes a row — comfortably inside the quota. */
+const MAX_PERSISTED_ROWS = 6000
