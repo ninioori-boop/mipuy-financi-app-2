@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore'
 import { auth, db, storage } from './firebase'
 import { intakeQuestionLabel } from './intakeForm'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 
 export interface IntakeFile {
   id:            string
@@ -35,9 +36,46 @@ function requireUid(): string {
   return uid
 }
 
+/**
+ * WHOSE intake this call is about.
+ *
+ * Every function here used to resolve `auth.currentUser.uid`, which is always
+ * the signed-in account — so an advisor inside a client's account was shown
+ * their OWN questionnaire and their OWN uploaded files, while the banner
+ * promised "השינויים נשמרים אצל הלקוח" (2026-08-11, reported from production).
+ * The advisor could therefore never see whether a client had uploaded anything,
+ * which is the entire purpose of the screen for them. The automap screen
+ * already resolved the client this way; this file was the one left behind.
+ */
+function targetUid(): string {
+  return useImpersonationStore.getState().client?.uid ?? requireUid()
+}
+
+/** True while an advisor is acting inside a client's account. */
+export function isActingAsClient(): boolean {
+  return !!useImpersonationStore.getState().client
+}
+
+/**
+ * Writes stay with the owner, always.
+ *
+ * Not a product choice — both rule files enforce it: `firestore.rules` allows an
+ * advisor to READ /intake/{client} but never to write it, and `storage.rules`
+ * restricts write/delete to `request.auth.uid == userId`. Without this guard the
+ * screen would send a write that lands as a raw permission-denied, or (worse,
+ * the old behaviour) silently save the CLIENT's answers into the ADVISOR's own
+ * intake document.
+ */
+function refuseWriteAsAdvisor(): void {
+  if (isActingAsClient()) {
+    throw new Error('התיק של הלקוח פתוח לצפייה בלבד. העלאה, עריכה ומחיקה נעשות מהחשבון של הלקוח.')
+  }
+}
+
 /** Upload one file for the current client + write its metadata (optionally
  * tagged with the questionnaire question it answers). */
 export async function uploadIntakeFile(file: File, questionId?: string): Promise<void> {
+  refuseWriteAsAdvisor()
   const uid = requireUid()
   const user = auth.currentUser!
   const fileId = mkId()
@@ -65,6 +103,7 @@ export async function uploadIntakeFile(file: File, questionId?: string): Promise
 
 /** Save the questionnaire's text/choice answers for the current client. */
 export async function saveAnswers(answers: Record<string, string>): Promise<void> {
+  refuseWriteAsAdvisor()
   const uid = requireUid()
   const user = auth.currentUser!
   await setDoc(doc(db, 'intake', uid), {
@@ -76,9 +115,9 @@ export async function saveAnswers(answers: Record<string, string>): Promise<void
   }, { merge: true })
 }
 
-/** Load the current client's saved answers. */
+/** Saved answers for the account in view (the client when acting as one). */
 export async function loadMyAnswers(): Promise<Record<string, string>> {
-  const snap = await getDoc(doc(db, 'intake', requireUid()))
+  const snap = await getDoc(doc(db, 'intake', targetUid()))
   const a = snap.exists() ? (snap.data().answers as unknown) : null
   return a && typeof a === 'object' ? (a as Record<string, string>) : {}
 }
@@ -99,13 +138,14 @@ async function readFiles(uid: string): Promise<IntakeFile[]> {
   })
 }
 
-/** Current client's own files. */
+/** Files of the account in view (the client's when acting as one). */
 export function listMyIntake(): Promise<IntakeFile[]> {
-  return readFiles(requireUid())
+  return readFiles(targetUid())
 }
 
-/** Delete one of the current client's files (Storage object + metadata). */
+/** Delete one of the signed-in account's files (Storage object + metadata). */
 export async function deleteIntakeFile(f: IntakeFile): Promise<void> {
+  refuseWriteAsAdvisor()
   const uid = requireUid()
   try { await deleteObject(ref(storage, f.path)) } catch { /* object may already be gone */ }
   await deleteDoc(doc(db, 'intake', uid, 'files', f.id))
