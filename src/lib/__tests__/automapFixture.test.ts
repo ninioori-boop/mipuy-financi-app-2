@@ -27,7 +27,7 @@ const run = (over: Partial<AutomapRun> = {}): AutomapRun => buildRun({
     { desc: 'ארנונה', amount: 1860, date: '2026-06-02', dir: 'out' },
   ],
   fileNames: ['credit.xlsx'], attachedByQ: {}, txnOverrides: {}, docNames: [],
-  intakeForm: {}, contextText: '', annualItems: [],
+  intakeForm: {}, intakeRows: {}, contextText: '', annualItems: [],
   result: {
     ...emptyMapping,
     // Two rows on purpose: one income row beside real deposits IS the

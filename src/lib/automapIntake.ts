@@ -1,26 +1,44 @@
 'use client'
 
-// Reading a client's intake questionnaire FOR THE AUTOMAP LAB ONLY.
+// Reading a client's intake from Firestore and Storage, for the automap lab.
 //
-// The questionnaire already exists and is live: src/lib/intakeForm.ts defines 22
-// questions, clients answer them into intake/{uid}.answers and upload files to
-// Storage under intake/{uid}/, each tagged with the questionId it answers. Seven
-// clients have filled it in. Nothing has ever read it back — the client screen
-// only ever loads the SIGNED-IN user's own intake, so the advisor has no view of
-// it at all. The data has been write-only since the day it shipped.
+// ⚠️ This half touches Firebase, so it can only run in the browser. The
+// questionnaire ITSELF — the question list, the targets, the formatting — is
+// pure and lives in automapQuestions.ts, because the replay script
+// (scripts/automap-replay.ts) runs it under Node with no Firebase config at all.
+// Importing this module from there would initialise an app with an empty key.
+// Everything pure is re-exported below, so the page still has one import.
 //
-// ⚠️ Why this file exists instead of two exports on intake.ts: that module backs
-// the LIVE "העלאת מסמכים" screen every client uses. `readFiles(uid)` is already
-// written there but private, and exporting it would be an edit to a live file
-// for a lab-only feature. Same call as duplicating ~20 lines in automapBank.ts
-// rather than editing the עו"ש tab. Reads only — no writes, no rules change;
-// firestore.rules:159 and storage.rules:18 already grant the advisor read access
-// through ownsClient(userId).
+// It began as a mirror of the live client form (src/lib/intakeForm.ts, 22
+// questions, answered into intake/{uid} with every file tagged by questionId).
+// It is no longer a mirror. Ori's rule, 2026-08-11: **a document is only worth
+// asking for when nothing else can produce the number.**
+//
+// Three documents survive that test, and only three:
+//   דוח עו"ש · דוחות אשראי · לוחות סילוקין
+// Everything else was a report uploaded so a model could read one number off it
+// — the salary, the credit score, the portfolio value, the accumulated pension.
+// Reading it back was work, it was the part that failed most, and the number was
+// always something a person could simply type. So those questions became typed
+// fields, and הר הביטוח was dropped altogether: the premiums are already visible
+// as charges in the statements.
+//
+// ⚠️ intakeForm.ts is LIVE and untouched. Clients still see all 22 questions;
+// this list is what the ADVISOR fills in the lab. The two ids that route to a
+// parser (oshReports, creditReports) are deliberately the live ones, so a file a
+// client uploaded through the real form still lands in the right parser.
+//
+// ⚠️ Why this file reads intake itself instead of exporting from intake.ts: that
+// module backs the live "העלאת מסמכים" screen. `readFiles(uid)` is already there
+// but private, and exporting it would be an edit to a live file for a lab-only
+// feature. Reads only — no writes, no rules change; firestore.rules:159 and
+// storage.rules:18 already grant the advisor read access through ownsClient().
 
 import { collection, doc, getDoc, getDocs, orderBy, query } from 'firebase/firestore'
 import { getDownloadURL, ref } from 'firebase/storage'
 import { db, storage } from './firebase'
-import { INTAKE_QUESTIONS, type IntakeQuestion } from './intakeForm'
+
+export * from './automapQuestions'
 
 export interface IntakeDoc {
   id:          string
@@ -62,216 +80,4 @@ export function intakeFileUrl(path: string): Promise<string> {
   return getDownloadURL(ref(storage, path))
 }
 
-// ── routing: what IS each file? ──
-//
-// This is the reason the questionnaire is worth connecting at all. A file that
-// arrived as the answer to "דוח עו\"ש שלושה חודשים אחורה" IS a bank statement —
-// known, not guessed. Guessing the file type is exactly what produced the worst
-// bug of 2026-08-07: every Excel went through the CREDIT parser, and on a bank
-// export a salary deposit was counted as an expense.
 
-export type IntakeRoute = 'bank' | 'credit' | 'document'
-
-const ROUTE_BY_QUESTION: Record<string, IntakeRoute> = {
-  oshReports:    'bank',
-  creditReports: 'credit',
-}
-
-/**
- * Where a file should go. Anything not explicitly a statement becomes a document
- * for the model to read — payslips, loan schedules, credit score, portfolios,
- * insurance and pension reports. Unknown ids land there too: a file we cannot
- * place is still worth showing the model, and must never be dropped.
- */
-export function routeForQuestion(questionId?: string): IntakeRoute {
-  return (questionId && ROUTE_BY_QUESTION[questionId]) || 'document'
-}
-
-// ── questions the LAB asks and the live client form does not ──
-//
-// The lab renders the same list the client sees, so a question added to
-// intakeForm.ts would appear on a screen seven clients have already filled in.
-// These live here instead: asked in the lab, invisible to clients, and the live
-// form is not touched. Moving one into intakeForm.ts is a separate decision.
-//
-// The credit score is a number, and the live form only ever asked for a
-// SCREENSHOT of it ('creditScore', a file). A picture has to be read by the
-// model to become a number; typing it makes it certain. A household has two
-// people and two scores, and the mapping carries one — so both are asked and
-// the average is what the mapping gets.
-
-export const LAB_EXTRA_QUESTIONS: IntakeQuestion[] = [
-  { id: 'creditScoreSelf',    type: 'text', label: 'ציון דירוג האשראי (מספר)',
-    hint: 'מתוך דוח נתוני אשראי, בדרך כלל 0–1000' },
-  { id: 'creditScorePartner', type: 'text', label: 'ציון דירוג האשראי של בן/בת הזוג',
-    hint: 'אם יש שניים — המיפוי יקבל את הממוצע' },
-]
-
-/** Everything the lab asks: the live questionnaire plus its own additions. */
-export const LAB_QUESTIONS: IntakeQuestion[] = [...INTAKE_QUESTIONS, ...LAB_EXTRA_QUESTIONS]
-
-/** The two score fields are reported as one averaged line, not two raw ones. */
-const SCORE_IDS = new Set(['creditScoreSelf', 'creditScorePartner'])
-
-/** A score as a person types it: "720", "720 נקודות", "1,000". */
-function parseScore(v?: string): number | null {
-  const digits = String(v ?? '').replace(/[^\d]/g, '')
-  if (!digits) return null
-  const n = Number(digits)
-  return Number.isFinite(n) && n > 0 ? n : null
-}
-
-/**
- * The one credit score the mapping carries. Two people, two scores, one
- * household — so the average, and the line says so rather than hiding it.
- * Null when neither was given: a made-up score is worse than none.
- */
-export function creditScoreLine(answers: Record<string, string>): string | null {
-  const self    = parseScore(answers.creditScoreSelf)
-  const partner = parseScore(answers.creditScorePartner)
-  if (self == null && partner == null) return null
-  if (self != null && partner != null) {
-    return `  - ציון דירוג אשראי: ${Math.round((self + partner) / 2)} (ממוצע של ${self} ו‑${partner})`
-  }
-  return `  - ציון דירוג אשראי: ${self ?? partner}`
-}
-
-// ── the questionnaire IS the mapping's schema ──
-//
-// Every question was written to fill a specific column. "מה היתרה בעו״ש" is
-// bankAccounts[].balance; "מסגרת האשראי בכל כרטיס" is creditCards[].limit; a
-// loan schedule carries the three fields a bank statement never shows. Sending
-// "question: answer" and leaving the model to work out where it goes is the
-// same guess we spent the day replacing with code — so the destination is
-// stated with the answer.
-//
-// An id with no entry here simply carries no target line. That is honest: it
-// means the answer is context rather than a column, and inventing a
-// destination would be worse than leaving it to the model's judgement.
-
-const ANSWER_TARGET: Record<string, string> = {
-  bankAccounts:       'bankAccounts[].name — שורה אחת לכל חשבון, עם שם הבנק מהתשובה הזאת ולא מכותרת הדוח',
-  oshBalance:         'bankAccounts[].balance — יתרה שלילית = מינוס',
-  creditCardsCount:   'creditCards[] — מספר השורות בסעיף',
-  creditLimits:       'creditCards[].limit',
-  hasLoans:           'debts[] — "לא" פירושו שהסעיף ריק, גם אם יש חיוב שנראה כמו החזר',
-  selfEmployedIncome: 'income[] של העצמאי, ואם יש פעילות עסקית — הקלט להפרדת businessIncome ממשק הבית',
-  cryptoDetails:      'savings[] — שורה אחת, accumulated = השווי',
-  realEstateDetails:  'savings[] — שורה אחת, accumulated = שווי הנכס, monthlyContribution = 0. נדל"ן הוא נכס ונספר בשווי הנכסים',
-  creditScoreSelf:    'creditScore',
-  creditScorePartner: 'creditScore (ממוצע בני הזוג, כבר מחושב בשורה שקיבלת)',
-  fullNames:          'הקשר בלבד',
-  phone:              'הקשר בלבד',
-}
-
-/** What an attached FILE is for — the section it is the source of. */
-const FILE_TARGET: Record<string, string> = {
-  payslips:            'income[] — שכר נטו, לא ברוטו',
-  oshReports:          'כבר פוענח לבלוקים של ההוצאות וההכנסות; אל תקרא אותו שוב',
-  creditReports:       'כבר פוענח לבלוק ההוצאות; אל תקרא אותו שוב',
-  loanSchedules:       'debts[].remainingBalance / interestRate / remainingMonths — זה המקור היחיד לשלושתם',
-  securitiesPortfolio: 'savings[] — שורה אחת עם שווי התיק כולו, לא שורה לכל נייר',
-  bankId:              'bankAccounts[] ו‑debts[] — תעודת זהות בנקאית מרכזת חשבונות והלוואות',
-  harHaKesefReports:   'savings[] — קופות וקרנות, accumulated = הצבירה',
-  harHaBituachReport:  'ins[] — הפרמיות החודשיות',
-  otherAssets:         'savings[] — שורה אחת לכל מוצר, accumulated = השווי',
-  creditScore:         'creditScore — רק אם אין מספר בשורת "ציון דירוג אשראי"',
-}
-
-/**
- * One line per attached document, naming the question it answered and the
- * column it feeds. The files themselves arrive as images/PDFs with no labels,
- * so without this the model is told "here are four screenshots, good luck".
- */
-export function formatIntakeDocs(attachedByQ: Record<string, string[]>): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const q of LAB_QUESTIONS) {
-    const names = attachedByQ[q.id] ?? []
-    if (!names.length) continue
-    seen.add(q.id)
-    const target = FILE_TARGET[q.id]
-    out.push(`  - ${names.join(', ')} — צורף כתשובה ל"${q.label}"${target ? ` → ${target}` : ''}`)
-  }
-  // A question id this file has never heard of — added to the form later, most
-  // likely. Same rule as routeForQuestion's fallback: a file we cannot place is
-  // still worth showing the model, and must never disappear silently.
-  for (const [id, names] of Object.entries(attachedByQ)) {
-    if (seen.has(id) || !names.length) continue
-    out.push(`  - ${names.join(', ')} — צורף כתשובה לשאלה "${id}"`)
-  }
-  return out
-}
-
-// ── the answers block the model receives ──
-
-/** One label per answered question, in the questionnaire's own order. */
-export function formatIntakeAnswers(answers: Record<string, string>): string[] {
-  const out: string[] = []
-  for (const q of LAB_QUESTIONS) {
-    if (q.type === 'file') continue                 // files travel as files
-    if (SCORE_IDS.has(q.id)) continue                // reported as one averaged line
-    const v = (answers[q.id] ?? '').trim()
-    if (!v) continue                                 // unanswered says nothing
-    const target = ANSWER_TARGET[q.id]
-    out.push(`  - ${q.label}: ${v}${target ? `   → ${target}` : ''}`)
-  }
-  const score = creditScoreLine(answers)
-  if (score) out.push(`${score}   → ${ANSWER_TARGET.creditScoreSelf}`)
-  return out
-}
-
-/** How many questions were actually answered — for the banner and the meter. */
-export function countAnswered(answers: Record<string, string>): number {
-  return LAB_QUESTIONS.filter(q => q.type !== 'file' && (answers[q.id] ?? '').trim()).length
-}
-
-// ── the questionnaire as the lab's INPUT surface ──
-//
-// The lab used to open with one dropzone: drag everything in, and the model
-// works out what each file is. That is backwards — it made the format the
-// source of truth for what a file MEANS, and the format cannot carry that.
-//
-// So the input is the questionnaire itself. Each question is its own slot, and
-// a file dropped into a slot is tagged with that question before it is parsed.
-// Same 22 questions the client sees; here the advisor fills them in.
-//
-// Grouping is presentation only, and is DELIBERATELY not exhaustive: a question
-// added to intakeForm.ts that nobody listed here lands in the trailing group
-// rather than disappearing from the screen. A silently missing question is the
-// same failure class as a silently dropped file.
-
-export interface IntakeGroup {
-  title:     string
-  questions: IntakeQuestion[]
-}
-
-/** Ordered display groups, by question id. Ids that don't exist are ignored. */
-const GROUP_IDS: { title: string; ids: string[] }[] = [
-  { title: 'מי הלקוח',        ids: ['fullNames', 'phone'] },
-  { title: 'הכנסות',          ids: ['payslips', 'selfEmployedIncome'] },
-  { title: 'חשבונות בנק',     ids: ['bankAccounts', 'oshBalance', 'oshReports', 'bankId'] },
-  { title: 'אשראי',           ids: ['creditCardsCount', 'creditLimits', 'creditReports', 'creditScoreSelf', 'creditScorePartner', 'creditScore'] },
-  { title: 'הלוואות',         ids: ['hasLoans', 'loanSchedules'] },
-  { title: 'חסכונות ונכסים',  ids: ['checkedHarHaKesef', 'harHaKesefReports', 'securitiesPortfolio', 'otherAssets', 'realEstateDetails', 'cryptoDetails'] },
-  { title: 'ביטוחים',         ids: ['checkedHarHaBituach', 'harHaBituachReport'] },
-]
-
-export function groupIntakeQuestions(questions: IntakeQuestion[] = LAB_QUESTIONS): IntakeGroup[] {
-  const byId = new Map(questions.map(q => [q.id, q]))
-  const used = new Set<string>()
-  const groups: IntakeGroup[] = []
-
-  for (const g of GROUP_IDS) {
-    const qs = g.ids.map(id => byId.get(id)).filter((q): q is IntakeQuestion => !!q)
-    for (const q of qs) used.add(q.id)
-    if (qs.length) groups.push({ title: g.title, questions: qs })
-  }
-
-  // Anything the lists above never mentioned — including a question added to the
-  // live form after this file was written. It must still be askable.
-  const rest = questions.filter(q => !used.has(q.id))
-  if (rest.length) groups.push({ title: 'נוסף', questions: rest })
-
-  return groups
-}

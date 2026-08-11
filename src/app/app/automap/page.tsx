@@ -30,7 +30,8 @@ import { sheetToText, looksLikeStatement } from '@/lib/automapSheet'
 import { buildRun } from '@/lib/automapFixture'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
-  formatIntakeAnswers, formatIntakeDocs, countAnswered, type IntakeDoc, type IntakeRoute,
+  formatIntakeAnswers, formatIntakeDocs, formatIntakeRows, declaredMonthlyIncome,
+  countAnswered, type IntakeDoc, type IntakeRoute,
 } from '@/lib/automapIntake'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
@@ -90,11 +91,11 @@ export default function AutoMapPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const {
-    contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs, intakeForm,
+    contextText, reportMonths, result, drafts, annualItems, dismissedOneOffs, intakeForm, intakeRows,
     txns, bankRows, fileNames, attachedByQ, txnOverrides, docNames,
     setContextText, setReportMonths, setResult, updateResult, reset,
     setAnnualItem, removeAnnualItem, dismissOneOff,
-    setIntakeAnswer, setIntakeForm, setLab, clearLabData,
+    setIntakeAnswer, setIntakeForm, setIntakeRows, setLab, clearLabData,
     saveDraft, loadDraft, deleteDraft,
   } = useAutoMapStore()
 
@@ -336,7 +337,15 @@ export default function AutoMapPage() {
     [attachedByQ],
   )
   const intakeLines   = useMemo(() => formatIntakeAnswers(intakeForm), [intakeForm])
-  const answeredCount = useMemo(() => countAnswered(intakeForm), [intakeForm])
+  const rowLines      = useMemo(() => formatIntakeRows(intakeRows), [intakeRows])
+  const answeredCount = useMemo(() => countAnswered(intakeForm, intakeRows), [intakeForm, intakeRows])
+  /**
+   * Monthly net income as the questionnaire declared it, already averaged over
+   * the months that were filled in. Non-zero flips the deposits block from
+   * "this is the income" to "this verifies the income" — the two are the same
+   * money, and nothing else stops them being added together.
+   */
+  const declaredIncome = useMemo(() => declaredMonthlyIncome(intakeRows), [intakeRows])
 
   // ── the client's questionnaire ──
   //
@@ -625,9 +634,11 @@ export default function AutoMapPage() {
       // client who skipped questions, and conflating them fires on every run.
       intakeAnswers: answeredCount > 0 ? intakeForm : null,
       intakeFiles,
+      declaredIncome,
     }),
     [expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
-     annualItems, installmentLines, settlements, answeredCount, intakeForm, intakeFiles],
+     annualItems, installmentLines, settlements, answeredCount, intakeForm, intakeFiles,
+     declaredIncome],
   )
 
   // ── the mapping against the account ──
@@ -665,7 +676,7 @@ export default function AutoMapPage() {
     const run = buildRun({
       months: detectedMonths || reportMonths,
       txns, bankRows, fileNames, attachedByQ, txnOverrides, docNames,
-      intakeForm, contextText, annualItems, result,
+      intakeForm, intakeRows, contextText, annualItems, result,
     })
     const blob = new Blob([JSON.stringify(run, null, 2)], { type: 'application/json' })
     const url  = URL.createObjectURL(blob)
@@ -676,7 +687,7 @@ export default function AutoMapPage() {
     URL.revokeObjectURL(url)
     toast.success('ההרצה נשמרה כקובץ automap-run.json בתיקיית ההורדות')
   }, [detectedMonths, reportMonths, txns, bankRows, fileNames, attachedByQ,
-      txnOverrides, docNames, intakeForm, contextText, annualItems, result])
+      txnOverrides, docNames, intakeForm, intakeRows, contextText, annualItems, result])
 
   const annualDupes = useMemo(
     () => (result ? findAnnualDuplicates(result.annual) : []),
@@ -690,9 +701,9 @@ export default function AutoMapPage() {
     () => (result ? checkIncomeAgainstDeposits(result, {
       deposits: flows.bankIn,
       months: flows.months,
-      hasPayslips: (intakeFiles.payslips ?? 0) > 0,
+      hasDeclaredIncome: declaredIncome > 0 || (intakeFiles.payslips ?? 0) > 0,
     }) : null),
-    [result, flows, intakeFiles],
+    [result, flows, intakeFiles, declaredIncome],
   )
 
   // A duplicate inside a result generated before the fix stays there for as
@@ -799,8 +810,10 @@ ${d.data}` })
       lines.push('')
     }
     if (incomeLines.length) {
-      lines.push('== הכנסות והפקדות שזוהו בעו"ש ==')
-      lines.push(...formatIncomeBreakdown(incomeLines, reportMonths))
+      lines.push(declaredIncome > 0
+        ? '== הפקדות שזוהו בעו"ש (אימות בלבד — ההכנסה נמסרה בשאלון) =='
+        : '== הכנסות והפקדות שזוהו בעו"ש ==')
+      lines.push(...formatIncomeBreakdown(incomeLines, reportMonths, declaredIncome > 0))
       lines.push('')
     }
     if (annualItems.length) {
@@ -850,6 +863,15 @@ ${d.data}` })
       lines.push(...intakeLines)
       lines.push('')
     }
+    // The typed tables: income per earner, funds, assets. Separated from the
+    // answers above because these are not text to interpret — every figure has
+    // already been reduced, in code, to the number its column wants.
+    if (rowLines.length) {
+      lines.push('== השאלון — מספרים שהוקלדו, כל אחד לעמודה שלו ==')
+      lines.push('🔴 המספרים כאן הוקלדו בידי אדם ולא הוסקו משום מסמך. כל שורה כאן חייבת להופיע כשורה במיפוי, ואף אחת מהן לא נספרת פעמיים מול הדוחות.')
+      lines.push(...rowLines)
+      lines.push('')
+    }
     // Documents arrive as unlabelled images and PDFs. Without this the model is
     // handed four screenshots and asked to work out what each one is — which is
     // the guess the questionnaire exists to remove.
@@ -867,7 +889,8 @@ ${d.data}` })
   }
 
   async function generate() {
-    if (!txns.length && !bankRows.length && !contextText.trim() && !docs.length && !intakeLines.length) {
+    if (!txns.length && !bankRows.length && !contextText.trim() && !docs.length
+        && !intakeLines.length && !rowLines.length) {
       toast.error('מלא את השאלון או צרף קבצים קודם')
       return
     }
@@ -1273,6 +1296,8 @@ ${d.data}` })
         <IntakeFormPanel
           answers={intakeForm}
           onAnswer={setIntakeAnswer}
+          rows={intakeRows}
+          onRows={setIntakeRows}
           onFiles={handleQuestionFiles}
           attached={attachedByQ}
           onRemoveAttached={removeAttached}

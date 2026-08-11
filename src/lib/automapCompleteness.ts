@@ -55,6 +55,16 @@ export interface CompletenessInput {
    * in a question's own slot names itself.
    */
   intakeFiles?: Record<string, number>
+  /**
+   * Net monthly income as the questionnaire declared it, already averaged. 0
+   * when nobody typed one.
+   *
+   * This replaced the payslip upload on 2026-08-11. The gap it guards is the
+   * same one either way — income that is nothing but a reading of the deposits,
+   * which is exactly where gross and net get confused and where two salaries
+   * paid into one account merge into a single number.
+   */
+  declaredIncome?: number
 }
 
 /**
@@ -119,7 +129,7 @@ const mentions = (text: string, words: string[]) =>
 export function buildCompletenessReport(input: CompletenessInput): CompletenessItem[] {
   const {
     expenseTxns, incomeRows, docs, contextText, reportMonths, detectedMonths,
-    annualItems, installments, settlements,
+    annualItems, installments, settlements, declaredIncome = 0,
   } = input
 
   const items: CompletenessItem[] = []
@@ -257,14 +267,15 @@ export function buildCompletenessReport(input: CompletenessInput): CompletenessI
         })
       }
 
-      // Income has two legal shapes: a payslip, or a self-employed client
-      // stating the figure. Neither present means the mapping's income is a
+      // Income has three legal shapes now: typed into the income table, a
+      // self-employed client stating the figure, or a payslip a client uploaded
+      // through the live form. None of them means the mapping's income is a
       // guess from deposits, which is exactly where gross/net goes wrong.
-      if (!(files.payslips ?? 0) && !(ans.selfEmployedIncome ?? '').trim()) {
+      if (!(declaredIncome > 0) && !(files.payslips ?? 0) && !(ans.selfEmployedIncome ?? '').trim()) {
         items.push({
           key: 'no-payslip', severity: 'gap',
-          title: 'לא צורף תלוש ולא פורטה הכנסה של עצמאי',
-          detail: 'בלי אחד מהם ההכנסה נגזרת מהפקדות בלבד, ואין דרך לדעת אם היא ברוטו, נטו, או שתי משכורות שהתערבבו.',
+          title: 'לא נמסרה הכנסה בשאלון',
+          detail: 'בלי הכנסה שנמסרה, המיפוי גוזר אותה מההפקדות בלבד, ואין דרך לדעת אם היא ברוטו, נטו, או שתי משכורות שהתערבבו. מלא את טבלת ההכנסה בשאלון.',
         })
       }
     }

@@ -139,9 +139,11 @@ export function reconcile(r: GeneratedMapping, input: ReconcileInput): Reconcile
 
 // ── income counted twice ──
 //
-// A payslip and the salary deposit it produced are the same money, and both
-// reach the model: the payslip as an image, the deposit as a line in the income
-// block. Nothing structural stops it from returning both as separate rows.
+// A declared salary and the deposit it produced are the same money, and both
+// reach the model: the figure typed into the questionnaire, and the deposit as
+// a line in the income block. Nothing structural stops it returning both as
+// separate rows. (Before 2026-08-11 the declared side was a payslip image; the
+// arithmetic that catches the double count is identical either way.)
 //
 // The reconciliation above WOULD notice — double-counted income inflates the
 // surplus — but it would name it wrong, reporting "expenses are missing" when
@@ -167,7 +169,7 @@ const INCOME_MIN_EXCESS = 800
 
 export function checkIncomeAgainstDeposits(
   r: GeneratedMapping,
-  input: { deposits: number; months: number; hasPayslips: boolean },
+  input: { deposits: number; months: number; hasDeclaredIncome: boolean },
 ): IncomeCheck | null {
   const months = Math.max(1, input.months)
   const depositsPerMonth = input.deposits / months
@@ -180,8 +182,8 @@ export function checkIncomeAgainstDeposits(
   return {
     mappingPerMonth, depositsPerMonth, excessPerMonth: excess,
     title: `ההכנסות גבוהות ב‑${money(excess)} לחודש ממה שנכנס לחשבון`,
-    detail: input.hasPayslips
-      ? `המיפוי מציג ${money(mappingPerMonth)} הכנסה לחודש, ולעו"ש נכנסו ${money(depositsPerMonth)}. צורפו תלושי שכר, וההסבר הנפוץ הוא שהשכר נספר פעמיים: פעם מהתלוש ופעם מההפקדה. הם אותו כסף.`
+    detail: input.hasDeclaredIncome
+      ? `המיפוי מציג ${money(mappingPerMonth)} הכנסה לחודש, ולעו"ש נכנסו ${money(depositsPerMonth)}. נמסרה הכנסה בשאלון, וההסבר הנפוץ הוא שהשכר נספר פעמיים: פעם מהשאלון ופעם מההפקדה. הם אותו כסף.`
       : `המיפוי מציג ${money(mappingPerMonth)} הכנסה לחודש, ולעו"ש נכנסו ${money(depositsPerMonth)}. או שיש הכנסה שנכנסת לחשבון אחר שלא הועלה, או שהכנסה נספרה פעמיים.`,
   }
 }

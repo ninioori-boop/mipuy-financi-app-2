@@ -24,6 +24,7 @@ import {
   type GeneratedMapping,
 } from './autoMap'
 import { normalizeForLookup } from './normalizeForLookup'
+import { declaredMonthlyIncome, type IntakeRow } from './automapQuestions'
 import { categorize } from './categorize'
 import type { Transaction } from '@/types/transaction'
 import type { BankRow } from './automapBank'
@@ -42,6 +43,7 @@ export interface AutomapRun {
   txnOverrides: Record<string, string>
   docNames:     string[]
   intakeForm:   Record<string, string>
+  intakeRows:   Record<string, IntakeRow[]>
   contextText:  string
   annualItems:  AnnualItem[]
   result:  GeneratedMapping | null
@@ -171,10 +173,26 @@ export function summarizeRun(run: AutomapRun): RunSummary {
   lines.push(`הצלבה: ${rec.verdict} · בפועל ${money(rec.actualPerMonth)} מול ${money(rec.mappingPerMonth)} במיפוי`)
   if (rec.verdict !== 'ok') findings.push({ severity: 'gap', text: rec.title })
 
+  const declared = declaredMonthlyIncome(run.intakeRows ?? {})
   const inc = checkIncomeAgainstDeposits(r, {
-    deposits, months, hasPayslips: (run.attachedByQ.payslips ?? []).length > 0,
+    deposits, months,
+    hasDeclaredIncome: declared > 0 || (run.attachedByQ.payslips ?? []).length > 0,
   })
   if (inc) findings.push({ severity: 'gap', text: inc.title })
+
+  // Declared income that the mapping simply did not carry. A number a person
+  // typed and that appears nowhere in the result is the failure the typed tables
+  // were built to end, and it is invisible in every total — the mapping just
+  // reconciles to a smaller life.
+  if (declared > 0) {
+    const carried = mappingIncome(r)
+    if (carried < declared * 0.85) {
+      findings.push({
+        severity: 'gap',
+        text: `נמסרה הכנסה של ${money(declared)} לחודש, ובמיפוי יש ${money(carried)}`,
+      })
+    }
+  }
 
   lines.push(`הכנסה ${money(mappingIncome(r))} · עודף ${money(mappingSurplus(r))} לחודש`)
   return { lines, findings }

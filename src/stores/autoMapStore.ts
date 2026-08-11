@@ -5,6 +5,7 @@ import { persist } from 'zustand/middleware'
 import type { GeneratedMapping } from '@/lib/autoMap'
 import type { AnnualItem } from '@/lib/automapAnnual'
 import type { BankRow } from '@/lib/automapBank'
+import type { IntakeRow } from '@/lib/automapQuestions'
 import type { Transaction } from '@/types/transaction'
 
 // A saved AutoMap session. Captures everything needed to reload a past
@@ -50,6 +51,17 @@ interface AutoMapState {
    */
   intakeForm: Record<string, string>
 
+  /**
+   * The questionnaire's table answers — question id → rows. Three questions use
+   * them: the three months of income per earner, the הר הכסף products, and the
+   * investment portfolios and assets. Each of those replaced a document upload,
+   * and each is a repeating shape a single text box would have flattened into a
+   * sentence somebody then has to parse.
+   *
+   * ⚠️ Client data, exactly like intakeForm — cleared in resetSessionStores().
+   */
+  intakeRows: Record<string, IntakeRow[]>
+
   // ── the parsed upload ──
   //
   // These used to live in the page's own useState, so a refresh kept the
@@ -77,6 +89,8 @@ interface AutoMapState {
   setContextText: (t: string) => void
   setIntakeAnswer: (id: string, value: string) => void
   setIntakeForm: (answers: Record<string, string>) => void
+  /** Replace the rows of one table question. */
+  setIntakeRows: (id: string, rows: IntakeRow[]) => void
   /** Set one upload field, by value or by updater (mirrors useState). */
   setLab: <K extends LabDataKey>(
     key: K,
@@ -132,6 +146,7 @@ export const useAutoMapStore = create<AutoMapState>()(
       annualItems: [],
       dismissedOneOffs: [],
       intakeForm: {},
+      intakeRows: {},
       txns: [],
       bankRows: [],
       fileNames: [],
@@ -142,6 +157,7 @@ export const useAutoMapStore = create<AutoMapState>()(
       setContextText:  (contextText) => set({ contextText }),
       setIntakeAnswer: (id, value) => set(s => ({ intakeForm: { ...s.intakeForm, [id]: value } })),
       setIntakeForm:   (answers) => set(s => ({ intakeForm: { ...s.intakeForm, ...answers } })),
+      setIntakeRows:   (id, rows) => set(s => ({ intakeRows: { ...s.intakeRows, [id]: rows } })),
       setLab: (key, value) => set(s => ({
         [key]: typeof value === 'function'
           ? (value as (prev: AutoMapState[typeof key]) => AutoMapState[typeof key])(s[key])
@@ -170,7 +186,7 @@ export const useAutoMapStore = create<AutoMapState>()(
 
       reset: () => set({
         contextText: '', reportMonths: 1, result: null,
-        annualItems: [], dismissedOneOffs: [], intakeForm: {},
+        annualItems: [], dismissedOneOffs: [], intakeForm: {}, intakeRows: {},
         txns: [], bankRows: [], fileNames: [], attachedByQ: {}, txnOverrides: {}, docNames: [],
       }),
 
