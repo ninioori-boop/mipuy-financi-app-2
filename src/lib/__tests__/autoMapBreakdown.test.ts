@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
   sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
-  consolidateByCategory, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual,
+  consolidateByCategory, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual, dropEmptyRows,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 
@@ -474,6 +474,25 @@ describe('consolidateByCategory', () => {
     }))
     expect(out.variable).toHaveLength(1)
     expect(out.sub).toHaveLength(1)
+  })
+
+  // "ביטוח בריאות מכבי" with an empty amount adds nothing to any total and
+  // reads as an unfinished row the advisor has to decide about.
+  it('drops a row the model named but never priced', () => {
+    const out = dropEmptyRows(withRows({
+      ins: [
+        { name: 'ביטוח הראל (כללי)', amount: 1380, category: 'ביטוח' },
+        { name: 'ביטוח בריאות מכבי', amount: 0, category: 'ביטוח' },
+      ],
+      annual: [{ name: 'ריק', annualAmount: 0 }, { name: 'חופשה', annualAmount: 1127 }],
+    }))
+    expect(out.ins).toHaveLength(1)
+    expect(out.annual.map(r => r.name)).toEqual(['חופשה'])
+  })
+
+  it('keeps every row that carries a number', () => {
+    const rows = withRows({ fixed: [{ name: 'ארנונה', amount: 620, category: 'ארנונה' }] })
+    expect(dropEmptyRows(rows).fixed).toHaveLength(1)
   })
 
   it('merges within a section, never across sections', () => {

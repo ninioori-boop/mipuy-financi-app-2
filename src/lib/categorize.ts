@@ -41,10 +41,30 @@ function keyMatches(query: string, key: string): boolean {
 }
 
 function searchDB(entries: [string, string][], query: string): string | null {
+  return searchBest(entries, query)?.cat ?? null
+}
+
+/**
+ * The longest matching key in a length-sorted list, with the key it matched on.
+ * The key length is what lets two lists be compared for specificity instead of
+ * one source simply outranking the other.
+ */
+function searchBest(entries: [string, string][], query: string): { key: string; cat: string } | null {
   for (const [key, cat] of entries) {
-    if (keyMatches(query, key.toLowerCase())) return cat
+    if (keyMatches(query, key.toLowerCase())) return { key, cat }
   }
   return null
+}
+
+/** Best match across both spellings of the description. */
+function bestOf(
+  entries: [string, string][], lower: string, normalized: string,
+): { key: string; cat: string } | null {
+  const a = searchBest(entries, lower)
+  const b = normalized !== lower ? searchBest(entries, normalized) : null
+  if (!a) return b
+  if (!b) return a
+  return b.key.length > a.key.length ? b : a
 }
 
 // Sort by key length descending (longer keys = more specific match).
@@ -84,16 +104,26 @@ export function categorize(
   const builtinExact = BUILTIN_EXACT.get(lower) ?? BUILTIN_EXACT.get(normalized)
   if (builtinExact) return builtinExact
 
-  // 3. Substring learned (user corrections + reviewed pool promotions).
-  const learnedEntries = sortByLength(Object.entries(learnedDB))
-  let result = searchDB(learnedEntries, lower)
-  if (!result && normalized !== lower) result = searchDB(learnedEntries, normalized)
-  if (result) return result
-
-  // 4. Substring built-in.
-  result = searchDB(BUILTIN_ENTRIES, lower)
-  if (!result && normalized !== lower) result = searchDB(BUILTIN_ENTRIES, normalized)
-  if (result) return result
+  // 3. Substring — the LONGEST matching key wins, whichever list it came from;
+  //    a learned key wins only a tie.
+  //
+  // 🔴 Learned used to outrank the built-in DB outright inside this tier, so a
+  // 4-character learned key beat a 10-character curated one. Real case: a
+  // learned "מגדל" → ביטוח hijacked the curated "מגדל/טלפון" → השקעות, and
+  // every securities purchase through the investment house was filed as an
+  // insurance premium — through three deploys that fixed exactly that key.
+  // This is the same defect the exact tiers above were added for in 2026-08-06
+  // ("one client's over-broad key hijacks a precisely-named merchant"); that
+  // round fixed exact-vs-substring and left specificity inside the substring
+  // tier untouched. Correction power is intact: a learned key at least as
+  // specific as the built-in one still wins.
+  const learnedHit = bestOf(sortByLength(Object.entries(learnedDB)), lower, normalized)
+  const builtinHit = bestOf(BUILTIN_ENTRIES, lower, normalized)
+  if (learnedHit && builtinHit) {
+    return builtinHit.key.length > learnedHit.key.length ? builtinHit.cat : learnedHit.cat
+  }
+  if (learnedHit) return learnedHit.cat
+  if (builtinHit) return builtinHit.cat
 
   // 5. Payment-rail fallback: Hebrew rail variants BUSINESS_DB has no key for
   // ("תשלום בביט", "פייבוקס") must still land on their untracked default —

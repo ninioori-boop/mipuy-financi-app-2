@@ -283,12 +283,18 @@ export function LabMappingView({
   // way to open it up at all.
   const resolveIncomeTxns = (row: MappingRow): Transaction[] => {
     const key = normalizeForLookup(row.name)
-    if (!key) return []
-    return incomeRows
-      .filter(r => {
-        const k = normalizeForLookup(r.desc)
-        return !!k && (k === key || k.includes(key) || key.includes(k))
-      })
+    const matched = key
+      ? incomeRows.filter(r => {
+          const k = normalizeForLookup(r.desc)
+          return !!k && (k === key || k.includes(key) || key.includes(k))
+        })
+      : []
+    // A single income row named after no payer in particular — "הכנסות", or a
+    // row the advisor renamed — represents ALL the deposits, so showing none of
+    // them is the least useful answer. Only when it is the only row: with
+    // several, an unmatched one must not claim the other rows' deposits.
+    const use = matched.length || result.income.length !== 1 ? matched : incomeRows
+    return use
       .map(r => ({
         desc: r.desc, amount: r.amount, originalAmount: null, category: 'הכנסות',
         source: 'עו"ש', notes: '', date: r.date,

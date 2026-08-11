@@ -27,6 +27,23 @@ describe('categorize — an investment house is not always insurance', () => {
     expect(categorize(desc)).toBe('השקעות')
   })
 
+  // 🔴 The reason it stayed broken through three deploys. A learned key used to
+  // outrank the built-in DB outright inside the substring tier, so a 4-char
+  // learned "מגדל" beat the curated 10-char "מגדל/טלפון" and every securities
+  // purchase came back as an insurance premium. Longest key wins now.
+  it('a SHORT learned key no longer hijacks a longer curated one', () => {
+    expect(categorize('קניה/( כאל) מגדל/טלפון ני', { 'מגדל': 'ביטוח' })).toBe('השקעות')
+  })
+
+  it('but a learned key at least as specific still wins — corrections work', () => {
+    expect(categorize('קניה/( כאל) מגדל/טלפון ני', { 'מגדל/טלפון': 'מזון לבית' })).toBe('מזון לבית')
+    expect(categorize('קניה/( כאל) מגדל/טלפון ני', { 'מגדל/טלפון ני': 'מזון לבית' })).toBe('מזון לבית')
+  })
+
+  it('a learned key still wins where the built-in has nothing longer', () => {
+    expect(categorize('מגדל חברה לביטוח', { 'מגדל חברה': 'השקעות' })).toBe('השקעות')
+  })
+
   it('still reads the insurance company as insurance', () => {
     expect(categorize('מגדל חברה לביטוח')).toBe('ביטוח')
     expect(categorize('הראל-ביטוח דירה')).toBe('ביטוח')

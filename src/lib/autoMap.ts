@@ -1025,6 +1025,25 @@ export function applyTxnRecategorization(m: GeneratedMapping, move: RecatMove): 
  * is the same shape for a different reason: ALL_CATEGORIES has only a generic
  * "ביטוח", so car, home, health and life all collapsed into one line.
  */
+/**
+ * Drop rows the model named but never priced.
+ *
+ * "ביטוח בריאות מכבי" with an empty amount adds nothing to any total and reads
+ * as an unfinished row the advisor has to decide about. What it really means —
+ * a policy exists whose premium was not in the data — belongs in the assessment
+ * and the completeness report, not as a ₪0 line in the mapping.
+ *
+ * A row with neither a name nor an amount is pure noise and goes too.
+ */
+export function dropEmptyRows(m: GeneratedMapping): GeneratedMapping {
+  const out = { ...m }
+  for (const key of SIMPLE_KEYS) out[key] = out[key].filter(r => r.amount !== 0)
+  out.annual = out.annual.filter(r => r.annualAmount !== 0)
+  out.businessIncome   = out.businessIncome.filter(r => r.amount !== 0)
+  out.businessExpenses = out.businessExpenses.filter(r => r.amount !== 0)
+  return out
+}
+
 export function consolidateByCategory(m: GeneratedMapping): GeneratedMapping {
   const out = { ...m }
   for (const key of CONSOLIDATED_SECTIONS) {
@@ -1165,7 +1184,7 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)
   const raw = obj(JSON.parse(json.replace(/,\s*([}\]])/g, '$1')))
 
-  return consolidateByCategory(moveLoansToDebts({
+  return dropEmptyRows(consolidateByCategory(moveLoansToDebts({
     creditScore:  num(raw.creditScore),
     creditCards:  arr(raw.creditCards).map(obj).map(r => ({
       name: str(r.name), limit: num(r.limit), chargeDay: num(r.chargeDay) || 2, ...meta(r),
@@ -1199,7 +1218,7 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
     businessIncome:   simple(arr(raw.businessIncome)),
     businessExpenses: simple(arr(raw.businessExpenses)),
     assessment: str(raw.assessment),
-  }))
+  })))
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {
