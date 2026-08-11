@@ -78,10 +78,22 @@ export function VerifyEmailScreen({ user }: { user: User }) {
             className="w-full border-line text-txt h-10">
             שלח שוב את מייל האימות
           </Button>
-          <button onClick={() => signOut(auth)}
-            className="text-xs text-muted-txt hover:text-txt transition-colors">
-            התנתקות
-          </button>
+        </div>
+
+        {/* The way OUT, not a footnote. A client who registered with a typo'd
+            address (`...@gmail.con`) can never receive this mail, so "send
+            again" is an infinite loop for her — and the only escape used to be
+            a text-xs link she never noticed. Whoever is stuck here is far more
+            likely to be looking at the wrong address than at a slow inbox. */}
+        <div className="border-t border-line pt-3 space-y-2">
+          <p className="text-xs text-muted-txt leading-relaxed">
+            לא מקבל את המייל? בדוק שהכתובת למעלה מדויקת. אם יש בה טעות, המייל לא יגיע לעולם,
+            וצריך להתחבר מחדש עם הכתובת הנכונה.
+          </p>
+          <Button onClick={() => signOut(auth)} variant="outline"
+            className="w-full border-gold/50 text-gold hover:bg-gold/10 h-10">
+            הכתובת שגויה — כניסה עם חשבון אחר
+          </Button>
         </div>
       </div>
     </div>

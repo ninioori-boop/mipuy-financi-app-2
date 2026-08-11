@@ -203,18 +203,40 @@ exports.gateSignup = beforeUserCreated(async (event) => {
   const email = event.data?.email?.toLowerCase().trim();
 
   if (!email) {
+    console.warn("[gateSignup] denied: no email on the account");
     throw new HttpsError("permission-denied", "נדרשת כתובת מייל כדי להירשם.");
   }
 
   const allowed = await db.collection("allowlist").doc(email).get();
   if (!allowed.exists) {
+    // The address is logged because THIS is the line an operator needs when a
+    // client reports "it says I'm not invited": nine times in ten the address
+    // they typed differs from the one that was invited. Same visibility the
+    // `emailLog` collection already keeps for invitations.
+    console.warn(`[gateSignup] denied: ${email} is not on the allowlist`);
+    // The `INVITE_ONLY:` prefix is load-bearing, not decoration. The client SDK
+    // reports every blocking-function rejection as `auth/internal-error` and
+    // keeps this text only inside `message`, JSON-wrapped, with the Hebrew
+    // \u-escaped — so src/lib/inviteOnlyError.ts matches on this ASCII marker to
+    // know a denial from a genuine outage. Changing it silently downgrades the
+    // user's message back to "שגיאה, נסו שוב". Keep both sides in sync.
     throw new HttpsError(
       "permission-denied",
-      "ההרשמה לאפליקציה היא בהזמנה בלבד. פנה/י ליועץ כדי לקבל גישה.",
+      "INVITE_ONLY: ההרשמה לאפליקציה היא בהזמנה בלבד. יש לוודא שהכתובת מדויקת, בדיוק זו שקיבלה את ההזמנה, או לפנות ליועץ.",
     );
   }
 
   // Approved — returning nothing permits the account to be created.
+  //
+  // This log line is also the ONLY cheap proof that the gate is wired at all.
+  // Discovered 2026-08-11: the function was deployed, green in CI and listed by
+  // `firebase functions:list`, yet `functions:log` held ZERO entries for its
+  // whole life — Firebase Auth never called it, because DEPLOYING a blocking
+  // function and REGISTERING its trigger in the Identity Platform config are
+  // two separate facts. Invite-only was silently unenforced, and a client's
+  // typo'd address (`...@gmail.con`) walked straight through. An empty log here
+  // means the gate is inert again; `npm run health` 【8】 checks the config side.
+  console.log("[gateSignup] allowed");
   return;
 });
 

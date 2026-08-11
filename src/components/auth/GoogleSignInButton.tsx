@@ -5,6 +5,7 @@ import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { embeddedKind, type EmbeddedKind } from '@/lib/isEmbedded'
+import { inviteOnlyMessage } from '@/lib/inviteOnlyError'
 
 export function GoogleSignInButton() {
   const [loading, setLoading] = useState(false)
@@ -78,7 +79,10 @@ export function GoogleSignInButton() {
     } catch (err: unknown) {
       const code = (err as { code?: string }).code
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
-        setError(hebrewAuthError(code))
+        // Google is the primary button now, so an uninvited person meets the
+        // invite-only gate HERE first. Without this the SDK's generic
+        // auth/internal-error tells them to retry, forever.
+        setError(inviteOnlyMessage(err) ?? hebrewAuthError(code))
       }
     } finally {
       setLoading(false)

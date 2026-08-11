@@ -1,219 +1,246 @@
-# CLAUDE.md — mipuy-financi-app-v2
+# CLAUDE.md — The Home Economist (mipuy-financi-app-v2)
 
-## כלי MCP — מה מותר להשתמש בו
+> ⚠️ **זו מערכת חיה בפרודקשן.** יועצים ולקוחות אמיתיים מנהלים בה כסף אמיתי היום.
+> שלב הבנייה הסתיים מזמן. אין "לוח 17 יום", אין "יום 2 הבא בתור".
+> כל שינוי כאן נוגע בנתונים של אנשים. התנהג בהתאם.
+
+---
+
+## 0. לפני שאתה נוגע במשהו
+
+| רוצה לדעת | תריץ / תקרא |
+|-----------|-------------|
+| מה מצב המערכת עכשיו (7 בדיקות, קריאה בלבד) | `npm run health` |
+| כמה משתמשים, מי פעיל, מה המשפך | `npm run report:funnel` |
+| מה עושה כל טאב | [TABS.md](TABS.md) |
+| נפלה תקלה בפרודקשן | [docs/incident-runbook.md](docs/incident-runbook.md) |
+| כמה AI נשרף ועל ידי מי | `npx tsx scripts/ai-usage-report.ts` |
+
+**אל תכתוב לקובץ הזה מספרי משתמשים ושימוש** (כמה לקוחות, כמה פעילים, כמה ממתין
+בתור). זה בדיוק מה שהרקיב את הגרסה הקודמת שלו. תפנה לפקודה שמייצרת את האמת,
+אל תעתיק לכאן את האמת של היום. מספרים על **הקוד** (שורות, טסטים) מותרים, כי
+הם נובעים מהריפו עצמו וזזים לאט.
+
+**סקילים שחייבים לרוץ:**
+- `/ship` לפני כל דיפלוי (main, Cloud Functions, firestore.rules)
+- `/grill` לפני שינוי **רגיש** בלבד: rules, functions, dataSync, כתיבה לפרודקשן, לוגיקה פיננסית. שינוי תוכן/UI רגיל עובר עם טסטים ובילד.
+- `/safe-commit` לפני קומיט שמוסיף קבצים חדשים לגיט
+- `/probe` כשצריך נתון אמיתי מ-Firestore
+
+---
+
+## 1. כלי MCP, מה מותר
+
 **השתמש רק בכלים הבאים. אל תטען או תפעיל שום MCP אחר.**
 
 | כלי | מתי |
 |-----|-----|
-| **context7** | כשצריך תיעוד של ספרייה (Next.js, Firebase, Zustand, shadcn) |
-| **playwright** | כשצריך לפתוח דפדפן ולבדוק UI |
-| **Google Drive** | אורי אישר במפורש (25/06/2026) — מותר ליצור/להעלות קבצים לדרייב שלו (למשל חשבוניות/גיליונות) |
+| **context7** | תיעוד ספרייה (Next.js, Firebase, Zustand, shadcn) |
+| **playwright** | פתיחת דפדפן ובדיקת UI |
+| **Google Drive** | אורי אישר במפורש (25/06/2026): מותר ליצור ולהעלות קבצים לדרייב שלו |
 
-**אסור להשתמש ב:** Gmail, Google Calendar, Canva, Microsoft 365, Vercel MCP, GitHub MCP.
-לכל פעולת git/npm/vercel — השתמש ב-Bash ישירות.
-
----
-
-## על הפרויקט
-**The Home Economist** — גרסה 2 של אפליקציית המיפוי הפיננסי.
-נבנית מאפס ב-React/Next.js במקום Vanilla JS, כדי למנוע את סוג הבאגים שנוצרו בגרסה הישנה (state גלובלי, DOM scraping, aliasing בין arrays).
-
-**גרסה ישנה (פועלת):** `../mipuy-financi-app` — ממשיכה לרוץ בנפרד ב-orimipuy.com
-**פרויקט זה:** מפותח מקומית עם `npm run dev`, פריסה לדומיין חדש בסוף הפרויקט (יום 17)
+**אסור:** Gmail, Google Calendar, Canva, Microsoft 365, Vercel MCP, GitHub MCP.
+לכל פעולת git/npm/vercel השתמש ב-Bash ישירות.
 
 ---
 
-## סטאק
-- **Next.js 16** (App Router, TypeScript)
-- **Zustand 5** — state management
-- **Tailwind CSS v4** + **shadcn/ui** — עיצוב (אין tailwind.config.ts — הכל ב-globals.css)
-- **Firebase 12** (Auth + Firestore) — אותו backend כמו הגרסה הישנה
-- **SheetJS xlsx@0.18.5** — parsing Excel (0.18.5 = גרסה אחרונה MIT)
-- **Recharts 3** — גרפים
-- **Vercel** — deployment (יום 17)
+## 2. מה המערכת בפועל
+
+**The Home Economist** הוא כלי עבודה של מאמן פיננסי מול לקוחותיו, וגם כלי ניהול
+אישי ללקוח עצמו. הוא מורכב מארבעה חלקים שרצים במקביל:
+
+1. **אפליקציית הווב** (הריפו הזה): Next.js על Vercel, חיה ב-**`app.orimipuy.com`**. זה הלב.
+2. **אפליקציית אנדרואיד נייטיב** (ריפו נפרד): עוטפת את הווב ב-WebView, ומוסיפה
+   לכידה אוטומטית של חיובי Google Pay. iOS נעשה דרך Shortcuts, ראה `/iphone-capture`.
+3. **Cloud Functions** (`functions/`): הזמנות, מחיקת חשבון, דוחות שבועיים ליועץ,
+   ושני בוטים בוואטסאפ (`clientBotWebhook`, `goalBotWebhook`).
+4. **סקריפטים תפעוליים** (`scripts/`): גיבוי, דוחות, allowlist, מיתוג, בדיקות בריאות.
+
+**גודל, כדי לכייל ציפיות:** בערך 44k שורות TypeScript, 20 סטורים, 37 מסכים,
+14 API routes (ועוד שני route handlers: `/go/[slug]` לקישורים קצרים
+ו-`/manifest.webmanifest`), 580 טסטים ב-45 קבצים.
+
+**שלוש כתובות חיות, אל תבלבל ביניהן:**
+
+| כתובת | מה זה |
+|-------|-------|
+| `app.orimipuy.com` | 🟢 **הפרודקשן של v2.** זה מה שלקוחות פותחים |
+| `mipuy-financi-app-2-3nay.vercel.app` | אותו deployment בדיוק, alias של Vercel |
+| `orimipuy.com` | 🟡 **האפליקציה הישנה** (`../mipuy-financi-app`, Vanilla JS), עדיין חיה |
+
+הישנה והחדשה חולקות **אותו** Firestore. שינוי ב-`firestore.rules` פוגע גם בה.
 
 ---
 
-## פלטת צבעים — The Home Economist
-נגזרת מהלוגו (שתי חצים: זהב + אנתרציט):
+## 3. סטאק
+
+- **Next.js 16.2** (App Router, TypeScript) + **React 19.2**
+- **Zustand 5** לניהול state
+- **Tailwind v4** + **shadcn/ui**, אין `tailwind.config.ts`, הכל ב-`globals.css`
+- **Firebase 12** (Auth + Firestore) + **firebase-admin 13** בצד השרת
+- **xlsx@0.18.5** ל-Excel. 🔒 **אל תשדרג**, 0.20+ דורש רישיון מסחרי
+- **Recharts 3** לגרפים, **@react-pdf/renderer** לייצוא PDF
+- **Anthropic API**, המודל בשימוש כרגע: `claude-sonnet-4-6`, מקובע ב-7 מקומות
+  (5 מסלולי ה-API, `src/lib/aiCategorize.ts`, ו-`functions/index.js`). שדרוג מודל
+  חייב לגעת בכולם, אחרת חצי מהמערכת נשארת מאחור.
+- **Vercel** לפריסה, **GitHub Actions** ל-CI
+
+---
+
+## 4. Firebase, המבנה האמיתי
+
+**Project ID:** `finance-machine-a36e9`
+ה-`authDomain` נקרא מ-`NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` ב-`src/lib/firebase.ts`.
+אל תקבע אותו בקוד, ואל תפתח את `.env.local` כדי לבדוק מה הערך.
+
+| קולקשן | מה יש בו |
+|--------|----------|
+| `users/{uid}` | 🔴 **כל התיק הפיננסי של אדם, במסמך אחד** (השדה `data`) |
+| `users/{uid}/sections/{id}` | חתכים לקריאה חלקית |
+| `users/{uid}/versions/{id}` | היסטוריית גרסאות (נגזמת דרך `/api/trim-versions`) |
+| `advisors/{uid}` · `practices/{id}` | יועצים ומשרדים (תפקידים, מיתוג, מכסת AI) |
+| `clientLinks/{id}` | הקישור יועץ↔לקוח, כולל הסכמות ושלב הליווי |
+| `shared/learnedDB` | מילון הסיווג המשותף. 🔴 כתיבה **רק** דרך `/api/learn` |
+| `transactionInbox/{uid}/items/{id}` | חיובים שנלכדו מהטלפון, לפני ניקוז ליומן |
+| `intake/{uid}` | טופס אינטייק (allowlist-gated) |
+| `config/ai` | מתג החירום הגלובלי ל-AI |
+| `aiUsage`, `rateLimits`, `deletionAudit`, `pushSubscriptions`, `platformOwners` | תפעול |
+
+**שני קבצי rules, לא אחד:** `firestore.rules` (242 שורות) ו-`storage.rules`
+(32 שורות, לקבצים שלקוח מעלה בטופס האינטייק). שינוי באחד לא מגן על השני.
+
+**`maps/{uid}` הוא שריד של v1.** האפליקציה הזאת לא כותבת אליו. רק שלושה סקריפטי
+דוחות קוראים ממנו כדי לספור לקוחות ותיקים. אל תבנה עליו כלום.
+
+**env vars** ב-`.env.local`, לא לקומיט:
+- `NEXT_PUBLIC_FIREBASE_*` לצד לקוח
+- `ANTHROPIC_API_KEY` 🔴 **בלי** `NEXT_PUBLIC_`, שרת בלבד
+- `AI_KILL_SWITCH`, `AI_DAILY_LIMIT`, `APP_CHECK_ENFORCE` (מתגי תפעול, ברירת מחדל כבויים)
+
+---
+
+## 5. אינווריאנטים קריטיים
+
+כל אחד מהם נולד מתקרית אמיתית. הם לא סגנון, הם צלקות.
+
+```
+🔴 סטור חדש = חובה לסווג אותו ב-storeCoverage.test.ts
+   (snapshot-reset / session-reset / exempt). סטור שלא סווג = הנתונים
+   של אדם אחד מופיעים במסך של אדם אחר. זה כבר קרה, פעמיים.
+
+🔴 שדה חדש ב-autoMapStore = חובה להוסיף אותו ל-resetSessionStores()
+   ב-src/lib/dataSync.ts. יש טסט ברמת השדה שיתפוס אותך.
+   ⚠️ ל-bankStore יש כיסוי רק ברמת הסטור. שם עוד אפשר לדלוף בשקט.
+
+🔴 שדה חדש בסנפשוט = חובה למסלול מלא: Snapshot type + collectSnapshot
+   + applySnapshot + resetAllStores. חסר אחד = אובדן נתונים שקט ברענון.
+   (הסוכן store-sync-validator בודק בדיוק את זה.)
+
+🔴 כל התיק במסמך אחד עם תקרה של 900KB (MAX_BYTES ב-DataSync.tsx).
+   מסמך שחוצה אותה: השמירה נכשלת, עבודת היום אובדת, והלקוח לא יוכל
+   לשמור יותר. כל שדה שאתה מוסיף לסנפשוט מקרב את הקיר.
+
+🔴 שמירה חסומה עד hydrated=true. טעינה שנכשלה לא מסמנת hydrated,
+   בכוונה. אל "תתקן" את זה: זה מה שמונע דריסת תיק מלא בברירות מחדל ריקות.
+
+🔴 resetSessionStores() אסור להיקרא מ-applyRemote(). זה ימחק דוח בנק
+   שהמשתמש באמצע העבודה עליו, בלי דרך לשחזר.
+
+🔴 shared/learnedDB נכתב אך ורק דרך /api/learn, ו-learnedSharing.ts חוסם
+   ממנו אמצעי תשלום ("ביט", "פייפאל", "העברה", "משיכה") וקטגוריות אישיות
+   כמו "ביט ללא מעקב". בלי החסימה הזאת כל הלקוחות לומדים שהעברה בביט היא
+   קטגוריה מסוימת. זה קרה, וניקוי ידני היה הפתרון.
+
+🔴 ANTHROPIC_API_KEY בלי NEXT_PUBLIC_. שרת בלבד.
+🔒 xlsx נעול על 0.18.5.
+```
+
+**RTL:** `dir="rtl"` ב-`<html>`. השתמש ב-`ps-`/`pe-`/`ms-`/`me-`, לא ב-`pl-`/`pr-`/`ml-`.
+
+---
+
+## 6. פלטת צבעים
+
+נגזרת מהלוגו (שני חצים: זהב ואנתרציט).
+
+⚠️ **מלכודת:** ב-`src/app/globals.css` יש **שתי** פלטות. אחת ב-`:root` (בהירה)
+ואחת ב-`.dark` (כהה). ה-root layout מקבע `<html className="... dark">`, ולכן
+**רק הבלוק של `.dark` משפיע בפועל**. עריכת `:root` נראית נכונה, עוברת בילד,
+ולא משנה כלום על המסך. הערכים הבאים הם אלה שב-`.dark`.
 
 ```css
---gold:       #C9A86C   /* accent ראשי — מהחץ הזהוב בלוגו */
---gold-light: #E0C896   /* hover states */
---gold-dark:  #A88844   /* active states */
+--gold:       #C9A86C   /* accent ראשי */
+--gold-light: #E0C896   /* hover */
+--gold-dark:  #A88844   /* active */
 --surface:    #0F0F0F   /* רקע ראשי */
 --surface2:   #1A1A1A   /* cards */
 --surface3:   #242424   /* elevated cards */
 --line:       #2A2A2A   /* borders */
 --txt:        #F0EDEA   /* טקסט ראשי */
 --muted-txt:  #8A8178   /* טקסט משני */
---income:     #4ADE80   /* הכנסות (ירוק) */
---expense:    #F87171   /* הוצאות (אדום) */
+--income:     #4ADE80   /* הכנסות */
+--expense:    #F87171   /* הוצאות */
 ```
 
-**שימוש ב-Tailwind:** `text-gold`, `bg-surface2`, `border-line`, `text-income`, `text-expense`
+ב-Tailwind: `text-gold`, `bg-surface2`, `border-line`, `text-income`, `text-expense`.
+אל תכתוב צבע קשיח. למיתוג של משרד ספציפי יש `/brand` ו-`scripts/brand-set.ts`,
+זו הדרך היחידה.
 
 ---
 
-## מבנה תיקיות
+## 7. פריסה
 
-```
-src/
-├── app/
-│   ├── layout.tsx              ← dir="rtl", dark, Rubik font
-│   ├── page.tsx                ← redirect → /app/credit
-│   ├── auth/page.tsx           ← login screen
-│   └── app/
-│       ├── layout.tsx          ← AppShell + TabNav
-│       ├── credit/page.tsx
-│       ├── bank/page.tsx
-│       ├── mapping/page.tsx
-│       ├── monthly/[month]/page.tsx
-│       ├── import/page.tsx
-│       ├── annual/page.tsx
-│       ├── trends/page.tsx
-│       ├── guide/page.tsx
-│       └── api/
-│           ├── categorize/route.ts   ← Claude Haiku proxy (יום 15)
-│           └── analyze/route.ts      ← Claude general proxy (יום 15)
-├── components/
-│   ├── ui/                     ← shadcn auto-generated
-│   ├── layout/                 ← AppShell, TabNav, SaveStatusBar, ClientSwitcher
-│   ├── auth/                   ← LoginForm, GoogleSignInButton, InviteCodeForm
-│   ├── credit/                 ← CreditTab, FileUploadZone, TransactionTable, ...
-│   ├── bank/                   ← BankTab, BankTransactionTable, BankInsightsPanel
-│   ├── mapping/                ← MappingTab, CategorySection, rows
-│   ├── monthly/                ← MonthlyTab, MonthSection, BudgetRow, CashFlowSummary
-│   ├── import/                 ← ImportTab, ImportSummaryPanel
-│   ├── annual/                 ← AnnualTab, AnnualSection, AnnualKpiBar
-│   ├── trends/                 ← TrendsTab + 3 chart components
-│   └── shared/                 ← HebrewAmount, LoadingOverlay, CategoryIcon
-├── stores/                     ← Zustand stores (יום 4)
-│   ├── creditStore.ts
-│   ├── importStore.ts          ← מבודד לחלוטין מ-creditStore!
-│   ├── mappingStore.ts
-│   ├── budgetStore.ts
-│   ├── annualStore.ts
-│   ├── bankStore.ts
-│   ├── learnedDBStore.ts
-│   ├── authStore.ts
-│   └── uiStore.ts
-├── hooks/                      ← custom hooks (ימים 3-5)
-│   ├── useFileParser.ts
-│   ├── useAiCategorize.ts
-│   ├── useAuth.ts
-│   ├── useFirestoreSync.ts
-│   ├── useLearnedDB.ts
-│   ├── useMonthlyCalc.ts
-│   ├── usePushToBudget.ts
-│   └── useTrendsData.ts
-├── lib/
-│   ├── firebase.ts             ← נוצר
-│   ├── parsing.ts              ← port מ-parsing.js (יום 3)
-│   ├── categorize.ts           ← port מ-globals.js (יום 3)
-│   ├── businessDB.ts           ← BUSINESS_DB 3000+ entries (יום 3)
-│   ├── constants.ts            ← ALL_CATEGORIES, MONTHS_LIST (יום 3)
-│   ├── healthScore.ts          ← buildHealthScore pure (יום 3)
-│   ├── firestoreService.ts     ← saveMap, loadMap, invites (יום 2)
-│   └── utils.ts                ← נוצר (shadcn cn helper)
-└── types/
-    ├── transaction.ts          ← (יום 3)
-    ├── budget.ts               ← (יום 3)
-    ├── auth.ts                 ← (יום 3)
-    └── firestore.ts            ← (יום 3)
-```
+**שני פרויקטי Vercel מחוברים לריפו הזה, אל תתבלבל:**
+- ✅ **`mipuy-financi-app-2-3nay`** הוא הפעיל, ומגיש את `app.orimipuy.com`. זה הירוק שצריך לעבור.
+- ❌ **`mipuy-financi-app-2`** נטוש. נכשל בכל דיפלוי וצובע X אדום על כל PR. **להתעלם.**
+
+⚠️ **פריסה שנדחפה אינה פריסה שנחתה.** אל תסיק מ-`git push` שהקוד חי.
+סקיל `/ship` מחזיק את מסלול האימות המלא, כולל המלכודת ש-`vercel ls` מדפיס
+את הטבלה ל-STDERR (עם `2>/dev/null` תקבל פלט ריק ותסיק שאין פריסה).
+
+**CI** (`.github/workflows/ci.yml`) רץ על כל push: `tsc --noEmit`, `vitest run`,
+בדיקת תחביר של functions, שומר עץ ה-functions, ובילד. יש גם ג'וב נפרד שמריץ את
+טסטי ה-firestore.rules מול האמולטור (ubuntu, כי אין JRE במכונה המקומית).
+זה advisory, אין branch protection. X אדום על main הוא סימן עצור-הכול.
+
+**דיפלוי של Cloud Functions מוגן ב-predeploy hook** (`firebase.json` מריץ את
+`scripts/check-functions-tree.js`). הסיבה: ה-CLI של Firebase **מוחק** כל פונקציה
+פרוסה שהוא לא מוצא בעץ המקומי. שש פונקציות חיות ישבו פעם על ענף צדדי בלבד,
+כך שדיפלוי שגרתי מ-`main` היה מוחק אותן מהפרודקשן בשקט. אם השומר חוסם אותך
+בטעות, עדכן את `EXPECTED` **באותו קומיט** שמסיר את המודול.
 
 ---
 
-## Firebase
-**Project ID:** `finance-machine-a36e9`
-**Auth Domain:** `orimipuy.com`
-**Collections:** `users/{uid}`, `maps/{clientUid}`, `invites/{code}`
+## 8. פקודות
 
-env vars ב-.env.local (לא לcommit):
-- `NEXT_PUBLIC_FIREBASE_*` — client-side
-- `ANTHROPIC_API_KEY` — server-side בלבד, אסור NEXT_PUBLIC_
-
----
-
-## Vercel / פריסה
-**שני פרויקטי Vercel מחוברים ל-repo הזה — אל תתבלבל:**
-- ✅ **`mipuy-financi-app-2-3nay`** — הפרויקט **הפעיל** (staging חי): `mipuy-financi-app-2-3nay.vercel.app`. זה הירוק שצריך לעבור.
-- ❌ **`mipuy-financi-app-2`** — פרויקט **ישן/זנוח** מלפני המעבר לנוכחי. נכשל בכל deploy ו**צובע X אדום על כל PR — להתעלם, זה לא הקוד שלנו.** (אפשר לנתק אותו ב-Vercel → Settings → Git בהזדמנות.)
-
----
-
-## אינווריאנטים קריטיים
-
-```
-❌ creditStore ↔ importStore — אסור aliasing או שיתוף reference
-   (זה היה הבאג הגדול בגרסה הישנה)
-
-✅ FileUploadZone מקבל prop: onFileParsed(txs) — parent מחליט לאיזה store
-✅ SmartPatternsPanel מקבל prop: transactions[] — לא קורא מגלובל
-✅ deletedRows ב-budgetStore מונע reappearance של שורות שנמחקו
-✅ ANTHROPIC_API_KEY בלי NEXT_PUBLIC_ — server-side only
-✅ xlsx@0.18.5 — אל תשדרג (0.20+ דורש רישיון מסחרי)
-```
-
----
-
-## מקורות לport מהגרסה הישנה
-
-| קובץ ישן | מה לקחת ממנו |
-|----------|--------------|
-| `../mipuy-financi-app/parsing.js` | detectColumns, parseAmount, extractTransactions, extractInstallmentInfo, isStandingOrderDesc |
-| `../mipuy-financi-app/globals.js` | BUSINESS_DB (3000+ entries), ALL_CATEGORIES, CATEGORY_ICONS, buildHealthScore logic |
-| `../mipuy-financi-app/client.js` | clientCollectData/clientRestoreData — serialization contract |
-| `../mipuy-financi-app/api/categorize.js` | verifyFirebaseToken, rate limiting → Next.js API route |
-| `../mipuy-financi-app/monthly.js` | moApplyCreditData, syncManualToMonth → budgetStore actions |
-| `../mipuy-financi-app/auth.js` | save guards (< 300 bytes), online/offline logic |
-
----
-
-## לוח עבודה — סטטוס
-
-| יום | פיצר | סטטוס |
-|-----|-------|--------|
-| **1** | 🏗️ Bootstrap — Next.js, shadcn, Firebase, RTL, Rubik, routes | ✅ הושלם |
-| **2** | 🔐 Auth — Google Sign-In, AuthProvider, Firestore sync | ⏳ הבא |
-| **3** | 🧠 Pure Logic — types, parsing.ts, categorize.ts, BUSINESS_DB, unit tests | ⏳ |
-| **4** | 🗃️ Stores — כל Zustand stores | ⏳ |
-| **5** | 📤 File Upload + Parser — FileUploadZone, useFileParser, TransactionTable | ⏳ |
-| **6** | 💳 טאב אשראי — SmartPatterns, CreditSummary, PushToBudget | ⏳ |
-| **7** | 🗂️ טאב מיפוי ידני — CategorySection, rows, LiveSummary | ⏳ |
-| **8** | 📅 טאב חודשי (תשתית) — MonthlyTab, BudgetRow, plan vs actual | ⏳ |
-| **9** | 📅 טאב חודשי (השלמה) — installments, debts, savings, deletedRows | ⏳ |
-| **10** | 📥 טאב ייבוא — importStore מבודד, שליחה לחודש | ⏳ |
-| **11** | 🏦 טאב עו"ש — BankTab, BankInsights | ⏳ |
-| **12** | 📊 מגמות — 3 גרפים Recharts, YTD KPIs | ⏳ |
-| **13** | 📆 תכנון שנתי — AnnualTab, anPullActuals | ⏳ |
-| **14** | 👥 Multi-user — Advisor panel, invite codes, onSnapshot | ⏳ |
-| **15** | 🤖 AI Categorization — /api/categorize route, useAiCategorize | ⏳ |
-| **16** | 🎨 עיצוב + UX — RTL polish, HebrewAmount, toast, responsive | ⏳ |
-| **17** | 🧪 בדיקות + פריסה — Vitest, Playwright E2E, Vercel deploy | ⏳ |
-
----
-
-## הרצה מקומית
 ```bash
-cd "c:\Users\ninio\Downloads\קלוד קוד\mipuy-financi-app-v2"
-npm run dev
-# → http://localhost:3000
+npm run dev            # פיתוח מקומי → localhost:3000
+npm run build          # אם עובר, אין שגיאות TypeScript
+npm test               # 472 טסטים
+npm run health         # בדיקת מצב המערכת, קריאה בלבד
+npm run report:funnel  # דוח AARRR
+npm run test:rules     # טסטי firestore.rules מול האמולטור (דורש Java)
 ```
 
-## בדיקה מהירה (build)
-```bash
-npm run build   # אם עובר — אין שגיאות TypeScript
-```
+⚠️ `next dev` שנשאר פתוח כמה ימים גורם לקומפילציות של דקות, והדף נטען אבל לא
+עושה hydration. זה נראה בדיוק כמו פיצ'ר שבור. תרענן את השרת לפני שתאשים את הקוד.
 
 ---
 
-## הערות פיתוח
+## 9. חובות ידועים
 
-- **Tailwind v4:** אין `tailwind.config.ts` — צבעים ב-`src/app/globals.css` תחת `@theme inline` ו-`.dark`
-- **shadcn:** קומפוננטות ב-`src/components/ui/` — השתמש ב-`npx shadcn@latest add`
-- **RTL:** `dir="rtl"` ב-`<html>` מטפל בכיוון. השתמש ב-`ps-` / `pe-` / `ms-` במקום `pl-` / `pr-` / `ml-`
-- **Font:** Rubik (Hebrew+Latin) נטען דרך `next/font/google`, variable: `--font-rubik`
-- **Firebase:** modular SDK v9 (לא compat). `import { getAuth } from 'firebase/auth'`
-- **params ב-Next.js 16:** `params` הם Promise — צריך `await params` ב-server components
+זה לא רשימת משאלות, אלה דברים שאומתו ופתוחים. אל תגלה אותם מחדש.
+
+- **אפס בדיקות E2E.** `npm run health` מסיים בהפניה ל-`npm run test:e2e`,
+  שלא קיים ב-package.json. אין מסלול אוטומטי שמוכיח שהאפליקציה בכלל עובדת.
+- **`expenseLog.entries` הוא מערך append-only ללא תקרה** בתוך המסמך שחסום ב-900KB.
+  ככל שתיעוד ההוצאות מצליח יותר, כך מתקרב הקיר. אין pruning ואין ארכוב.
+- **מתג החירום של ה-AI נכשל פתוח.** ב-`aiBudget.ts`, אם Firestore לא נגיש,
+  ה-catch מחזיר `false` ומאפשר להמשיך. הבקרה שותקת בדיוק כשצריך אותה.
+- **אין מסלול restore.** יש `backup-firestore.ts`, PITR וגיבוי שבועי.
+  אין סקריפט שחזור ואין עדות ששחזור אי פעם בוצע.
+- **`bankStore` מוגן רק ברמת הסטור** בטסט הדליפה, לא ברמת השדה כמו `autoMapStore`.
+- **גלגל הלמידה תקוע על הצעד האנושי.** הצעות ה-AI נצברות ואף אחד לא סוקר אותן.
+  כמה ממתינות עכשיו: `npx tsx scripts/review-ai-suggestions.ts`.
+- **קבצים עסקיים לא מעוקבים בשורש הריפו** (הצעות מחיר, חוזים, תמחור) שאינם
+  ב-.gitignore. `git add -A` יכניס תנאים מסחריים של לקוח להיסטוריית הגיט.

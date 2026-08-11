@@ -38,10 +38,20 @@ export default function AuthPage() {
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-6 shadow-2xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-txt mb-1">כניסה למערכת</h2>
-              <p className="text-white/60 text-sm">כנסו עם מייל או חשבון Google</p>
+              <p className="text-white/60 text-sm">כנסו עם חשבון Google או עם מייל וסיסמה</p>
             </div>
 
-            <EmailAuthForm />
+            {/* Google first, deliberately. Typing an address by hand on a phone
+                is how a client registered `...@gmail.con` and locked herself
+                out of a verification mail that could never arrive; Google
+                supplies the address AND comes pre-verified, so it skips both
+                failure modes. Email+password stays fully available below. */}
+            <div className="space-y-2">
+              <GoogleSignInButton />
+              <p className="text-white/50 text-xs text-center">
+                הדרך המהירה: בלי להקליד כתובת ובלי מייל אימות
+              </p>
+            </div>
 
             {/* Divider */}
             <div className="flex items-center gap-3">
@@ -50,7 +60,7 @@ export default function AuthPage() {
               <div className="flex-1 h-px bg-white/10" />
             </div>
 
-            <GoogleSignInButton />
+            <EmailAuthForm />
 
             <p className="text-white/50 text-xs text-center leading-relaxed">
               בכניסה למערכת אתם מסכימים ל

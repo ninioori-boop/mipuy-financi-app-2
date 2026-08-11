@@ -10,7 +10,8 @@
  * behaves correctly for a user. It cannot catch a wrong category, a broken
  * screen, or a bad UX. Those need `npm run test:e2e` and a human.
  */
-import { cert, initializeApp } from "firebase-admin/app";
+import { cert, initializeApp, type ServiceAccount } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -62,7 +63,9 @@ async function main() {
     console.error("❌ service-account-key.json לא נמצא בשורש הפרויקט — הרץ מתיקיית הפרויקט הראשית.");
     process.exit(1);
   }
-  initializeApp({ credential: cert(JSON.parse(key)) });
+  // The key file is snake_case on disk; ServiceAccount is camelCase in types.
+  const svc = JSON.parse(key) as ServiceAccount & { project_id: string };
+  const app = initializeApp({ credential: cert(svc) });
   const db = getFirestore();
 
   console.log("\x1b[1m\n═══ בדיקת מצב המערכת ═══\x1b[0m");
@@ -163,6 +166,104 @@ async function main() {
   }
   if (resurrected) fail(`${resurrected} חשבונות מחוקים חזרו לחיים — כשל במנגנון המצבה!`);
   else ok("אף חשבון מחוק לא שוחזר");
+
+  // ── 8. Invite-only signup gate ────────────────────────────────────────────
+  // A blocking function can be DEPLOYED and still never run: Firebase Auth calls
+  // it only if the trigger is REGISTERED in the Identity Platform config, which
+  // is a separate fact from the deployment. On 2026-08-11 gateSignup was in the
+  // code, green in CI, listed by `firebase functions:list` — and had zero
+  // invocations in its entire life, so invite-only was not enforced at all and
+  // a client's typo'd address sailed straight through. `functions:list` proves
+  // deployment; only the config below proves registration.
+  head("【8】 שער ההרשמה (בהזמנה בלבד)");
+  // Addresses are masked on purpose: this output gets pasted into chats and
+  // screenshots. Same rule scripts/list-allowlist.ts states for itself.
+  const mask = (e: string) => {
+    const at = e.indexOf("@");
+    return at < 1 ? "???" : `${e.slice(0, Math.min(3, at))}***${e.slice(at)}`;
+  };
+  try {
+    const accessToken = (await (app.options.credential as {
+      getAccessToken(): Promise<{ access_token: string }>
+    }).getAccessToken()).access_token;
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/admin/v2/projects/${svc.project_id}/config`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) {
+      // NOT a warning. This check exists because a control died silently and
+      // nobody noticed for its entire life; "I could not verify the gate" must
+      // never be indistinguishable from "the gate is fine" and exit 0.
+      fail(`לא ניתן לקרוא את הקונפיג של Identity Platform (HTTP ${res.status}) — מצב השער אינו ידוע`);
+    } else {
+      const cfg = await res.json() as {
+        blockingFunctions?: { triggers?: Record<string, { functionUri?: string }> }
+      };
+      const trigger = cfg.blockingFunctions?.triggers?.beforeCreate;
+      if (!trigger) {
+        fail("beforeCreate לא רשום — gateSignup פרוס אך לא נקרא, וכל אחד יכול להירשם!");
+      } else if (!(trigger.functionUri ?? "").includes("gateSignup")) {
+        // A registered trigger pointing at the wrong function enforces nothing,
+        // and would otherwise report a cheerful ✅.
+        fail(`beforeCreate רשום אך מצביע על פונקציה אחרת: ${trigger.functionUri ?? "לא ידוע"}`);
+      } else {
+        ok("השער רשום ומחובר ל-gateSignup");
+      }
+    }
+  } catch (e) {
+    fail(`בדיקת רישום השער נכשלה: ${(e as Error).message}`);
+  }
+
+  // The same failure seen from the data side: an account that exists without an
+  // invitation. This alarm already existed in scripts/list-allowlist.ts and was
+  // correct for two months — it simply was not part of any command anyone runs.
+  //
+  // Wrapped: listUsers is a NEW dependency for this script (the Auth Admin API),
+  // and an uncaught rejection here would abort the run before the verdict prints,
+  // throwing away the seven checks that already passed.
+  try {
+    const allowSnap = await db.collection("allowlist").get();
+    const allow = new Set(allowSnap.docs.map(d => d.id));
+    const uninvited: { uid: string; email: string }[] = [];
+    let authCount = 0;
+    let pageToken: string | undefined;
+    do {
+      const page = await getAuth().listUsers(1000, pageToken);
+      for (const u of page.users) {
+        const mail = (u.email ?? "").toLowerCase().trim();
+        if (!mail) continue;
+        authCount++;
+        if (!allow.has(mail)) uninvited.push({ uid: u.uid, email: mail });
+      }
+      pageToken = page.pageToken;
+    } while (pageToken);
+    console.log(`     ${authCount} חשבונות · ${allow.size} רשומות ב-allowlist`);
+
+    // Two very different stories share one symptom. /revoke deliberately deletes
+    // the allowlist doc and LEAVES the account alive, so an ex-client is
+    // expected to show up here forever — failing on that would train everyone to
+    // ignore this line, which is how the gate rotted unnoticed in the first
+    // place. A never-invited stranger, by contrast, cannot have a portfolio: the
+    // rules block users/{uid} without an allowlist entry. So data present ⇒
+    // access was withdrawn; no data ⇒ the account should never have existed.
+    const withData: string[] = [];
+    const strangers: string[] = [];
+    for (const acct of uninvited) {
+      const has = (await db.collection("users").doc(acct.uid).get()).exists;
+      (has ? withData : strangers).push(mask(acct.email));
+    }
+    if (strangers.length) {
+      fail(`${strangers.length} חשבונות נרשמו בלי הזמנה מעולם: ${strangers.slice(0, 5).join(", ")}`);
+      console.log(`     (ה-rules חוסמים מהם כל נתון, אבל הם לא היו אמורים להיווצר)`);
+    } else {
+      ok("אף חשבון לא נוצר ללא הזמנה");
+    }
+    if (withData.length) {
+      warn(`${withData.length} חשבונות עם נתונים שהגישה שלהם בוטלה (/revoke): ${withData.slice(0, 5).join(", ")}`);
+    }
+  } catch (e) {
+    fail(`הצלבת החשבונות מול ה-allowlist נכשלה: ${(e as Error).message}`);
+  }
 
   // ── verdict ───────────────────────────────────────────────────────────────
   console.log("\n" + "─".repeat(46));

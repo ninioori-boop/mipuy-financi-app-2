@@ -9,6 +9,8 @@ import {
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
+import { suggestEmailFix } from '@/lib/emailTypo'
+import { inviteOnlyMessage } from '@/lib/inviteOnlyError'
 
 type Mode = 'signin' | 'signup' | 'reset'
 
@@ -19,9 +21,30 @@ export function EmailAuthForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  // A suspected domain typo, and the escape hatch for someone whose unusual
+  // address we guessed wrong. Never a hard block: the user always gets through
+  // on the second press.
+  const [typoFix, setTypoFix] = useState<string | null>(null)
+  const [ignoreTypo, setIgnoreTypo] = useState(false)
+
+  function onEmailChange(next: string) {
+    setEmail(next)
+    setTypoFix(null)
+    setIgnoreTypo(false)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    // Before anything reaches Firebase: an address like `...@gmail.con` is
+    // syntactically valid, so nothing downstream will ever question it, and the
+    // verification mail leaves for a domain that cannot exist. Catch it here,
+    // while the client is still looking at the field they typed it into.
+    if (!ignoreTypo) {
+      const fix = suggestEmailFix(email)
+      if (fix) { setTypoFix(fix); setError(null); setSuccess(null); return }
+    }
+
     setLoading(true)
     setError(null)
     setSuccess(null)
@@ -45,7 +68,9 @@ export function EmailAuthForm() {
         return
       }
     } catch (err: unknown) {
-      setError(hebrewError((err as { code?: string }).code))
+      // An invite-only rejection arrives as auth/internal-error, whose default
+      // text tells the user to retry — which can never succeed.
+      setError(inviteOnlyMessage(err) ?? hebrewError((err as { code?: string }).code))
     } finally {
       setLoading(false)
     }
@@ -56,6 +81,8 @@ export function EmailAuthForm() {
     setError(null)
     setSuccess(null)
     setPassword('')
+    setTypoFix(null)
+    setIgnoreTypo(false)
   }
 
   return (
@@ -64,11 +91,39 @@ export function EmailAuthForm() {
         type="email"
         placeholder="כתובת מייל"
         value={email}
-        onChange={e => setEmail(e.target.value)}
+        onChange={e => onEmailChange(e.target.value)}
         required
         dir="ltr"
-        className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+        className={`w-full rounded-lg border bg-surface px-3 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 ${
+          typoFix ? 'border-gold' : 'border-line'
+        }`}
       />
+
+      {typoFix && (
+        <div className="rounded-lg border border-gold/50 bg-gold/10 p-3 space-y-2 text-center">
+          <p className="text-xs text-txt leading-relaxed">
+            נראה שיש טעות בסיומת הכתובת. אם היא לא נכונה, מייל האימות לא יגיע לשום מקום.
+          </p>
+          <p className="text-sm text-txt" dir="ltr">{typoFix}</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              onClick={() => { setEmail(typoFix); setTypoFix(null) }}
+              className="flex-1 bg-gold hover:bg-gold-light text-surface font-semibold h-9 text-xs"
+            >
+              כן, תקן לזה
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { setIgnoreTypo(true); setTypoFix(null) }}
+              className="flex-1 border-line text-txt h-9 text-xs"
+            >
+              הכתובת שלי נכונה
+            </Button>
+          </div>
+        </div>
+      )}
 
       {mode !== 'reset' && (
         <input
