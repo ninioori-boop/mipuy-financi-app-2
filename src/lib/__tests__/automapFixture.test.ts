@@ -45,6 +45,35 @@ const run = (over: Partial<AutomapRun> = {}): AutomapRun => buildRun({
 
 const findings = (r: AutomapRun) => summarizeRun(r).findings.map(f => f.text)
 
+// 🔴 Found on Ori's real run, 2026-08-11. The summariser counted a ₪8,799 card
+// settlement as an expense while the same ₪8,799 was already itemised in the
+// credit report. That turned a ₪4,105 monthly surplus into a ₪3,127 deficit and
+// reported "₪5,333 of expenses are missing" when nothing was missing — the page
+// itself had it right the whole time. A summary that lies about the screen is
+// worse than no summary.
+describe('the card settlement is not counted twice', () => {
+  const withSettlement = run({
+    bankRows: [
+      { desc: 'משכורת', amount: 42000, date: '2026-06-01', dir: 'in' },
+      { desc: 'ארנונה', amount: 1860, date: '2026-06-02', dir: 'out' },
+      { desc: 'תשלום כרטיס אשראי', amount: 9000, date: '2026-06-03', dir: 'out' },
+    ],
+  })
+
+  it('excludes it from the reconciliation, as the page does', () => {
+    const { lines } = summarizeRun(withSettlement)
+    const line = lines.find(l => l.startsWith('הצלבה'))!
+    // 42000 in, 1860 out, 1023 of card charges — the ₪9,000 settlement IS
+    // those charges arriving at the bank, and must not be subtracted again.
+    expect(line).toContain('₪13,039')
+  })
+
+  it('still counts it when there is no credit detail behind it', () => {
+    const noCredit = run({ txns: [], bankRows: withSettlement.bankRows })
+    expect(summarizeRun(noCredit).lines.find(l => l.startsWith('הצלבה'))).toContain('₪10,380')
+  })
+})
+
 describe('summarizeRun — the picture of the screen', () => {
   it('describes the run without inventing problems', () => {
     const { lines, findings } = summarizeRun(run())

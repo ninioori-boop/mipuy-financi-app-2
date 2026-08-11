@@ -24,6 +24,7 @@ import {
   type GeneratedMapping,
 } from './autoMap'
 import { normalizeForLookup } from './normalizeForLookup'
+import { isCardSettlement } from './automapBank'
 import { declaredMonthlyIncome, type IntakeRow } from './automapQuestions'
 import { categorize } from './categorize'
 import type { Transaction } from '@/types/transaction'
@@ -79,6 +80,10 @@ export function summarizeRun(run: AutomapRun): RunSummary {
   const lines: string[] = []
   const findings: RunFinding[] = []
   const months = Math.max(1, run.months)
+
+  // A settlement is only a duplicate when the charges behind it were uploaded.
+  // With no credit detail it is the household's only record of that spending.
+  const hasCreditDetail = run.txns.length > 0
 
   const overridden = (t: Transaction) => run.txnOverrides[normalizeKey(t.desc)] ?? t.category
   const all: Transaction[] = [
@@ -167,7 +172,16 @@ export function summarizeRun(run: AutomapRun): RunSummary {
   }
 
   // The two cross-checks the advisor reads first.
-  const bankOut = run.bankRows.filter(b => b.dir === 'out').reduce((s, b) => s + b.amount, 0)
+  //
+  // 🔴 Settlements are excluded, exactly as the page excludes them. Counting a
+  // ₪8,799 card settlement as an expense while the same ₪8,799 is already
+  // itemised in the credit report double-counts it — and on a real run that
+  // turned a ₪4,105 monthly surplus into a ₪3,127 deficit and reported
+  // "₪5,333 of expenses are missing" when nothing was missing at all.
+  // A summary that lies about the screen is worse than no summary.
+  const bankOut = run.bankRows
+    .filter(b => b.dir === 'out' && !(hasCreditDetail && isCardSettlement(b.desc)))
+    .reduce((s, b) => s + b.amount, 0)
   const cardCharges = run.txns.reduce((s, t) => s + (t.isRefund ? -t.amount : t.amount), 0)
   const rec = reconcile(r, { bankIn: deposits, bankOut, cardCharges, months })
   lines.push(`הצלבה: ${rec.verdict} · בפועל ${money(rec.actualPerMonth)} מול ${money(rec.mappingPerMonth)} במיפוי`)
