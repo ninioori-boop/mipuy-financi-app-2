@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
   sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
-  consolidateByCategory, ensureAnnualItems,
+  consolidateByCategory, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 
@@ -498,6 +498,64 @@ describe('ensureAnnualItems', () => {
 
   it('does nothing when there is nothing confirmed', () => {
     expect(ensureAnnualItems(base, [])).toBe(base)
+  })
+})
+
+// ensureAnnualItems only guards the moment of generation, and the result is
+// persisted — so a mapping made before the fix keeps its duplicate for as long
+// as it lives. The same rule has to be able to clean up after the fact.
+describe('findAnnualDuplicates / dedupeAnnual', () => {
+  const withAnnual = (annual: { name: string; annualAmount: number }[]): GeneratedMapping => ({
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual,
+    debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '',
+  })
+
+  it('finds the pair from the real result', () => {
+    const rows = [
+      { name: 'חופשה וטיול', annualAmount: 1127 },
+      { name: 'אלוף הספות (חופשה/בילוי)', annualAmount: 3700 },
+      { name: 'העברה/אלוף הספות', annualAmount: 3700 },
+    ]
+    expect(findAnnualDuplicates(rows)).toEqual([[1, 2]])
+  })
+
+  it('keeps the first of the pair and drops the rest', () => {
+    const out = dedupeAnnual(withAnnual([
+      { name: 'אלוף הספות (חופשה/בילוי)', annualAmount: 3700 },
+      { name: 'העברה/אלוף הספות', annualAmount: 3700 },
+    ]))
+    expect(out.annual).toHaveLength(1)
+    expect(out.annual[0].name).toBe('אלוף הספות (חופשה/בילוי)')
+  })
+
+  // Two policies at the same insurer share words but no consecutive pair. If
+  // this ever merges them, a real annual expense disappears.
+  it('leaves two genuinely different expenses alone', () => {
+    const rows = [
+      { name: 'ביטוח רכב הראל', annualAmount: 4200 },
+      { name: 'ביטוח דירה הראל', annualAmount: 1800 },
+      { name: 'חופשה וטיול', annualAmount: 1127 },
+    ]
+    expect(findAnnualDuplicates(rows)).toEqual([])
+    expect(dedupeAnnual(withAnnual(rows)).annual).toHaveLength(3)
+  })
+
+  it('groups three copies of one charge together, not into pairs', () => {
+    const rows = [
+      { name: 'אלוף הספות', annualAmount: 3700 },
+      { name: 'העברה/אלוף הספות', annualAmount: 3700 },
+      { name: 'אלוף הספות (ריהוט)', annualAmount: 3700 },
+    ]
+    expect(findAnnualDuplicates(rows)).toEqual([[0, 1, 2]])
+    expect(dedupeAnnual(withAnnual(rows)).annual).toHaveLength(1)
+  })
+
+  it('returns the mapping untouched when there is nothing to merge', () => {
+    const m = withAnnual([{ name: 'חופשה וטיול', annualAmount: 1127 }])
+    expect(dedupeAnnual(m)).toBe(m)
+    expect(findAnnualDuplicates([])).toEqual([])
   })
 })
 

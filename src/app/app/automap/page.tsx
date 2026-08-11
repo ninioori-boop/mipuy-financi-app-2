@@ -17,7 +17,7 @@ import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   groupByName, formatIncomeBreakdown,
   buildInstallments, buildStandingOrders, formatInstallments, formatStandingOrders, isInstallment,
-  applyTxnRecategorization, ensureAnnualItems,
+  applyTxnRecategorization, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
@@ -588,6 +588,10 @@ export default function AutoMapPage() {
     () => (result ? reconcile(result, flows) : null),
     [result, flows],
   )
+  const annualDupes = useMemo(
+    () => (result ? findAnnualDuplicates(result.annual) : []),
+    [result],
+  )
 
   /**
    * Move one transaction to another category, from the פירוט.
@@ -742,7 +746,9 @@ export default function AutoMapPage() {
         // expenses on purpose; if the model then failed to put them into the
         // annual section, they left the mapping entirely. Put them back here so
         // that cannot happen — they show at annualAmount/12 per month.
-        const parsed = ensureAnnualItems(parseGeneratedMapping(rawText), annualItems)
+        // dedupeAnnual last: the model itself sometimes returns the same charge
+        // under two names, which ensureAnnualItems has no reason to notice.
+        const parsed = dedupeAnnual(ensureAnnualItems(parseGeneratedMapping(rawText), annualItems))
         setResult(parsed)
         // A truncated reply still parses now (extractJsonObject repairs it), but
         // the tail sections are missing — say so rather than let it pass as a
@@ -1689,6 +1695,31 @@ export default function AutoMapPage() {
               </div>
             )}
           </div>
+
+          {/* A duplicate baked into a result generated before the fix. The
+              result is persisted, so it would otherwise live there until the
+              advisor regenerated (an AI call) or spotted the row by eye. */}
+          {annualDupes.length > 0 && (
+            <div className="rounded-xl border-2 border-expense/40 bg-expense/5 p-3 space-y-2">
+              <div className="text-sm font-semibold text-expense">
+                ⚠️ {annualDupes.length === 1 ? 'הוצאה שנתית מופיעה פעמיים' : `${annualDupes.length} הוצאות שנתיות מופיעות פעמיים`}
+              </div>
+              <div className="text-xs text-txt leading-relaxed">
+                {annualDupes.map(g => g.map(i => result.annual[i]?.name).filter(Boolean).join('  ↔  ')).join(' · ')}
+                {' — '}אותו חיוב בשני שמות, אז הוא נספר פעמיים בשנתי ובחודשי.
+              </div>
+              <button
+                onClick={() => {
+                  const before = result.annual.length
+                  updateResult(prev => dedupeAnnual(prev))
+                  toast.success(`הוסרו ${before - (before - annualDupes.reduce((s, g) => s + g.length - 1, 0))} שורות כפולות`)
+                }}
+                className="rounded-lg border border-expense/50 bg-expense/10 px-3 py-1.5 text-xs font-semibold text-expense hover:bg-expense/20 transition-colors"
+              >
+                השאר שורה אחת מכל חיוב
+              </button>
+            </div>
+          )}
 
           {/* The account's verdict on the mapping. Shown FIRST and always —
               including when it passes, because "this reconciles" is the one

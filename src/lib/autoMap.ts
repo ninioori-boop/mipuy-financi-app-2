@@ -1054,6 +1054,46 @@ function bigramsOf(s: string): string[] {
   return out
 }
 
+/**
+ * Annual rows that describe the same charge, by the same shared-word-pair rule
+ * ensureAnnualItems uses. Returns groups of indices, first occurrence first.
+ *
+ * ensureAnnualItems only guards the moment of generation, and the result is
+ * persisted — so a mapping produced before the fix keeps its duplicate for as
+ * long as it lives, and the only way out was to regenerate (an AI call) or
+ * spot the row by eye. This lets the same rule clean up after the fact.
+ */
+export function findAnnualDuplicates(rows: { name: string }[]): number[][] {
+  const keys = rows.map(r => normalizeForLookup(r.name) || r.name.trim())
+  const used = new Set<number>()
+  const groups: number[][] = []
+
+  for (let i = 0; i < rows.length; i++) {
+    if (used.has(i) || !keys[i]) continue
+    const mine = new Set(bigramsOf(keys[i]))
+    const group = [i]
+    for (let j = i + 1; j < rows.length; j++) {
+      if (used.has(j) || !keys[j]) continue
+      const same =
+        keys[i] === keys[j] ||
+        keys[i].includes(keys[j]) ||
+        keys[j].includes(keys[i]) ||
+        bigramsOf(keys[j]).some(b => mine.has(b))
+      if (same) { group.push(j); used.add(j) }
+    }
+    if (group.length > 1) { groups.push(group); used.add(i) }
+  }
+  return groups
+}
+
+/** Keep the first row of each duplicate group and drop the rest. */
+export function dedupeAnnual(m: GeneratedMapping): GeneratedMapping {
+  const groups = findAnnualDuplicates(m.annual)
+  if (!groups.length) return m
+  const drop = new Set(groups.flatMap(g => g.slice(1)))
+  return { ...m, annual: m.annual.filter((_, i) => !drop.has(i)) }
+}
+
 export function ensureAnnualItems(
   m: GeneratedMapping,
   items: { name: string; category: string; annualAmount: number }[],
