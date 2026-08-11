@@ -61,3 +61,7 @@ clients.html
 funnel-report.md
 funnel-report.json
 data-report.html
+
+# Saved automap run: one household's real transactions. Local only, never committed.
+scripts/.automap-run.json
+automap-run.json

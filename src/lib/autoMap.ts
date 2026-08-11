@@ -1180,6 +1180,41 @@ export function ensureAnnualItems(
   }
 }
 
+/**
+ * The transactions behind one row of an expense section.
+ *
+ * Lives here rather than in the view because it is the rule the screen is
+ * judged by, and a rule only the screen knows cannot be tested. 🔴 It used to
+ * be "transactions whose category equals the row's category", which made the
+ * drill-down depend on the model having filled in a field — and a row that came
+ * back as "סך ביטוחים (הראל + מכבי)" with an empty category could not be opened
+ * at all, which was the one row worth opening.
+ */
+export function resolveRowTxns<T extends { desc: string; category: string; isRefund: boolean }>(
+  section: 'fixed' | 'sub' | 'ins',
+  rows: { name: string; category?: string }[],
+  index: number,
+  txns: T[],
+): T[] {
+  const row = rows[index]
+  if (!row) return []
+  const usable = txns.filter(t => !t.isRefund)
+
+  if (row.category) return usable.filter(t => t.category === row.category)
+
+  // A single unlabelled row represents everything its section holds.
+  const inSection = usable.filter(t => sectionOfCategory(t.category) === section)
+  if (rows.length === 1) return inSection
+
+  // Beside others it must not claim their charges, so only a name match counts.
+  const nameKey = normalizeForLookup(row.name)
+  if (!nameKey) return []
+  return inSection.filter(t => {
+    const k = normalizeForLookup(t.desc)
+    return !!k && (k.includes(nameKey) || nameKey.includes(k))
+  })
+}
+
 /** Extract + coerce the model's JSON into a GeneratedMapping. Throws on no JSON. */
 export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)

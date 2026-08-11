@@ -26,6 +26,7 @@ import {
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
 import { reconcile, checkIncomeAgainstDeposits } from '@/lib/automapReconcile'
+import { buildRun } from '@/lib/automapFixture'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
   formatIntakeAnswers, formatIntakeDocs, countAnswered, type IntakeDoc, type IntakeRoute,
@@ -611,6 +612,34 @@ export default function AutoMapPage() {
     () => (result ? reconcile(result, flows) : null),
     [result, flows],
   )
+  /**
+   * Save the run to a local file.
+   *
+   * Every defect in this feature reached Ori first, because nothing could
+   * reproduce what he was looking at: 600+ tests, all of them on pure logic,
+   * while every bug lived in the seam between the logic and the screen. This
+   * makes a run replayable — the same fix can be checked in seconds against his
+   * data, with no run and no AI spend, and the checks become assertions.
+   *
+   * 🔒 Real transactions. Written to disk locally, uploaded nowhere, gitignored.
+   */
+  const saveRun = useCallback(() => {
+    const run = buildRun({
+      months: detectedMonths || reportMonths,
+      txns, bankRows, fileNames, attachedByQ, txnOverrides, docNames,
+      intakeForm, contextText, annualItems, result,
+    })
+    const blob = new Blob([JSON.stringify(run, null, 2)], { type: 'application/json' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = 'automap-run.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('ההרצה נשמרה כקובץ automap-run.json בתיקיית ההורדות')
+  }, [detectedMonths, reportMonths, txns, bankRows, fileNames, attachedByQ,
+      txnOverrides, docNames, intakeForm, contextText, annualItems, result])
+
   const annualDupes = useMemo(
     () => (result ? findAnnualDuplicates(result.annual) : []),
     [result],
@@ -1557,6 +1586,17 @@ export default function AutoMapPage() {
             <span className="text-xs text-muted-txt">
               קיימת תוצאה — לחיצה תיצור מיפוי חדש מאותם קבצים
             </span>
+          )}
+          {/* Saves the run so a defect can be reproduced without another run.
+              The file stays on this machine and is never uploaded. */}
+          {(txns.length > 0 || bankRows.length > 0) && (
+            <button
+              onClick={saveRun}
+              title="שומר את ההרצה כקובץ מקומי, כדי שאפשר יהיה לשחזר תקלה בלי להריץ שוב"
+              className="text-xs px-2.5 py-1.5 rounded border border-line bg-surface text-muted-txt hover:text-gold hover:border-gold/40 transition-colors"
+            >
+              🧪 שמור הרצה לבדיקה
+            </button>
           )}
           {result && (
             <button
