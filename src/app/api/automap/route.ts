@@ -7,6 +7,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin'
 import { hasLabAccess } from '@/lib/labAccess'
 import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 import { isAccountDeleted } from '@/lib/deletionTombstone'
+import { isInvited, NOT_INVITED_MESSAGE } from '@/lib/requireInvited'
 import { AUTOMAP_SYSTEM_PROMPT } from '@/lib/autoMap'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
@@ -74,6 +75,14 @@ export async function POST(req: NextRequest) {
   // spend, and before the deleted uid can re-create a rate-limit counter.
   if (await isAccountDeleted(uid)) {
     return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+  }
+
+  // Invite-only, enforced HERE because the AI routes are the one authenticated
+  // surface firestore.rules does not cover, and the only one that spends money
+  // per call. gateSignup was meant to stop an uninvited account from ever
+  // existing; it has never run once (see src/lib/requireInvited.ts).
+  if (!(await isInvited(uid, email))) {
+    return NextResponse.json({ error: NOT_INVITED_MESSAGE }, { status: 403 })
   }
 
   // App Check (gated) — no-op until APP_CHECK_ENFORCE=true.

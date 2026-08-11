@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
 import { doc, getDoc } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
 import { ConsentScreen, type PendingInvite } from '@/components/auth/ConsentScreen'
 import { VerifyEmailScreen } from '@/components/auth/VerifyEmailScreen'
+import { NotInvitedScreen } from '@/components/auth/NotInvitedScreen'
 import { refreshBrand } from '@/components/layout/BrandProvider'
 import { raceWithTimeout, TIMED_OUT } from '@/lib/promiseTimeout'
 
@@ -27,6 +28,27 @@ const PUBLIC = ['/auth', '/privacy', '/connect', '/delete-account']
 // Generous on purpose: the two reads normally land in a few hundred ms.
 const CONSENT_CHECK_TIMEOUT_MS = 8_000
 
+/**
+ * Is this account on the invite allowlist? `true` / `false` / `null` when the
+ * question could not be answered. Only an explicit `false` blocks — the browser
+ * cannot read `allowlist` itself (the rules deny it), so this asks the server,
+ * and anything short of a clear "no" leaves the app open.
+ */
+async function fetchInviteStatus(): Promise<boolean | null> {
+  try {
+    const user = auth.currentUser
+    if (!user) return null
+    const res = await fetch('/api/invite-status', {
+      headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+    })
+    if (!res.ok) return null
+    const body = await res.json()
+    return typeof body?.invited === 'boolean' ? body.invited : null
+  } catch {
+    return null
+  }
+}
+
 export function ConsentGate({ children }: { children: ReactNode }) {
   const { user } = useAuthStore()
   const pathname = usePathname()
@@ -35,6 +57,26 @@ export function ConsentGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'checking' | 'clear' | 'pending'>('clear')
   const [invite, setInvite] = useState<PendingInvite | null>(null)
   const [variant, setVariant] = useState<'view' | 'edit' | 'view-edit'>('view')
+  const [notInvited, setNotInvited] = useState(false)
+
+  // DELIBERATELY its own effect, not part of the race below. Joining them would
+  // couple the consent screen to a cold serverless lambda: Promise.all settles
+  // at the slowest, so a slow invite check past the 8s timeout would discard
+  // two Firestore reads that landed in 300ms and silently skip a client's
+  // consent screen — and it would put that lambda on first paint for everyone.
+  // This screen replaces a 90-minute dead end; arriving a second late is fine.
+  const recheckInvite = useCallback(async () => {
+    const answer = await fetchInviteStatus()
+    setNotInvited(answer === false)
+    return answer
+  }, [])
+
+  useEffect(() => {
+    if (!user?.uid) { setNotInvited(false); return }
+    let alive = true
+    fetchInviteStatus().then(answer => { if (alive) setNotInvited(answer === false) })
+    return () => { alive = false }
+  }, [user?.uid])
 
   useEffect(() => {
     const email = user?.email?.toLowerCase()
@@ -82,6 +124,11 @@ export function ConsentGate({ children }: { children: ReactNode }) {
 
   // No user or a public route → app renders normally (AuthProvider owns /auth redirects).
   if (!user || isPublic) return <>{children}</>
+
+  // Before the verification gate below: an address that was never invited will
+  // never become usable by verifying it, so "check your email" is advice that
+  // cannot work — precisely the dead end this replaces.
+  if (notInvited) return <NotInvitedScreen user={user} onRecheck={recheckInvite} />
 
   // An unverified PASSWORD account stops here, before the app. Without this the
   // invite-squatting fix (clientLinks/setClientSharing trust only a VERIFIED

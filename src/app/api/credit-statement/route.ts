@@ -5,6 +5,7 @@ import { checkAiQuota, aiQuotaMessage } from '@/lib/aiQuota'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 import { verifyAppCheckToken, appCheckEnforced } from '@/lib/verifyAppCheckToken'
 import { isAccountDeleted } from '@/lib/deletionTombstone'
+import { isInvited, NOT_INVITED_MESSAGE } from '@/lib/requireInvited'
 
 // firebase-admin (rate limit + quota) needs the Node runtime.
 export const runtime = 'nodejs'
@@ -53,6 +54,14 @@ export async function POST(req: NextRequest) {
   // spend, and before the deleted uid can re-create a rate-limit counter.
   if (await isAccountDeleted(uid)) {
     return NextResponse.json({ error: 'account deleted' }, { status: 410 })
+  }
+
+  // Invite-only, enforced HERE because the AI routes are the one authenticated
+  // surface firestore.rules does not cover, and the only one that spends money
+  // per call. gateSignup was meant to stop an uninvited account from ever
+  // existing; it has never run once (see src/lib/requireInvited.ts).
+  if (!(await isInvited(uid, email))) {
+    return NextResponse.json({ error: NOT_INVITED_MESSAGE }, { status: 403 })
   }
 
   if (appCheckEnforced()) {
