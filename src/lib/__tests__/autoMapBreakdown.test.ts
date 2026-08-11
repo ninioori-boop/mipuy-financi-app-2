@@ -470,6 +470,32 @@ describe('ensureAnnualItems', () => {
     expect(ensureAnnualItems(withIt, items).annual).toHaveLength(1)
   })
 
+  // 🔴 The real duplicate, 2026-08-11: the model qualified the name and the
+  // advisor's confirmation kept the statement's prefix. Exact matching saw two
+  // different charges and one ₪3,700 transfer became ₪7,400 a year.
+  it('does not duplicate when the model qualified the name', () => {
+    const withIt = { ...base, annual: [{ name: 'אלוף הספות (אוכל בחוץ ובילויים)', annualAmount: 3700 }] }
+    expect(ensureAnnualItems(withIt, items).annual).toHaveLength(1)
+  })
+
+  it('does not duplicate when the confirmation is the shorter name', () => {
+    const withIt = { ...base, annual: [{ name: 'העברה/אלוף הספות — ריהוט', annualAmount: 3700 }] }
+    expect(ensureAnnualItems(withIt, [{ name: 'אלוף הספות', category: 'ריהוט והבית', annualAmount: 3700 }]).annual)
+      .toHaveLength(1)
+  })
+
+  // Containment must not become "anything matches anything": two unrelated
+  // annual expenses still have to survive as two rows.
+  it('still adds a genuinely different expense', () => {
+    const withIt = { ...base, annual: [{ name: 'אלוף הספות (אוכל בחוץ ובילויים)', annualAmount: 3700 }] }
+    const out = ensureAnnualItems(withIt, [
+      ...items,
+      { name: 'ביטוח רכב הראל', category: 'ביטוח', annualAmount: 4200 },
+    ])
+    expect(out.annual).toHaveLength(2)
+    expect(out.annual.map(a => a.annualAmount)).toContain(4200)
+  })
+
   it('does nothing when there is nothing confirmed', () => {
     expect(ensureAnnualItems(base, [])).toBe(base)
   })

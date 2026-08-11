@@ -3390,6 +3390,16 @@ export const BUSINESS_DB: Record<string, string> = Object.fromEntries([
   // spending. Ori, 2026-08-09. Each key must out-length the generic house name
   // above it ("מגדל" → ביטוח), or a קרן כספית gets filed as insurance.
   ["מגדל כספית", "חסכונות"],
+  // A securities BUY through an investment house is not insurance and not an
+  // expense at all — it is money moving into an asset. The statement line reads
+  // "קניה/( כאל) מגדל/טלפון ני", where the house name on its own hits the
+  // generic ["מגדל", "ביטוח"] key and a whole portfolio is filed as premiums.
+  // The channel suffix is what out-lengths it. Ori, 2026-08-11.
+  ["מגדל/טלפון", "השקעות"],
+  ["מגדל/אינטרנט", "השקעות"],
+  ["מגדל/נט", "השקעות"],
+  ["ניירות ערך", "השקעות"],
+  ["נירות ערך", "השקעות"],
   ["קסם אקטיב", "חסכונות"],
   ["ksm active", "חסכונות"],
   ["קרן כספית", "חסכונות"],

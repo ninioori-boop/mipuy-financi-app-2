@@ -504,6 +504,8 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **debts (חובות)**: הלוואות ומשכנתאות. 🔴 **כל החזר הלוואה או משכנתה הולך לכאן, לעולם לא ל‑fixed.** גם כשהקטגוריה "החזר הלוואות" מופיעה בבלוק ההוצאות — היא שייכת ל‑debts. החזר הוא לא הוצאה קבועה: יש לו יתרה, ריבית ותאריך סיום, וזה כל מה שהסעיף הזה קיים בשבילו. אם היתרה, הריבית או מספר התשלומים לא ידועים — השאר 0, **אל תמציא אותם**, ומלא רק monthlyPayment.
 - **installments (תשלומים)**: רכישות בתשלומים (X מתוך Y).
 - **savings (חיסכון)**: הפקדות לחיסכון/פנסיה/קרנות.
+  🔴 **תיק ניירות ערך הוא שורה אחת: שווי התיק כולו.** אם קיבלת צילום מסך של תיק השקעות, אל תיצור שורה לכל מניה ואל תפרט אחזקות. השווי של כל נייר בנפרד הוא רעש: הוא משתנה כל יום, אין ליועץ מה לעשות איתו במיפוי, והוא מפוצץ את הסעיף בעשרות שורות. שורה אחת, בשם החשבון או בית ההשקעות, עם השווי הכולל ב‑accumulated.
+  קניית נייר ערך היא **העברה לנכס, לא הוצאה** — אל תכניס אותה ל‑variable או ל‑fixed גם אם היא מופיעה בעו"ש כחיוב.
 
 ## תמונת מצב הלקוח (נתונים נקודתיים — לא חודשיים)
 אם הנתונים כוללים אותם, חלץ גם:
@@ -1040,13 +1042,44 @@ export function consolidateByCategory(m: GeneratedMapping): GeneratedMapping {
  * from the mapping altogether without a word. Money that leaves silently is the
  * failure mode this whole tool keeps running into.
  */
+/** Consecutive word pairs of a normalized name; words of 1 char are ignored. */
+function bigramsOf(s: string): string[] {
+  const words = s.split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1)
+  const out: string[] = []
+  for (let i = 0; i + 1 < words.length; i++) out.push(`${words[i]} ${words[i + 1]}`)
+  return out
+}
+
 export function ensureAnnualItems(
   m: GeneratedMapping,
   items: { name: string; category: string; annualAmount: number }[],
 ): GeneratedMapping {
   if (!items.length) return m
-  const have = new Set(m.annual.map(a => normalizeForLookup(a.name) || a.name.trim()))
-  const missing = items.filter(i => !have.has(normalizeForLookup(i.name) || i.name.trim()))
+
+  // 🔴 Matching on the exact normalized name was too strict and produced the
+  // duplicate it was meant to prevent: the model wrote "אלוף הספות (אוכל בחוץ
+  // ובילויים)", the advisor's confirmation was "העברה/אלוף הספות", and one
+  // ₪3,700 transfer became ₪7,400 a year. The two names describe the same
+  // charge because one CONTAINS the other — the model adds a category or a
+  // qualifier, the confirmation keeps the raw statement text with its prefix.
+  //
+  // Containment alone does not catch it either — each name has extra text on a
+  // DIFFERENT side, so neither contains the other. What identifies them as the
+  // same charge is a shared pair of consecutive words ("אלוף הספות").
+  //
+  // A bigram, not single words: "ביטוח רכב הראל" and "ביטוח דירה הראל" share
+  // two words and are two different policies, but no consecutive pair — so they
+  // stay two rows, which is the whole reason not to match on word overlap.
+  const have = m.annual.map(a => normalizeForLookup(a.name) || a.name.trim()).filter(Boolean)
+  const haveBigrams = new Set(have.flatMap(bigramsOf))
+
+  const alreadyThere = (name: string) => {
+    const key = normalizeForLookup(name) || name.trim()
+    if (!key) return false
+    if (have.some(h => h === key || h.includes(key) || key.includes(h))) return true
+    return bigramsOf(key).some(b => haveBigrams.has(b))
+  }
+  const missing = items.filter(i => !alreadyThere(i.name))
   if (!missing.length) return m
   return {
     ...m,

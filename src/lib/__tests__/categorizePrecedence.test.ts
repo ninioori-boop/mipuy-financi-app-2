@@ -14,6 +14,29 @@ import { BUSINESS_DB } from '../businessDB'
 const [builtinKey, builtinCat] = Object.entries(BUSINESS_DB)
   .find(([k]) => k.length >= 6) as [string, string]
 
+// An investment house sells both policies and securities under one name, and
+// the generic key is the short one. A ₪1,000 securities purchase filed as an
+// insurance premium is wrong twice over: wrong category, and counted as
+// spending when it is money moving into an asset.
+describe('categorize — an investment house is not always insurance', () => {
+  it.each([
+    'קניה/( כאל) מגדל/טלפון ני',
+    'קניה/(כאל) מגדל/אינטרנט',
+    'מגדל/נט קניה ניע',
+  ])('reads a securities buy as an investment: %s', desc => {
+    expect(categorize(desc)).toBe('השקעות')
+  })
+
+  it('still reads the insurance company as insurance', () => {
+    expect(categorize('מגדל חברה לביטוח')).toBe('ביטוח')
+    expect(categorize('הראל-ביטוח דירה')).toBe('ביטוח')
+  })
+
+  it('keeps the money-market fund as savings, not investments', () => {
+    expect(categorize('מגדל כספית')).toBe('חסכונות')
+  })
+})
+
 describe('categorize — precedence tiers', () => {
   it('a learned EXACT key overrides the built-in DB (correction power intact)', () => {
     expect(categorize(builtinKey, { [builtinKey.toLowerCase()]: 'מנויים' })).toBe('מנויים')
