@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
-import { SectionPanel } from '@/components/mapping/SectionPanel'
+import { LabSectionPanel, type LabRow } from '@/components/automap/LabSectionPanel'
 import { DebtPanel } from '@/components/mapping/DebtPanel'
 import { InstallmentPanel } from '@/components/mapping/InstallmentPanel'
 import { SavingPanel } from '@/components/mapping/SavingPanel'
@@ -164,6 +164,12 @@ export function LabMappingView({
   // ── adapters: GeneratedMapping rows → id-bearing panel rows ──
   const simpleRows = (key: SimpleKey): MappingRow[] =>
     result[key].map((r, i) => ({ id: `${key}-${i}`, name: r.name, amount: r.amount }))
+  /** The same rows, carrying the lab-only fields the lab's own panel shows. */
+  const labRows = (key: SimpleKey): LabRow[] =>
+    result[key].map((r, i) => ({
+      id: `${key}-${i}`, name: r.name, amount: r.amount,
+      category: r.category, confidence: r.confidence, source: r.source,
+    }))
   const annualRows: AnnualRow[] =
     result.annual.map((r, i) => ({ id: `annual-${i}`, name: r.name, annualAmount: r.annualAmount }))
   const debtRows: DebtRow[] =
@@ -232,40 +238,7 @@ export function LabMappingView({
     patch(key, rows)
   }
 
-  // Row extras: the category picker (editable) + the confidence/source chip.
-  const chipFor = (key: SimpleKey) => (row: MappingRow) => {
-    const i = idxOf(row.id)
-    const r = result[key][i]
-    if (!r) return null
-    // SectionPanel's row is a non-wrapping flex: name (flex-1) · rowExtra ·
-    // amount group (shrink-0) · delete. Anything here marked shrink-0 cannot
-    // give way, so when the row exceeds the card it spills outside the border
-    // instead of compressing — which is exactly what these two chips did.
-    // `min-w-0` + capped widths let both truncate; the source chip, being
-    // informational rather than actionable, gives up its space first.
-    // ⚠️ The confidence/source chip used to sit here as a second element. It
-    // cost ~110px on a row whose name input cannot shrink below its intrinsic
-    // width (SectionPanel's name is flex-1 with no min-w-0), so on income and
-    // מנויים — the two sections that ALSO get a drill-down button — the row
-    // exceeded the card and the controls overlapped each other. The chip was
-    // informational, not actionable, so it became a tooltip on the control
-    // that is actionable.
-    const meta = [
-      r.confidence ? `אמינות: ${{ high: 'אמין', medium: 'בינוני', low: 'נמוך' }[r.confidence]}` : '',
-      r.source ? `מקור: ${r.source}` : '',
-    ].filter(Boolean).join(' · ')
-    return (
-      <span className="flex items-center min-w-0" title={meta || undefined}>
-        <CategoryPicker
-          value={r.category ?? ''}
-          onChange={cat => setCategory(key, i, cat)}
-          variant="chip"
-          placeholder="קטגוריה"
-          className="max-w-[96px]"
-        />
-      </span>
-    )
-  }
+
 
   // Drill-down transactions for a fixed/sub/ins row — the parsed report lines
   // whose category matches the AI row's category. Gives every expense section
@@ -273,8 +246,35 @@ export function LabMappingView({
   // see exactly which charges make up each category.
   const txnsForCategory = (cat?: string): Transaction[] =>
     cat ? txns.filter(t => !t.isRefund && t.category === cat) : []
-  const resolveTxnsFor = (key: SimpleKey) => (row: MappingRow): Transaction[] =>
-    txnsForCategory(result[key][idxOf(row.id)]?.category)
+
+  /**
+   * The transactions a row is made of.
+   *
+   * 🔴 This used to be "transactions whose category equals the row's category",
+   * which made the drill-down depend on the model having filled in a field. A
+   * row that came back as "סך ביטוחים (הראל + מכבי)" with an empty category had
+   * no פירוט at all — the one row the advisor most needed to open. So there are
+   * three ways in, and only the last can come up empty:
+   *   1. the row's category, when it has one;
+   *   2. the whole SECTION, when the row is the only one in it (a single
+   *      unlabelled row represents everything that section holds);
+   *   3. a name match, for an unlabelled row sitting beside others — it must
+   *      not claim its neighbours' charges.
+   */
+  const resolveTxnsFor = (key: SimpleKey) => (row: MappingRow): Transaction[] => {
+    const cat = result[key][idxOf(row.id)]?.category
+    if (cat) return txnsForCategory(cat)
+
+    const inSection = txns.filter(t => !t.isRefund && sectionOfCategory(t.category) === key)
+    if (result[key].length === 1) return inSection
+
+    const nameKey = normalizeForLookup(row.name)
+    if (!nameKey) return []
+    return inSection.filter(t => {
+      const k = normalizeForLookup(t.desc)
+      return !!k && (k.includes(nameKey) || nameKey.includes(k))
+    })
+  }
 
   // Income has no category to match on — its rows are named after the payer.
   // Matching on the normalized name is how a row of ₪23,671 finally admits it
@@ -516,55 +516,65 @@ export function LabMappingView({
       <div className="grid grid-cols-1 gap-6">
 
         {/* שורה 1: הכנסות | קבועות */}
-        <SectionPanel
+        <LabSectionPanel
           title="הכנסות חודשיות"
           icon="💰"
-          rows={simpleRows('income')}
+          rows={labRows('income')}
           totalLabel="סה&quot;כ הכנסות"
           totalColor="text-income"
           colName="מקור הכנסה"
-          rowExtra={chipFor('income')}
-          resolveTxns={resolveIncomeTxns}
+          colAmt="סכום חודשי ₪"
+          txnsFor={resolveIncomeTxns}
+          months={months}
+          onCategory={(row, cat) => setCategory('income', idxOf(row.id), cat)}
+          onRecategorize={onRecategorize ?? (() => {})}
           onAdd={() => addSimple('income')}
           onUpdate={(id, field, value) => editSimple('income', idxOf(id), field, value)}
           onDelete={id => delRow('income', idxOf(id))}
         />
-        <SectionPanel
+        <LabSectionPanel
           title="הוצאות קבועות"
           icon="📌"
-          rows={simpleRows('fixed')}
+          rows={labRows('fixed')}
           totalLabel="סה&quot;כ קבועות"
           colName="סוג הוצאה"
           colAmt="סכום חודשי ₪"
-          rowExtra={chipFor('fixed')}
-          resolveTxns={resolveTxnsFor('fixed')}
+          txnsFor={resolveTxnsFor('fixed')}
+          months={months}
+          onCategory={(row, cat) => setCategory('fixed', idxOf(row.id), cat)}
+          onRecategorize={onRecategorize ?? (() => {})}
           onAdd={() => addSimple('fixed')}
           onUpdate={(id, field, value) => editSimple('fixed', idxOf(id), field, value)}
           onDelete={id => delRow('fixed', idxOf(id))}
         />
 
         {/* שורה 2: מנויים | ביטוחים */}
-        <SectionPanel
+        <LabSectionPanel
           title="מינויים ומנויים"
           icon="🔄"
-          rows={simpleRows('sub')}
+          rows={labRows('sub')}
           totalLabel="סה&quot;כ מנויים"
           colName="שם המנוי"
-          rowExtra={chipFor('sub')}
-          resolveTxns={resolveTxnsFor('sub')}
+          colAmt="סכום חודשי ₪"
+          txnsFor={resolveTxnsFor('sub')}
+          months={months}
+          onCategory={(row, cat) => setCategory('sub', idxOf(row.id), cat)}
+          onRecategorize={onRecategorize ?? (() => {})}
           onAdd={() => addSimple('sub')}
           onUpdate={(id, field, value) => editSimple('sub', idxOf(id), field, value)}
           onDelete={id => delRow('sub', idxOf(id))}
         />
-        <SectionPanel
+        <LabSectionPanel
           title="ביטוחים"
           icon="🛡️"
-          rows={simpleRows('ins')}
+          rows={labRows('ins')}
           totalLabel="סה&quot;כ ביטוחים"
           colName="סוג הביטוח"
           colAmt="פרמיה חודשית ₪"
-          rowExtra={chipFor('ins')}
-          resolveTxns={resolveTxnsFor('ins')}
+          txnsFor={resolveTxnsFor('ins')}
+          months={months}
+          onCategory={(row, cat) => setCategory('ins', idxOf(row.id), cat)}
+          onRecategorize={onRecategorize ?? (() => {})}
           onAdd={() => addSimple('ins')}
           onUpdate={(id, field, value) => editSimple('ins', idxOf(id), field, value)}
           onDelete={id => delRow('ins', idxOf(id))}
