@@ -432,6 +432,50 @@ describe('consolidateByCategory', () => {
     expect(out.variable).toHaveLength(2)
   })
 
+  // 🔴 In an expense section the category IS the unit. In income it is not:
+  // every row carries "הכנסות", so merging by category produced ONE row named
+  // "הכנסות" — a single ₪25,921 where a salary, a pension and a one-off
+  // reserve-duty grant used to be told apart.
+  it('never merges income — its rows are sources, not categories', () => {
+    const out = consolidateByCategory(withRows({
+      income: [
+        { name: 'משכורת', amount: 14000, category: 'הכנסות' },
+        { name: 'ביטוח לאומי מילואים', amount: 7890, category: 'הכנסות' },
+        { name: 'מענק מילואים', amount: 1936, category: 'הכנסות' },
+      ],
+    }))
+    expect(out.income).toHaveLength(3)
+    expect(out.income.map(r => r.name)).toContain('מענק מילואים')
+  })
+
+  // Same shape, different reason: ALL_CATEGORIES has only a generic "ביטוח",
+  // so merging collapsed car, home, health and life into one meaningless line.
+  it('never merges insurance — one row per policy', () => {
+    const out = consolidateByCategory(withRows({
+      ins: [
+        { name: 'ביטוח בריאות הראל', amount: 41,  category: 'ביטוח' },
+        { name: 'ביטוח דירה הראל',   amount: 270, category: 'ביטוח' },
+        { name: 'הפניקס ביטוח חיים', amount: 57,  category: 'ביטוח' },
+      ],
+    }))
+    expect(out.ins).toHaveLength(3)
+  })
+
+  it('still merges the expense sections it is meant to', () => {
+    const out = consolidateByCategory(withRows({
+      variable: [
+        { name: 'שונות — א', amount: 10, category: 'שונות' },
+        { name: 'שונות — ב', amount: 20, category: 'שונות' },
+      ],
+      sub: [
+        { name: 'מנויים — נטפליקס', amount: 40, category: 'מנויים' },
+        { name: 'מנויים — ספוטיפיי', amount: 20, category: 'מנויים' },
+      ],
+    }))
+    expect(out.variable).toHaveLength(1)
+    expect(out.sub).toHaveLength(1)
+  })
+
   it('merges within a section, never across sections', () => {
     const out = consolidateByCategory(withRows({
       fixed:    [{ name: 'א', amount: 100, category: 'ארנונה' }],

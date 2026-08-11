@@ -569,8 +569,12 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
 - **זיכויים כבר מקוזזים בנתונים שקיבלת** — אל תחסיר אותם שוב. שורה עם סכום שלילי או עם "זיכוי בלבד" פירושה שבתקופה הזו הוחזר יותר ממה שחויב. אל תיצור שורת הוצאה שלילית: החזר 0 לאותה שורה, וציין את זה ב‑assessment.
 - קטגוריות שאינן הוצאה (${list(SKIP_CATEGORIES)}) — אל תכניס כהוצאה; הכנסות לך ל‑income.
 
-## שורה אחת לכל קטגוריה — בכל הסעיפים
-🔴 **החזר שורה אחת בדיוק לכל קטגוריה, ובשדה name כתוב את שם הקטגוריה.** אל תפצל קטגוריה לשורה לכל בית עסק ואל תמציא תת‑סוגים.
+## שורה אחת לכל קטגוריה — בסעיפי ההוצאות
+🔴 **ב‑fixed, variable ו‑sub: החזר שורה אחת בדיוק לכל קטגוריה, ובשדה name כתוב את שם הקטגוריה.** אל תפצל קטגוריה לשורה לכל בית עסק ואל תמציא תת‑סוגים.
+
+⚠️ **שני סעיפים שהכלל הזה לא חל עליהם, כי בהם הקטגוריה היא לא היחידה:**
+- **income — שורה לכל מקור הכנסה.** לכל ההכנסות יש אותה קטגוריה ("הכנסות"), אז שורה אחת לקטגוריה פירושה שורה אחת לכל ההכנסות של המשפחה — וזה מוחק בדיוק את מה שהיועץ צריך לראות: משכורת מול קצבה מול תקבול חד‑פעמי. **שם השורה הוא המשלם** (מעסיק, ביטוח לאומי, לקוח), לא "הכנסות".
+- **ins — שורה לכל פוליסה.** רשימת הקטגוריות מכילה "ביטוח" גנרי בלבד, אז מיזוג לפי קטגוריה מאחד ביטוח רכב, דירה, בריאות וחיים למספר אחד חסר משמעות. **שם השורה הוא סוג הביטוח והמבטח** ("ביטוח בריאות הראל").
 
 - ❌ "שונות — עמית כלים 87", "שונות — פרחי רונית 67", "שונות — יאוארדי 57", "שונות — שאר 267"
 - ✅ "שונות 478"
@@ -932,6 +936,13 @@ export interface RecatResult {
 const SIMPLE_KEYS = ['income', 'fixed', 'variable', 'sub', 'ins'] as const
 type SimpleSectionKey = typeof SIMPLE_KEYS[number]
 
+/**
+ * Sections where merging rows by category is right — the ones whose rows span
+ * many categories, so the category genuinely is the unit. See the note on
+ * consolidateByCategory for why income and ins are excluded.
+ */
+const CONSOLIDATED_SECTIONS = ['fixed', 'variable', 'sub'] as const
+
 const keyOfSection = (s: MappingSection | null): SimpleSectionKey | null =>
   s && (SIMPLE_KEYS as readonly string[]).includes(s) ? (s as SimpleSectionKey) : null
 
@@ -1004,10 +1015,18 @@ export function applyTxnRecategorization(m: GeneratedMapping, move: RecatMove): 
  *
  * Rows with no category are left alone: there is nothing to merge them ON, and
  * guessing would fold unrelated things together.
+ *
+ * 🔴 income and ins are NOT merged, and the reason is the whole point of this
+ * function: in an expense section the category IS the unit, but in those two it
+ * is not. Every income row carries the same category ("הכנסות"), so merging by
+ * it produced a single row named "הכנסות" — one number where a salary, a
+ * pension and a one-off reserve-duty grant used to be distinguishable. Insurance
+ * is the same shape for a different reason: ALL_CATEGORIES has only a generic
+ * "ביטוח", so car, home, health and life all collapsed into one line.
  */
 export function consolidateByCategory(m: GeneratedMapping): GeneratedMapping {
   const out = { ...m }
-  for (const key of SIMPLE_KEYS) {
+  for (const key of CONSOLIDATED_SECTIONS) {
     const merged: GenSimpleRow[] = []
     const byCat = new Map<string, number>()   // category → index in `merged`
     for (const row of out[key]) {
