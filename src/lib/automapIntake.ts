@@ -157,7 +157,7 @@ const ANSWER_TARGET: Record<string, string> = {
   hasLoans:           'debts[] — "לא" פירושו שהסעיף ריק, גם אם יש חיוב שנראה כמו החזר',
   selfEmployedIncome: 'income[] של העצמאי, ואם יש פעילות עסקית — הקלט להפרדת businessIncome ממשק הבית',
   cryptoDetails:      'savings[] — שורה אחת, accumulated = השווי',
-  realEstateDetails:  'assessment בלבד — לנדל"ן אין סעיף במיפוי החודשי',
+  realEstateDetails:  'savings[] — שורה אחת, accumulated = שווי הנכס, monthlyContribution = 0. נדל"ן הוא נכס ונספר בשווי הנכסים',
   creditScoreSelf:    'creditScore',
   creditScorePartner: 'creditScore (ממוצע בני הזוג, כבר מחושב בשורה שקיבלת)',
   fullNames:          'הקשר בלבד',

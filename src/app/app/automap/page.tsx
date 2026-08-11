@@ -454,7 +454,15 @@ export default function AutoMapPage() {
       category: categorize(r.desc, learned), source: 'עו"ש', notes: '',
       date: r.date, installment: null, isStandingOrder: false, isRefund: false,
     }))
-    return [...txns, ...fromBank].map(t => {
+    // 🔴 Credit rows are re-categorised on every read, not left with whatever
+    // they got when the file was parsed. Persisting the upload (2026-08-10)
+    // froze each row's category into localStorage, so every categorisation fix
+    // shipped after that landed in the code and touched nothing on screen — a
+    // securities purchase stayed filed as insurance through three deploys that
+    // fixed it. Bank rows were always re-derived here; now credit rows are too,
+    // and a fix stops being invisible.
+    const fromCredit: Transaction[] = txns.map(t => ({ ...t, category: categorize(t.desc, learned) }))
+    return [...fromCredit, ...fromBank].map(t => {
       const override = txnOverrides[txnKey(t)]
       return override ? { ...t, category: override } : t
     })
@@ -592,6 +600,23 @@ export default function AutoMapPage() {
     () => (result ? findAnnualDuplicates(result.annual) : []),
     [result],
   )
+
+  // A duplicate inside a result generated before the fix stays there for as
+  // long as the result lives, because the result is persisted and the guard
+  // runs at generation. A button was not enough — it has to be found, and the
+  // same duplicate was reported three times. Cleaned once, on load.
+  const dedupedOnceRef = useRef(false)
+  useEffect(() => {
+    if (dedupedOnceRef.current) return
+    const r = useAutoMapStore.getState().result
+    if (!r) return
+    dedupedOnceRef.current = true
+    const groups = findAnnualDuplicates(r.annual)
+    if (!groups.length) return
+    const removed = groups.reduce((s, g) => s + g.length - 1, 0)
+    updateResult(prev => dedupeAnnual(prev))
+    toast.info(`נוקו ${removed} שורות שנתיות כפולות מהתוצאה השמורה`)
+  }, [result, updateResult])
 
   /**
    * Move one transaction to another category, from the פירוט.

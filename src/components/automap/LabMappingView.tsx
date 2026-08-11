@@ -243,18 +243,26 @@ export function LabMappingView({
     // instead of compressing — which is exactly what these two chips did.
     // `min-w-0` + capped widths let both truncate; the source chip, being
     // informational rather than actionable, gives up its space first.
+    // ⚠️ The confidence/source chip used to sit here as a second element. It
+    // cost ~110px on a row whose name input cannot shrink below its intrinsic
+    // width (SectionPanel's name is flex-1 with no min-w-0), so on income and
+    // מנויים — the two sections that ALSO get a drill-down button — the row
+    // exceeded the card and the controls overlapped each other. The chip was
+    // informational, not actionable, so it became a tooltip on the control
+    // that is actionable.
+    const meta = [
+      r.confidence ? `אמינות: ${{ high: 'אמין', medium: 'בינוני', low: 'נמוך' }[r.confidence]}` : '',
+      r.source ? `מקור: ${r.source}` : '',
+    ].filter(Boolean).join(' · ')
     return (
-      <span className="flex items-center gap-1 min-w-0">
+      <span className="flex items-center min-w-0" title={meta || undefined}>
         <CategoryPicker
           value={r.category ?? ''}
           onChange={cat => setCategory(key, i, cat)}
           variant="chip"
           placeholder="קטגוריה"
-          className="max-w-[112px]"
+          className="max-w-[96px]"
         />
-        <span className="hidden sm:flex min-w-0">
-          <RowMetaChip confidence={r.confidence} source={r.source} />
-        </span>
       </span>
     )
   }
