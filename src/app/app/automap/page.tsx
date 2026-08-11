@@ -26,6 +26,7 @@ import {
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
 import { reconcile, checkIncomeAgainstDeposits } from '@/lib/automapReconcile'
+import { sheetToText, looksLikeStatement } from '@/lib/automapSheet'
 import { buildRun } from '@/lib/automapFixture'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
@@ -46,7 +47,9 @@ const mkId = () => Math.random().toString(36).slice(2)
 
 // Non-Excel documents (PDF / images) sent to Claude as base64 blocks so it reads
 // them directly — no OCR of our own.
-type AttachedDoc = { id: string; name: string; kind: 'image' | 'pdf'; mediaType: string; data: string }
+// A 'sheet' carries TEXT, not base64: a spreadsheet that is not a statement is
+// read by the model as a table rather than parsed. See automapSheet.ts.
+type AttachedDoc = { id: string; name: string; kind: 'image' | 'pdf' | 'sheet'; mediaType: string; data: string }
 
 function readAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -192,11 +195,35 @@ export default function AutoMapPage() {
           // bank export go through the credit parser and count a salary as an
           // expense; when the client told us, we don't guess.
           const route   = routes?.get(file.name)
-          const isExcel = route === 'bank' || route === 'credit' || (!route && /\.(xlsx|xls|csv)$/i.test(file.name))
+          const isExcel = /\.(xlsx|xls|csv)$/i.test(file.name)
           const isPdf   = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
           const isImage = file.type.startsWith('image/')
           if (isExcel) {
             const rows = await parseExcelFile(file, { allSheets: true })
+
+            // 🔴 Only a statement goes to a parser. An Excel routed to
+            // "document" used to fall between the cases here — not parsed, not
+            // a PDF, not an image — and was rejected as "סוג קובץ לא נתמך", so
+            // a client's insurance report or pension statement simply vanished.
+            // Everything that is not one of the two statement formats becomes a
+            // text table for the model: no parser to write, nothing to maintain
+            // when an issuer moves a column, and it costs input tokens, which
+            // are the cheap direction.
+            const parseIt = route === 'bank' || route === 'credit'
+              || (!route && looksLikeStatement(rows))
+
+            if (!parseIt) {
+              const text = sheetToText(rows, file.name)
+              if (!text.trim()) {
+                setParseStatus(prev => ({ ...prev, [file.name]: 'failed' }))
+                toast.warning(`הגיליון ${file.name} ריק`)
+                continue
+              }
+              newDocs.push({ id: mkId(), name: file.name, kind: 'sheet', mediaType: 'text/plain', data: text })
+              setParseStatus(prev => ({ ...prev, [file.name]: 'done' }))
+              continue
+            }
+
             // A bank statement must NOT go through the credit parser: it has no
             // concept of חובה/זכות, so it read a salary deposit as an expense.
             // When the questionnaire told us which this is, honour that; only a
@@ -209,7 +236,18 @@ export default function AutoMapPage() {
               const from = file.name
               setBankRows(prev => [...prev, ...bank.map(b => ({ ...b, source: from }))])
             } else {
-              all.push(...extractTransactions(rows, file.name, learned))
+              const txns = extractTransactions(rows, file.name, learned)
+              // A sheet that looked like a statement and yielded nothing is not
+              // a statement. It must reach the model rather than disappear.
+              if (!txns.length) {
+                const text = sheetToText(rows, file.name)
+                if (text.trim()) {
+                  newDocs.push({ id: mkId(), name: file.name, kind: 'sheet', mediaType: 'text/plain', data: text })
+                  setParseStatus(prev => ({ ...prev, [file.name]: 'done' }))
+                  continue
+                }
+              }
+              all.push(...txns)
             }
             names.push(file.name)
           } else if (isImage) {
@@ -739,9 +777,14 @@ export default function AutoMapPage() {
   function buildContent(): unknown[] {
     const blocks: unknown[] = [{ type: 'text', text: buildMessage() }]
     for (const d of docs) {
-      blocks.push(d.kind === 'image'
-        ? { type: 'image',    source: { type: 'base64', media_type: d.mediaType, data: d.data } }
-        : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.data } })
+      if (d.kind === 'sheet') {
+        blocks.push({ type: 'text', text: `=== גיליון מצורף: ${d.name} ===
+${d.data}` })
+      } else if (d.kind === 'image') {
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: d.mediaType, data: d.data } })
+      } else {
+        blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.data } })
+      }
     }
     return blocks
   }
@@ -1325,6 +1368,11 @@ export default function AutoMapPage() {
               <div key={d.id} className="flex items-center gap-2 rounded-lg border border-line bg-surface ps-1 pe-2 py-1 text-xs text-txt">
                 {d.kind === 'pdf' ? (
                   <span className="size-8 shrink-0 rounded bg-line/60 flex items-center justify-center text-base">📕</span>
+                ) : d.kind === 'sheet' ? (
+                  <span
+                    className="size-8 shrink-0 rounded bg-line/60 flex items-center justify-center text-base"
+                    title={`${d.data.split('\n').length} שורות נשלחות למודל כטבלה`}
+                  >📗</span>
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
