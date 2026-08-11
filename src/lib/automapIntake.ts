@@ -136,6 +136,73 @@ export function creditScoreLine(answers: Record<string, string>): string | null 
   return `  - ציון דירוג אשראי: ${self ?? partner}`
 }
 
+// ── the questionnaire IS the mapping's schema ──
+//
+// Every question was written to fill a specific column. "מה היתרה בעו״ש" is
+// bankAccounts[].balance; "מסגרת האשראי בכל כרטיס" is creditCards[].limit; a
+// loan schedule carries the three fields a bank statement never shows. Sending
+// "question: answer" and leaving the model to work out where it goes is the
+// same guess we spent the day replacing with code — so the destination is
+// stated with the answer.
+//
+// An id with no entry here simply carries no target line. That is honest: it
+// means the answer is context rather than a column, and inventing a
+// destination would be worse than leaving it to the model's judgement.
+
+const ANSWER_TARGET: Record<string, string> = {
+  bankAccounts:       'bankAccounts[].name — שורה אחת לכל חשבון, עם שם הבנק מהתשובה הזאת ולא מכותרת הדוח',
+  oshBalance:         'bankAccounts[].balance — יתרה שלילית = מינוס',
+  creditCardsCount:   'creditCards[] — מספר השורות בסעיף',
+  creditLimits:       'creditCards[].limit',
+  hasLoans:           'debts[] — "לא" פירושו שהסעיף ריק, גם אם יש חיוב שנראה כמו החזר',
+  selfEmployedIncome: 'income[] של העצמאי, ואם יש פעילות עסקית — הקלט להפרדת businessIncome ממשק הבית',
+  cryptoDetails:      'savings[] — שורה אחת, accumulated = השווי',
+  realEstateDetails:  'assessment בלבד — לנדל"ן אין סעיף במיפוי החודשי',
+  creditScoreSelf:    'creditScore',
+  creditScorePartner: 'creditScore (ממוצע בני הזוג, כבר מחושב בשורה שקיבלת)',
+  fullNames:          'הקשר בלבד',
+  phone:              'הקשר בלבד',
+}
+
+/** What an attached FILE is for — the section it is the source of. */
+const FILE_TARGET: Record<string, string> = {
+  payslips:            'income[] — שכר נטו, לא ברוטו',
+  oshReports:          'כבר פוענח לבלוקים של ההוצאות וההכנסות; אל תקרא אותו שוב',
+  creditReports:       'כבר פוענח לבלוק ההוצאות; אל תקרא אותו שוב',
+  loanSchedules:       'debts[].remainingBalance / interestRate / remainingMonths — זה המקור היחיד לשלושתם',
+  securitiesPortfolio: 'savings[] — שורה אחת עם שווי התיק כולו, לא שורה לכל נייר',
+  bankId:              'bankAccounts[] ו‑debts[] — תעודת זהות בנקאית מרכזת חשבונות והלוואות',
+  harHaKesefReports:   'savings[] — קופות וקרנות, accumulated = הצבירה',
+  harHaBituachReport:  'ins[] — הפרמיות החודשיות',
+  otherAssets:         'savings[] — שורה אחת לכל מוצר, accumulated = השווי',
+  creditScore:         'creditScore — רק אם אין מספר בשורת "ציון דירוג אשראי"',
+}
+
+/**
+ * One line per attached document, naming the question it answered and the
+ * column it feeds. The files themselves arrive as images/PDFs with no labels,
+ * so without this the model is told "here are four screenshots, good luck".
+ */
+export function formatIntakeDocs(attachedByQ: Record<string, string[]>): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const q of LAB_QUESTIONS) {
+    const names = attachedByQ[q.id] ?? []
+    if (!names.length) continue
+    seen.add(q.id)
+    const target = FILE_TARGET[q.id]
+    out.push(`  - ${names.join(', ')} — צורף כתשובה ל"${q.label}"${target ? ` → ${target}` : ''}`)
+  }
+  // A question id this file has never heard of — added to the form later, most
+  // likely. Same rule as routeForQuestion's fallback: a file we cannot place is
+  // still worth showing the model, and must never disappear silently.
+  for (const [id, names] of Object.entries(attachedByQ)) {
+    if (seen.has(id) || !names.length) continue
+    out.push(`  - ${names.join(', ')} — צורף כתשובה לשאלה "${id}"`)
+  }
+  return out
+}
+
 // ── the answers block the model receives ──
 
 /** One label per answered question, in the questionnaire's own order. */
@@ -146,10 +213,11 @@ export function formatIntakeAnswers(answers: Record<string, string>): string[] {
     if (SCORE_IDS.has(q.id)) continue                // reported as one averaged line
     const v = (answers[q.id] ?? '').trim()
     if (!v) continue                                 // unanswered says nothing
-    out.push(`  - ${q.label}: ${v}`)
+    const target = ANSWER_TARGET[q.id]
+    out.push(`  - ${q.label}: ${v}${target ? `   → ${target}` : ''}`)
   }
   const score = creditScoreLine(answers)
-  if (score) out.push(score)
+  if (score) out.push(`${score}   → ${ANSWER_TARGET.creditScoreSelf}`)
   return out
 }
 

@@ -28,7 +28,7 @@ import { buildCompletenessReport } from '@/lib/automapCompleteness'
 import { reconcile } from '@/lib/automapReconcile'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
-  formatIntakeAnswers, countAnswered, type IntakeDoc, type IntakeRoute,
+  formatIntakeAnswers, formatIntakeDocs, countAnswered, type IntakeDoc, type IntakeRoute,
 } from '@/lib/automapIntake'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
@@ -694,8 +694,18 @@ export default function AutoMapPage() {
     // A statement header naming another bank is a clearing detail, not a fact —
     // that is how a Yahav portfolio came back labelled Hapoalim.
     if (intakeLines.length) {
-      lines.push('== השאלון — תשובות הלקוח. מקור מוסמך, גובר על כל הסקה מהנתונים ==')
+      lines.push('== השאלון — מקור מוסמך, וגם הסכימה של המיפוי ==')
+      lines.push('אחרי כל תשובה מופיע "→ היעד": העמודה בדיוק שהתשובה הזאת ממלאת. השאלון נכתב כדי להתפרק לעמודות, אז אל תחליט לבד לאן נתון הולך — לך לפי היעד. תשובה בלי יעד היא הקשר בלבד.')
       lines.push(...intakeLines)
+      lines.push('')
+    }
+    // Documents arrive as unlabelled images and PDFs. Without this the model is
+    // handed four screenshots and asked to work out what each one is — which is
+    // the guess the questionnaire exists to remove.
+    const docLines = formatIntakeDocs(attachedByQ)
+    if (docLines.length) {
+      lines.push('== המסמכים שצורפו, ולאיזו עמודה כל אחד שייך ==')
+      lines.push(...docLines)
       lines.push('')
     }
     if (contextText.trim()) {

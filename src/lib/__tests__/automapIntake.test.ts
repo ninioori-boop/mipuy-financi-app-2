@@ -6,7 +6,7 @@ vi.mock('@/lib/firebase', () => ({ auth: {}, db: {}, storage: {} }))
 
 import {
   routeForQuestion, formatIntakeAnswers, countAnswered, groupIntakeQuestions,
-  creditScoreLine, LAB_QUESTIONS, LAB_EXTRA_QUESTIONS,
+  creditScoreLine, LAB_QUESTIONS, LAB_EXTRA_QUESTIONS, formatIntakeDocs,
 } from '@/lib/automapIntake'
 import { INTAKE_QUESTIONS, type IntakeQuestion } from '@/lib/intakeForm'
 
@@ -153,6 +153,65 @@ describe('creditScoreLine', () => {
     expect(creditScoreLine({})).toBeNull()
     expect(creditScoreLine({ creditScoreSelf: '', creditScorePartner: '  ' })).toBeNull()
     expect(creditScoreLine({ creditScoreSelf: 'לא יודע' })).toBeNull()
+  })
+})
+
+// The questionnaire was written to decompose into the mapping's columns: "מה
+// היתרה בעו״ש" IS bankAccounts[].balance. Sending "question: answer" and
+// leaving the model to work out where it goes is the same guess the whole
+// questionnaire exists to remove.
+describe('every answer states the column it fills', () => {
+  it('names the destination for an answer that has one', () => {
+    const lines = formatIntakeAnswers({ oshBalance: '12,000', creditLimits: '30,000' })
+    expect(lines.find(l => l.includes('12,000'))).toContain('bankAccounts[].balance')
+    expect(lines.find(l => l.includes('30,000'))).toContain('creditCards[].limit')
+  })
+
+  it('says nothing about a destination when the answer is only context', () => {
+    const line = formatIntakeAnswers({ fullNames: 'אורי וטל' })[0]
+    expect(line).toContain('אורי וטל')
+    expect(line).toContain('הקשר בלבד')
+  })
+
+  it('routes the averaged credit score to creditScore', () => {
+    const lines = formatIntakeAnswers({ creditScoreSelf: '700', creditScorePartner: '740' })
+    expect(lines.find(l => l.includes('720'))).toContain('creditScore')
+  })
+
+  it('never emits a bare arrow with no target', () => {
+    for (const l of formatIntakeAnswers({ oshBalance: '1', fullNames: 'x', realEstateDetails: 'y' })) {
+      expect(l).not.toMatch(/→\s*$/)
+    }
+  })
+})
+
+// Documents arrive as unlabelled images and PDFs. Without this the model gets
+// four screenshots and has to work out what each one is.
+describe('formatIntakeDocs', () => {
+  it('names the question a file answered and the column it feeds', () => {
+    const [line] = formatIntakeDocs({ loanSchedules: ['סילוקין.pdf'] })
+    expect(line).toContain('סילוקין.pdf')
+    expect(line).toContain('לוח סילוקין')
+    expect(line).toContain('debts[].remainingBalance')
+  })
+
+  it('tells the model not to re-read a statement that was already parsed', () => {
+    expect(formatIntakeDocs({ oshReports: ['osh.xlsx'] })[0]).toContain('אל תקרא אותו שוב')
+  })
+
+  // Same rule as routeForQuestion's unknown-id fallback: a file we cannot place
+  // is still worth showing the model, and must never disappear silently.
+  it('lists a file from an unknown question rather than dropping it', () => {
+    const [line] = formatIntakeDocs({ someNewQuestion: ['x.pdf'] })
+    expect(line).toContain('x.pdf')
+  })
+
+  it('lists a file whose question has no declared target', () => {
+    expect(formatIntakeDocs({ harHaKesefReports: ['x.pdf'] })[0]).toContain('x.pdf')
+  })
+
+  it('is empty when nothing is attached', () => {
+    expect(formatIntakeDocs({})).toEqual([])
   })
 })
 
