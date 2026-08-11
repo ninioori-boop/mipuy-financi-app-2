@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { callable } from '@/lib/firebase'
 import { useAuthStore } from '@/stores/authStore'
+import { STAGE_LABELS } from '@/lib/advisorMock'
 
 // FIRM MANAGER — the middle tier. The practice OWNER sees every advisor in their
 // firm and the clients each brought in. Data comes from the getFirmOverview
@@ -13,7 +14,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 type LinkStatus = 'pending' | 'active' | 'declined' | 'revoked' | 'consumed'
 
-interface ClientRow { email: string; status: LinkStatus; dateMs: number }
+interface ClientRow { email: string; status: LinkStatus; dateMs: number; stage: string | null }
 interface AdvisorRow { uid: string; email: string; role: string; clients: ClientRow[]; activeCount: number }
 interface FirmOverview { practiceName: string; advisorCount: number; advisors: AdvisorRow[] }
 
@@ -22,6 +23,37 @@ const STATUS_LABEL: Record<LinkStatus, string> = {
 }
 
 const fmtDate = (ms: number) => (ms ? new Date(ms).toLocaleDateString('he-IL') : '—')
+
+// The engagement stage is only meaningful for a client who is actually sharing:
+// the advisor sets it after a meeting, and setClientStage refuses a link that is
+// not active. A pending invite has no stage because nothing has begun.
+//
+// An active client whose advisor never touched the control shows 'היכרות' —
+// which is what the advisor's own list shows for them (stageIndex maps absent to
+// index 0), so the two screens agree. It is rendered muted, so "never updated"
+// stays visually distinct from a stage somebody actually chose.
+// Single source of truth, shared with the advisor's own screen — a duplicated
+// literal here would drift the day the pipeline gains a stage.
+const stageOf = (c: ClientRow): string | null =>
+  c.status === 'active' ? (c.stage || STAGE_LABELS[0]) : null
+
+/**
+ * "היכרות 3 · מיפוי 2" — where this advisor's book actually stands.
+ * Emitted in PIPELINE order, never in client-arrival order: a manager scanning
+ * six advisors for whoever is stuck at the start cannot compare six lines that
+ * each sort themselves differently.
+ */
+function stageBreakdown(clients: ClientRow[]): string {
+  const counts = new Map<string, number>()
+  for (const c of clients) {
+    const s = stageOf(c)
+    if (s) counts.set(s, (counts.get(s) ?? 0) + 1)
+  }
+  return STAGE_LABELS
+    .filter(s => counts.has(s))
+    .map(s => `${s} ${counts.get(s)}`)
+    .join(' · ')
+}
 
 function Loading() {
   return <div className="max-w-4xl mx-auto p-8 text-center text-muted-txt">טוען…</div>
@@ -116,6 +148,11 @@ export default function FirmPage() {
               <span className="text-income font-semibold">{a.activeCount}</span> משתפים · {a.clients.length} סה״כ
             </div>
           </div>
+          {stageBreakdown(a.clients) && (
+            <div className="px-4 sm:px-5 py-2 border-b border-line/50 text-xs text-muted-txt">
+              שלבים: <span className="text-txt">{stageBreakdown(a.clients)}</span>
+            </div>
+          )}
           {a.clients.length === 0 ? (
             <div className="px-4 sm:px-5 py-4 text-sm text-muted-txt">עוד לא הזמין לקוחות.</div>
           ) : (
@@ -123,7 +160,17 @@ export default function FirmPage() {
               {a.clients.map((c, i) => (
                 <li key={c.email + i} className="px-4 sm:px-5 py-3 flex items-center justify-between gap-3">
                   <span className="text-sm text-txt truncate" dir="ltr">{c.email}</span>
-                  <span className="flex items-center gap-3 shrink-0">
+                  <span className="flex items-center gap-2 sm:gap-3 shrink-0">
+                    {stageOf(c) && (
+                      <span
+                        title={c.stage ? 'השלב שהיועץ סימן' : 'השלב טרם עודכן על ידי היועץ'}
+                        className={`text-[11px] rounded-full px-2 py-0.5 whitespace-nowrap ${
+                          c.stage ? 'bg-gold/15 text-gold' : 'bg-surface2 text-muted-txt border border-line'
+                        }`}
+                      >
+                        {stageOf(c)}
+                      </span>
+                    )}
                     <span className="text-xs text-muted-txt">{STATUS_LABEL[c.status]}</span>
                     <span className="text-xs text-muted-txt tabular-nums">{fmtDate(c.dateMs)}</span>
                   </span>

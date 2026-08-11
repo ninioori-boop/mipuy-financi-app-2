@@ -629,6 +629,19 @@ exports.setClientSharing = onCall(async (request) => {
     if (access === "write") linkDoc.editConsentAt = now;
     if (clearRequested) linkDoc.requestedAccess = FieldValue.delete();
 
+    // A NEW advisor means a NEW engagement, which starts at the beginning.
+    // This write rebinds invitedByUid and practiceId but merges, so without
+    // this the previous advisor's `stage` rode along: a client who left firm A
+    // at 'בקרה' and was re-invited by firm B showed up in firm B's manager
+    // screen already at 'בקרה' — three stages further than anyone had actually
+    // taken them, and it told firm B how deep firm A's engagement had got.
+    // Scoped to a DIFFERENT advisor on purpose: a revoke and re-grant with the
+    // same advisor is the same engagement and keeps its real stage.
+    if (claimingPending && linkSnap.exists
+        && linkSnap.data().invitedByUid !== source.invitedByUid) {
+      linkDoc.stage = FieldValue.delete();
+    }
+
     tx.set(linkRef, linkDoc, { merge: true });
 
     // Consume the pending invite (keeps the roster query clean).
@@ -1126,7 +1139,12 @@ exports.getFirmOverview = onCall(async (request) => {
       if (d.practiceId && d.practiceId !== practiceId) return;
       const ts = d.statusChangedAt || d.createdAt;
       const dateMs = ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0;
-      clients.push({ email: d.invitedEmail, status: d.status, dateMs });
+      // The engagement stage the ADVISOR sets after each meeting (setClientStage
+      // writes it on the uid-keyed link). Passed through as-is, null when it was
+      // never set — the manager's screen decides how to present "not yet set",
+      // and a default invented here would be indistinguishable from a real one.
+      // Still statuses and labels only, never a client's financial data.
+      clients.push({ email: d.invitedEmail, status: d.status, dateMs, stage: d.stage || null });
       if (d.status === "active") activeCount++;
     });
     clients.sort((x, y) => y.dateMs - x.dateMs);
