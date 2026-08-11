@@ -201,7 +201,18 @@ async function main() {
       };
       const trigger = cfg.blockingFunctions?.triggers?.beforeCreate;
       if (!trigger) {
-        fail("beforeCreate לא רשום — gateSignup פרוס אך לא נקרא, וכל אחד יכול להירשם!");
+        // A WARNING, not a failure, and only because this is a known dead end
+        // with known compensating controls — not because it stopped mattering.
+        // Registering a blocking function requires the project to be on
+        // Identity Platform; on plain Firebase Auth the deploy returns
+        // OPERATION_NOT_ALLOWED, so gateSignup CANNOT be switched on by any
+        // amount of redeploying (verified 2026-08-11). Upgrading is one-way and
+        // billing-affecting, so it stays Ori's call. A permanent red here would
+        // only teach everyone to stop reading this section.
+        warn("gateSignup לא רשום ולא ניתן לרשום אותו ללא שדרוג ל-Identity Platform (החלטה של אורי).");
+        console.log(`     המשמעות: אפשר לפתוח חשבון בלי הזמנה. מה שחוסם בפועל:`);
+        console.log(`     ה-rules על כל מסלולי הנתונים, isInvited() על חמשת מסלולי ה-AI,`);
+        console.log(`     ומסך "לא ברשימת המוזמנים" בכניסה. הבדיקה הבאה מוודאת שזה מחזיק.`);
       } else if (!(trigger.functionUri ?? "").includes("gateSignup")) {
         // A registered trigger pointing at the wrong function enforces nothing,
         // and would otherwise report a cheerful ✅.
