@@ -33,6 +33,7 @@ import {
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
+import { isPaymentRailKey } from '@/lib/learnedSharing'
 import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
@@ -438,10 +439,24 @@ export default function AutoMapPage() {
     return { incomeRows: income, bankExpenses: expenses, settlements: settled }
   }, [bankRows, txns])
 
-  // Corrections made from the פירוט are keyed on description+date+amount, which
-  // means two genuinely identical charges move together — the right call: the
-  // same merchant on the same day is the same kind of spending.
-  const txnKey = (t: { desc: string; date: string; amount: number }) =>
+  // Corrections from the פירוט are keyed on the MERCHANT, not the charge.
+  //
+  // "כל הקניה מגדל צריך להיות נייר ערך" — a category is a fact about who was
+  // paid, not about one payment. Keying on description+date+amount meant
+  // correcting a ₪1,000 purchase left the ₪500 one from two days later exactly
+  // as wrong, and the advisor had to repeat himself once per row.
+  const txnKey = (t: { desc: string }) => normalizeForLookup(t.desc) || t.desc.trim()
+
+  /**
+   * Identity of a single CHARGE, for duplicate detection only.
+   *
+   * ⚠️ Must never be confused with txnKey above. Two charges at the same shop
+   * share a merchant and are not duplicates; only the same description on the
+   * same day for the same amount is suspect. Keying duplicates by merchant
+   * would mark every regular shopper's charges as duplicated and let the
+   * cleanup button delete real spending.
+   */
+  const dupKey = (t: { desc: string; date: string; amount: number }) =>
     `${t.desc}|${t.date}|${t.amount}`
 
   // Every transaction we know about. Bank charges become ordinary categorized
@@ -480,7 +495,7 @@ export default function AutoMapPage() {
     const seen = new Map<string, { n: number; amount: number }>()
     for (const t of allTxns) {
       if (t.isRefund) continue
-      const k = txnKey(t)
+      const k = dupKey(t)
       const cur = seen.get(k)
       seen.set(k, { n: (cur?.n ?? 0) + 1, amount: t.amount })
     }
@@ -496,7 +511,7 @@ export default function AutoMapPage() {
     const keep = <T extends { desc: string; date: string; amount: number }>(rows: T[]) => {
       const seen = new Set<string>()
       return rows.filter(r => {
-        const k = txnKey(r)
+        const k = dupKey(r)
         if (seen.has(k)) return false
         seen.add(k)
         return true
@@ -629,20 +644,43 @@ export default function AutoMapPage() {
   const recategorizeTxn = useCallback((t: Transaction, to: string) => {
     const from = t.category
     if (!to || from === to) return
-    setTxnOverrides(prev => ({ ...prev, [txnKey(t)]: to }))
+    const key = txnKey(t)
+    setTxnOverrides(prev => ({ ...prev, [key]: to }))
+
+    // Every charge from this merchant moves, so the amount that moves is their
+    // whole netted total. Moving one charge's share while the screen moved all
+    // of them would leave the rows disagreeing with their own detail.
+    const mine = allTxns.filter(x => txnKey(x) === key)
+    const total = mine.reduce((s, x) => s + (x.isRefund ? -x.amount : x.amount), 0)
+
+    // 🔴 Remembered for THIS CLIENT ONLY, never pushed to the shared pool.
+    // Today's case is the argument: "מגדל חברה לביטוח = קרן השתלמות" is true
+    // for this household and false in general, and shared it would file another
+    // client's life-insurance premium as savings. The exact normalized
+    // description is learned, not a guessed fragment — a short key is what let
+    // a learned "מגדל" hijack the curated "מגדל/טלפון" all afternoon.
+    // Payment rails are never learned, local included: the same rail carries a
+    // different payee every time, so there is nothing true to remember.
+    let remembered = false
+    if (!isPaymentRailKey(key)) {
+      useCreditStore.setState(s => ({ learnedDB: { ...s.learnedDB, [key]: to } }))
+      remembered = true
+    }
 
     if (!result || !from) { toast.success(`"${t.desc}" סווג כ${to}`); return }
     const months = Math.max(1, detectedMonths || reportMonths)
     const { mapping, nothingDebited } = applyTxnRecategorization(result, {
-      from, to, monthlyDelta: t.amount / months, merchant: t.desc,
+      from, to, monthlyDelta: total / months, merchant: t.desc,
     })
     setResult(mapping)
+
+    const what = mine.length > 1 ? `${mine.length} חיובים של "${t.desc}"` : `"${t.desc}"`
     toast.success(
       nothingDebited
-        ? `"${t.desc}" נוסף ל${to}. לא נמצאה שורה של ${from} לגרוע ממנה — בדוק את הסכומים`
-        : `"${t.desc}" הועבר מ${from} ל${to}`,
+        ? `${what} נוספו ל${to}. לא נמצאה שורה של ${from} לגרוע ממנה, בדוק את הסכומים`
+        : `${what} הועברו מ${from} ל${to}${remembered ? ' · נשמר גם להרצות הבאות' : ''}`,
     )
-  }, [result, detectedMonths, reportMonths, setResult])
+  }, [result, allTxns, detectedMonths, reportMonths, setResult])
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
     setAnnualItem({
