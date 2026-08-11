@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { reconcile, mappingSurplus, type ReconcileInput } from '@/lib/automapReconcile'
+import {
+  reconcile, mappingSurplus, checkIncomeAgainstDeposits, type ReconcileInput,
+} from '@/lib/automapReconcile'
 import type { GeneratedMapping } from '@/lib/autoMap'
 
 const empty: GeneratedMapping = {
@@ -124,5 +126,54 @@ describe('reconcile — the mapping against the account', () => {
     // ₪350/month gap: under the ₪400 floor, but 8.75% of a ₪4,000 income.
     const r = reconcile(small, { bankIn: 12000, bankOut: 900, cardCharges: 0, months: 3 })
     expect(r.verdict).toBe('expenses-missing')
+  })
+})
+
+// A payslip and the salary deposit it produced are the same money, and both
+// reach the model. The reconciliation WOULD notice the inflation but would
+// blame the expenses, so this is the check that can tell them apart.
+describe('checkIncomeAgainstDeposits', () => {
+  const withIncome = (amount: number): GeneratedMapping => ({ ...empty, income: [{ name: 'משכורת', amount }] })
+
+  it('flags income counted twice, and names the payslip as the likely cause', () => {
+    const c = checkIncomeAgainstDeposits(withIncome(28000), { deposits: 42000, months: 3, hasPayslips: true })!
+    expect(Math.round(c.depositsPerMonth)).toBe(14000)
+    expect(Math.round(c.excessPerMonth)).toBe(14000)
+    expect(c.detail).toContain('תלושי שכר')
+    expect(c.detail).toContain('אותו כסף')
+  })
+
+  it('says something different when no payslip was attached', () => {
+    const c = checkIncomeAgainstDeposits(withIncome(28000), { deposits: 42000, months: 3, hasPayslips: false })!
+    expect(c.detail).toContain('חשבון אחר')
+    expect(c.detail).not.toContain('תלושי שכר')
+  })
+
+  it('is silent when the mapping matches the deposits', () => {
+    expect(checkIncomeAgainstDeposits(withIncome(14000), { deposits: 42000, months: 3, hasPayslips: true })).toBeNull()
+  })
+
+  // Income BELOW deposits is normal: a transfer between the household's own
+  // accounts, a refund, a loan paid in. Only the other direction is suspect.
+  it('never flags income lower than the deposits', () => {
+    expect(checkIncomeAgainstDeposits(withIncome(9000), { deposits: 42000, months: 3, hasPayslips: true })).toBeNull()
+  })
+
+  it('ignores a difference that is only rounding', () => {
+    expect(checkIncomeAgainstDeposits(withIncome(14400), { deposits: 42000, months: 3, hasPayslips: true })).toBeNull()
+  })
+
+  it('needs BOTH a material share and a material amount', () => {
+    // 40% over, but only ₪400/month: too small to chase.
+    expect(checkIncomeAgainstDeposits(withIncome(1400), { deposits: 3000, months: 3, hasPayslips: true })).toBeNull()
+  })
+
+  it('counts business receipts as income — they arrive in the same account', () => {
+    const biz = { ...empty, income: [{ name: 'משכורת', amount: 14000 }], businessIncome: [{ name: 'תקבולים', amount: 20000 }] }
+    expect(checkIncomeAgainstDeposits(biz, { deposits: 42000, months: 3, hasPayslips: false })).not.toBeNull()
+  })
+
+  it('says nothing with no bank data to compare against', () => {
+    expect(checkIncomeAgainstDeposits(withIncome(28000), { deposits: 0, months: 3, hasPayslips: true })).toBeNull()
   })
 })

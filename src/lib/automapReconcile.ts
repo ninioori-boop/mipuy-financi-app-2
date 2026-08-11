@@ -137,6 +137,55 @@ export function reconcile(r: GeneratedMapping, input: ReconcileInput): Reconcile
   }
 }
 
+// ── income counted twice ──
+//
+// A payslip and the salary deposit it produced are the same money, and both
+// reach the model: the payslip as an image, the deposit as a line in the income
+// block. Nothing structural stops it from returning both as separate rows.
+//
+// The reconciliation above WOULD notice — double-counted income inflates the
+// surplus — but it would name it wrong, reporting "expenses are missing" when
+// the expenses are fine and the income is doubled. So the arithmetic that can
+// tell them apart is done here: deposits are the ceiling on money that arrived.
+//
+// Only the one direction is flagged. Income legitimately BELOW deposits happens
+// constantly (a transfer between the household's own accounts, a refund, a loan
+// paid in), while income materially ABOVE what ever reached the account has
+// only a few explanations, and counting it twice is the common one.
+
+export interface IncomeCheck {
+  mappingPerMonth: number
+  depositsPerMonth: number
+  excessPerMonth: number
+  title: string
+  detail: string
+}
+
+/** Above this share of the deposits, and this many shekels, it is not rounding. */
+const INCOME_TOLERANCE = 1.12
+const INCOME_MIN_EXCESS = 800
+
+export function checkIncomeAgainstDeposits(
+  r: GeneratedMapping,
+  input: { deposits: number; months: number; hasPayslips: boolean },
+): IncomeCheck | null {
+  const months = Math.max(1, input.months)
+  const depositsPerMonth = input.deposits / months
+  if (depositsPerMonth <= 0) return null              // no bank data, nothing to compare
+
+  const mappingPerMonth = mappingIncome(r)
+  const excess = mappingPerMonth - depositsPerMonth
+  if (excess < INCOME_MIN_EXCESS || mappingPerMonth < depositsPerMonth * INCOME_TOLERANCE) return null
+
+  return {
+    mappingPerMonth, depositsPerMonth, excessPerMonth: excess,
+    title: `ההכנסות גבוהות ב‑${money(excess)} לחודש ממה שנכנס לחשבון`,
+    detail: input.hasPayslips
+      ? `המיפוי מציג ${money(mappingPerMonth)} הכנסה לחודש, ולעו"ש נכנסו ${money(depositsPerMonth)}. צורפו תלושי שכר, וההסבר הנפוץ הוא שהשכר נספר פעמיים: פעם מהתלוש ופעם מההפקדה. הם אותו כסף.`
+      : `המיפוי מציג ${money(mappingPerMonth)} הכנסה לחודש, ולעו"ש נכנסו ${money(depositsPerMonth)}. או שיש הכנסה שנכנסת לחשבון אחר שלא הועלה, או שהכנסה נספרה פעמיים.`,
+  }
+}
+
 /** ₪ with a sign, because the direction is the whole message. */
 function money(n: number): string {
   const v = Math.round(n)

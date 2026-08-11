@@ -25,7 +25,7 @@ import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
-import { reconcile } from '@/lib/automapReconcile'
+import { reconcile, checkIncomeAgainstDeposits } from '@/lib/automapReconcile'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
   formatIntakeAnswers, formatIntakeDocs, countAnswered, type IntakeDoc, type IntakeRoute,
@@ -614,6 +614,18 @@ export default function AutoMapPage() {
   const annualDupes = useMemo(
     () => (result ? findAnnualDuplicates(result.annual) : []),
     [result],
+  )
+
+  // A payslip and the deposit it produced are the same money. The reconciliation
+  // above would notice the inflation but blame the expenses, so the one check
+  // that can tell them apart runs on its own.
+  const incomeCheck = useMemo(
+    () => (result ? checkIncomeAgainstDeposits(result, {
+      deposits: flows.bankIn,
+      months: flows.months,
+      hasPayslips: (intakeFiles.payslips ?? 0) > 0,
+    }) : null),
+    [result, flows, intakeFiles],
   )
 
   // A duplicate inside a result generated before the fix stays there for as
@@ -1781,6 +1793,30 @@ export default function AutoMapPage() {
               >
                 השאר שורה אחת מכל חיוב
               </button>
+            </div>
+          )}
+
+          {/* Shown above the reconciliation on purpose: when income is doubled
+              the reconciliation reports a gap and blames the expenses, so the
+              real cause has to be read first. */}
+          {incomeCheck && (
+            <div className="rounded-xl border-2 border-expense/40 bg-expense/5 p-3 space-y-2">
+              <div className="text-sm font-semibold text-expense">⚠️ {incomeCheck.title}</div>
+              <div className="text-xs text-txt leading-relaxed">{incomeCheck.detail}</div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">לפי המיפוי</div>
+                  <div className="text-sm font-bold text-income tabular-nums">{fmt(incomeCheck.mappingPerMonth)}</div>
+                </div>
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">נכנס לעו&quot;ש</div>
+                  <div className="text-sm font-bold text-txt tabular-nums">{fmt(incomeCheck.depositsPerMonth)}</div>
+                </div>
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">הפרש</div>
+                  <div className="text-sm font-bold text-expense tabular-nums">{fmt(incomeCheck.excessPerMonth)}</div>
+                </div>
+              </div>
             </div>
           )}
 
