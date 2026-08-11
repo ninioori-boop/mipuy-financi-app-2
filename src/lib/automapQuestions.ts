@@ -65,8 +65,13 @@ export type LabQType = 'phone' | 'text' | 'paragraph' | 'choice' | 'file' | 'row
 export interface LabColumn {
   key:          string
   label:        string
-  /** money/percent render as numeric inputs; the parsing is the same either way. */
-  kind?:        'text' | 'money' | 'percent'
+  /**
+   * money/percent render as numeric inputs; the parsing is the same either way.
+   * `detail` is free text that gets a full-width box of its own under the row —
+   * "מתי נרכש, באיזה מחיר" does not fit in a cell beside a number, and a field
+   * too small to write in is a field nobody writes in.
+   */
+  kind?:        'text' | 'money' | 'percent' | 'detail'
   placeholder?: string
 }
 
@@ -131,10 +136,13 @@ export const LAB_QUESTIONS: LabQuestion[] = [
     hint:     'שורה לכל מוצר. אין צורך להעלות דוח.',
     addLabel: 'הוסף מוצר',
     columns: [
-      { key: 'name',       label: 'שם המוצר והחברה', placeholder: 'קרן השתלמות — מנורה' },
-      { key: 'amount',     label: 'הצבירה',          kind: 'money' },
-      { key: 'feeBalance', label: 'ד.ניהול מצבירה',  kind: 'percent' },
-      { key: 'feeDeposit', label: 'ד.ניהול מהפקדה',  kind: 'percent' },
+      { key: 'name',       label: 'שם המוצר והחברה',        placeholder: 'קרן השתלמות — מנורה' },
+      { key: 'amount',     label: 'כמה צבור בו?',           kind: 'money' },
+      // Two fields and not one: הר הכסף states both, the mapping has a column
+      // for each, and a single blended number lands in the wrong one about half
+      // the time. On a pension the fee that matters is usually the deposit one.
+      { key: 'feeDeposit', label: 'דמי ניהול מההפקדה (%)',  kind: 'percent' },
+      { key: 'feeBalance', label: 'דמי ניהול מהצבירה (%)',  kind: 'percent' },
     ] },
 
   // Replaces three uploads at once: the bank securities screenshot, the trading
@@ -146,9 +154,10 @@ export const LAB_QUESTIONS: LabQuestion[] = [
     hint:     'תיק השקעות בבנק, תיק מסחר עצמאי, קרן כספית, פיקדון, מטבעות דיגיטליים, נדל"ן. סכום אחד לכל נכס, לא פירוט אחזקות.',
     addLabel: 'הוסף נכס',
     columns: [
-      { key: 'name',   label: 'שם הנכס', placeholder: 'תיק השקעות בבנק' },
-      { key: 'amount', label: 'השווי',   kind: 'money' },
-      { key: 'note',   label: 'הערה',    placeholder: 'מתי נרכש, באיזה מחיר' },
+      { key: 'name',   label: 'שם הנכס',  placeholder: 'תיק השקעות בבנק' },
+      { key: 'amount', label: 'מה השווי?', kind: 'money' },
+      { key: 'detail', label: 'פירוט',    kind: 'detail',
+        placeholder: 'מתי נרכש, באיזה מחיר, אם יש עליו משכנתה, איפה הוא מנוהל' },
     ] },
 ]
 
@@ -377,8 +386,12 @@ export function formatIntakeRows(rowsById: Record<string, IntakeRow[]>): string[
     out.push('  תיקי השקעות ונכסים שנמסרו — כל אחד הוא שורה ב‑savings[], accumulated = השווי, monthlyContribution = 0:')
     for (const r of assets) {
       const amount = parseTypedNumber(r.amount)
-      const note   = (r.note ?? '').trim()
-      out.push(`  - ${(r.name ?? '').trim() || 'נכס'}: ${amount !== null ? shekel(amount) : 'ללא שווי'}${note ? ` (${note})` : ''}`)
+      // `note` is the pre-2026-08-11 key. A saved run or a half-filled form from
+      // before the rename still carries it, and losing what someone wrote about
+      // their apartment because a key changed is the exact failure this table
+      // was built to end.
+      const detail = ((r.detail ?? r.note) ?? '').trim()
+      out.push(`  - ${(r.name ?? '').trim() || 'נכס'}: ${amount !== null ? shekel(amount) : 'ללא שווי'}${detail ? ` (${detail})` : ''}`)
     }
     out.push('  🔴 שורה אחת לכל תיק, עם השווי הכולל. אל תפרט אחזקות ואל תיצור שורה לכל נייר ערך.')
   }

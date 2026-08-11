@@ -83,6 +83,24 @@ describe('what the lab still asks for as a file', () => {
       expect(q.columns?.length, `${q.id} has no columns`).toBeGreaterThan(0)
     }
   })
+
+  // Ori, 2026-08-11: "שיופיע מסגרת עם שאלה מה דמי הניהול מההפקדה ומה מהצבירה".
+  // הר הכסף states both, the mapping has a column for each, and one blended
+  // number lands in the wrong one about half the time.
+  it('asks for the two management fees separately, each spelled out', () => {
+    const fund = LAB_QUESTIONS.find(q => q.id === 'harHaKesefProducts')!
+    const fees = fund.columns!.filter(c => c.kind === 'percent')
+    expect(fees.map(c => c.key)).toEqual(['feeDeposit', 'feeBalance'])
+    expect(fees[0].label).toContain('מההפקדה')
+    expect(fees[1].label).toContain('מהצבירה')
+  })
+
+  it('gives the assets table a detail box with room to write in', () => {
+    const assets = LAB_QUESTIONS.find(q => q.id === 'assets')!
+    const detail = assets.columns!.find(c => c.kind === 'detail')
+    expect(detail?.key).toBe('detail')
+    expect(detail?.label).toBe('פירוט')
+  })
 })
 
 describe('formatIntakeAnswers', () => {
@@ -214,13 +232,20 @@ describe('formatIntakeRows', () => {
     expect(out).toContain('0.5%')
   })
 
-  it('carries an asset and its note, and asks for one row per portfolio', () => {
+  it('carries an asset and its detail, and asks for one row per portfolio', () => {
     const out = formatIntakeRows({
-      assets: [{ name: 'דירה בפתח תקווה', amount: '1800000', note: 'נרכשה 2019' }],
+      assets: [{ name: 'דירה בפתח תקווה', amount: '1800000', detail: 'נרכשה 2019 ב‑1,250,000' }],
     }).join('\n')
     expect(out).toContain('1,800,000')
     expect(out).toContain('נרכשה 2019')
     expect(out).toContain('אל תפרט אחזקות')
+  })
+
+  // `note` was the key before the field became a proper פירוט box. A form or a
+  // saved run filled before the rename must not lose what someone wrote.
+  it('still reads what was written under the old key', () => {
+    const out = formatIntakeRows({ assets: [{ name: 'דירה', amount: '1800000', note: 'נרכשה 2019' }] }).join('\n')
+    expect(out).toContain('נרכשה 2019')
   })
 
   it('keeps a fund whose balance was left blank rather than hiding the product', () => {

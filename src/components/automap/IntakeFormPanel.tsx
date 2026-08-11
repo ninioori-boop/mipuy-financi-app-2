@@ -19,7 +19,7 @@
 //
 // Lab-only. The live client form is untouched.
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   groupIntakeQuestions, type LabQuestion, type LabColumn, type IntakeRow,
 } from '@/lib/automapIntake'
@@ -52,18 +52,27 @@ const hasRowData = (rows: IntakeRow[] = []) =>
   rows.some(r => Object.values(r).some(v => String(v ?? '').trim()))
 
 /**
- * A repeatable little table.
+ * A repeatable entry — one framed box per item, every field carrying its own
+ * question above it.
+ *
+ * It was a bare grid with a single header strip, and Ori's answer to that was
+ * "שיופיע מסגרת עם שאלה מה דמי הניהול מההפקדה ומה מהצבירה". He is right: a
+ * header abbreviated to fit a 7rem column ("ד.ניהול מצבירה") is not a question,
+ * and two adjacent percent boxes with cryptic headers are an invitation to type
+ * the number into the wrong one. Whether a fee comes off the balance or off the
+ * deposit is the whole point of asking.
  *
  * ⚠️ Every track is minmax(0,…). A grid column defaults to min-content, so a
- * long merchant name or a wide number pushes the track past its share and the
- * next one lands on top of it — which is precisely the "המסגרות אחת על השנייה"
- * Ori reported on the income and subscription panels.
+ * long product name pushes its track past its share and the next one lands on
+ * top of it — precisely the "המסגרות אחת על השנייה" from the income panel.
  */
 function RowsEditor({
   q, rows, onRows, disabled,
 }: { q: LabQuestion; rows: IntakeRow[]; onRows: (rows: IntakeRow[]) => void; disabled?: boolean }) {
   const cols: LabColumn[] = q.columns ?? []
-  // Always one line to type into, without making the advisor press + first.
+  const inline  = cols.filter(c => c.kind !== 'detail')
+  const details = cols.filter(c => c.kind === 'detail')
+  // Always one entry to type into, without making the advisor press + first.
   const display = rows.length ? rows : [{}]
 
   const setCell = (i: number, key: string, v: string) => {
@@ -73,50 +82,65 @@ function RowsEditor({
   }
   const removeRow = (i: number) => onRows(display.filter((_, j) => j !== i))
 
-  const track = (c: LabColumn) =>
-    c.kind === 'money' || c.kind === 'percent' ? 'minmax(0,7rem)' : 'minmax(0,1.5fr)'
-  const gridStyle = { gridTemplateColumns: `${cols.map(track).join(' ')} 1.75rem` }
+  const numeric = (c: LabColumn) => c.kind === 'money' || c.kind === 'percent'
+  const track = (c: LabColumn) => (numeric(c) ? 'minmax(0,9rem)' : 'minmax(0,1.4fr)')
+  // Stacked on a phone, side by side from sm up. The tracks vary per question,
+  // so they arrive as a custom property rather than a Tailwind class.
+  const colStyle = { '--cols': inline.map(track).join(' ') } as CSSProperties
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[26rem] space-y-1">
-        <div className="grid gap-1.5 px-0.5 text-[11px] text-muted-txt" style={gridStyle}>
-          {cols.map(c => <div key={c.key} className="truncate">{c.label}</div>)}
-          <div />
-        </div>
-
-        {display.map((row, i) => (
-          <div key={i} className="grid gap-1.5 items-center" style={gridStyle}>
-            {cols.map(c => (
-              <input
-                key={c.key}
-                type="text"
-                inputMode={c.kind === 'money' ? 'numeric' : c.kind === 'percent' ? 'decimal' : undefined}
-                dir={c.kind === 'money' || c.kind === 'percent' ? 'ltr' : undefined}
-                value={row[c.key] ?? ''}
-                placeholder={c.placeholder}
-                disabled={disabled}
-                onChange={e => setCell(i, c.key, e.target.value)}
-                className={`${cellCls} ${c.kind === 'money' || c.kind === 'percent' ? 'text-end tabular-nums' : ''}`}
-              />
-            ))}
+    <div className="space-y-2">
+      {display.map((row, i) => (
+        <div key={i} className="rounded-lg border border-line bg-surface2/40 p-2 space-y-2">
+          <div className="flex items-start gap-2">
+            <div className="grid gap-2 grow min-w-0 sm:[grid-template-columns:var(--cols)]" style={colStyle}>
+              {inline.map(c => (
+                <label key={c.key} className="min-w-0 block">
+                  <span className="block text-[11px] text-muted-txt mb-0.5">{c.label}</span>
+                  <input
+                    type="text"
+                    inputMode={c.kind === 'money' ? 'numeric' : c.kind === 'percent' ? 'decimal' : undefined}
+                    dir={numeric(c) ? 'ltr' : undefined}
+                    value={row[c.key] ?? ''}
+                    placeholder={c.placeholder}
+                    disabled={disabled}
+                    onChange={e => setCell(i, c.key, e.target.value)}
+                    className={`${cellCls} ${numeric(c) ? 'text-end tabular-nums' : ''}`}
+                  />
+                </label>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => removeRow(i)}
               disabled={disabled || display.length === 1}
               aria-label="הסר שורה"
-              className="size-6 shrink-0 flex items-center justify-center rounded text-muted-txt hover:text-expense hover:bg-line/40 transition-colors disabled:opacity-25 disabled:hover:text-muted-txt disabled:hover:bg-transparent"
+              className="mt-5 size-6 shrink-0 flex items-center justify-center rounded text-muted-txt hover:text-expense hover:bg-line/40 transition-colors disabled:opacity-25 disabled:hover:text-muted-txt disabled:hover:bg-transparent"
             >×</button>
           </div>
-        ))}
 
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onRows([...display, {}])}
-          className="rounded-lg border border-dashed border-line px-2.5 py-1 text-xs text-muted-txt hover:border-gold/50 hover:text-gold transition-colors disabled:opacity-50"
-        >+ {q.addLabel ?? 'הוסף שורה'}</button>
-      </div>
+          {details.map(c => (
+            <label key={c.key} className="block">
+              <span className="block text-[11px] text-muted-txt mb-0.5">{c.label}</span>
+              <textarea
+                rows={2}
+                value={row[c.key] ?? ''}
+                placeholder={c.placeholder}
+                disabled={disabled}
+                onChange={e => setCell(i, c.key, e.target.value)}
+                className={`${cellCls} leading-relaxed`}
+              />
+            </label>
+          ))}
+        </div>
+      ))}
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onRows([...display, {}])}
+        className="rounded-lg border border-dashed border-line px-2.5 py-1 text-xs text-muted-txt hover:border-gold/50 hover:text-gold transition-colors disabled:opacity-50"
+      >+ {q.addLabel ?? 'הוסף שורה'}</button>
     </div>
   )
 }
