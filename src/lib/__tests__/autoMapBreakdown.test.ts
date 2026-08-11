@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
   sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
+  adjustCategoryAmount,
   consolidateByCategory, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual, dropEmptyRows,
   type GeneratedMapping,
 } from '@/lib/autoMap'
@@ -801,5 +802,79 @@ describe('detectMonthSpan', () => {
 
   it('returns 0 rather than guessing when the dates are not ISO', () => {
     expect(detectMonthSpan([{ date: '03/06/2026' }, { date: '' }])).toBe(0)
+  })
+})
+
+// Deleting a charge in the פירוט, or fixing its amount, has to move the row
+// above it too. Otherwise the advisor removes a ₪1,289 charge that was never
+// the household's, the detail loses it, and the total still counts it — a row
+// that no longer matches its own detail, which nobody catches because both
+// halves look right on their own.
+describe('adjustCategoryAmount', () => {
+  const withRows = (over: Partial<GeneratedMapping>): GeneratedMapping => ({
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts: [], installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '', ...over,
+  })
+
+  const food = () => withRows({
+    variable: [
+      { name: 'מזון לבית',        amount: 900, category: 'מזון לבית' },
+      { name: 'אוכל בחוץ',        amount: 500, category: 'אוכל בחוץ ובילויים' },
+    ],
+  })
+
+  it('takes the monthly share out of the row when a charge is deleted', () => {
+    const m = adjustCategoryAmount(food(), { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: -100 })
+    expect(m.variable.find(r => r.category === 'מזון לבית')!.amount).toBe(800)
+    expect(m.variable.find(r => r.category === 'אוכל בחוץ ובילויים')!.amount).toBe(500)
+  })
+
+  it('adds it back when an amount is corrected upwards', () => {
+    const m = adjustCategoryAmount(food(), { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: 250 })
+    expect(m.variable.find(r => r.category === 'מזון לבית')!.amount).toBe(1150)
+  })
+
+  it('prefers the row named after the merchant over the biggest one', () => {
+    const m = withRows({
+      variable: [
+        { name: 'כללי',    amount: 1000, category: 'מזון לבית' },
+        { name: 'שופרסל',  amount: 300,  category: 'מזון לבית' },
+      ],
+    })
+    const out = adjustCategoryAmount(m, { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: -50 })
+    expect(out.variable.find(r => r.name === 'שופרסל')!.amount).toBe(250)
+    expect(out.variable.find(r => r.name === 'כללי')!.amount).toBe(1000)
+  })
+
+  // A row that cannot absorb the debit would go negative and quietly inflate
+  // the household's surplus — the one direction of error nobody questions.
+  it('never takes a row below zero', () => {
+    const m = adjustCategoryAmount(food(), { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: -5000 })
+    expect(m.variable.some(r => r.category === 'מזון לבית')).toBe(false)
+    expect(m.variable).toHaveLength(1)
+  })
+
+  it('creates a row when the category has none and money is being added', () => {
+    const m = adjustCategoryAmount(withRows({}), { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: 120 })
+    expect(m.variable).toEqual([expect.objectContaining({ name: 'שופרסל', amount: 120, category: 'מזון לבית' })])
+  })
+
+  it('does nothing when there is nothing to take it from', () => {
+    const m = withRows({})
+    expect(adjustCategoryAmount(m, { category: 'מזון לבית', merchant: 'שופרסל', monthlyDelta: -120 }).variable).toEqual([])
+  })
+
+  it('leaves the mapping alone on a zero change or an unknown category', () => {
+    const m = food()
+    expect(adjustCategoryAmount(m, { category: 'מזון לבית', merchant: 'x', monthlyDelta: 0 }).variable).toEqual(m.variable)
+    expect(adjustCategoryAmount(m, { category: 'קטגוריה שלא קיימת', merchant: 'x', monthlyDelta: -50 }).variable).toEqual(m.variable)
+  })
+
+  it('does not touch a row of another category', () => {
+    const m = adjustCategoryAmount(food(), { category: 'אוכל בחוץ ובילויים', merchant: 'WOLT', monthlyDelta: -200 })
+    expect(m.variable.find(r => r.category === 'מזון לבית')!.amount).toBe(900)
+    expect(m.variable.find(r => r.category === 'אוכל בחוץ ובילויים')!.amount).toBe(300)
   })
 })

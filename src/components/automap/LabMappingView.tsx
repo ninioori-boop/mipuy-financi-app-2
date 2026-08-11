@@ -15,7 +15,7 @@ import type {
 } from '@/stores/mappingStore'
 import { sectionOfCategory, SECTION_LABEL_HE, type GeneratedMapping, type MappingSection } from '@/lib/autoMap'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
-import { TxnDetailTable } from '@/components/automap/TxnDetailTable'
+import { TxnDetailTable, type TxnEditHandlers } from '@/components/automap/TxnDetailTable'
 import type { Transaction } from '@/types/transaction'
 
 // The auto-mapping lab renders the AI result through the EXACT same panels as
@@ -74,13 +74,15 @@ interface Props {
   months?: number
   /** Move one transaction to another category, adjusting the rows it feeds. */
   onRecategorize?: (txn: Transaction, category: string) => void
+  /** Edit controls for the פירוט: description, amount, delete. */
+  txnEdit?: TxnEditHandlers
   onChange: (patch: Partial<GeneratedMapping> | ((prev: GeneratedMapping) => Partial<GeneratedMapping>)) => void
 }
 
 type SimpleKey = 'income' | 'fixed' | 'sub' | 'ins'
 
 export function LabMappingView({
-  result, txns, incomeRows = [], months = 1, onRecategorize, onChange,
+  result, txns, incomeRows = [], months = 1, onRecategorize, onChange, txnEdit,
 }: Props) {
   // Which variable-category group has its underlying transactions expanded.
   const [openCategoryTxns, setOpenCategoryTxns] = useState<string | null>(null)
@@ -528,6 +530,7 @@ export function LabMappingView({
           months={months}
           onCategory={(row, cat) => setCategory('income', idxOf(row.id), cat)}
           onRecategorize={onRecategorize ?? (() => {})}
+          txnEdit={txnEdit}
           onAdd={() => addSimple('income')}
           onUpdate={(id, field, value) => editSimple('income', idxOf(id), field, value)}
           onDelete={id => delRow('income', idxOf(id))}
@@ -543,6 +546,7 @@ export function LabMappingView({
           months={months}
           onCategory={(row, cat) => setCategory('fixed', idxOf(row.id), cat)}
           onRecategorize={onRecategorize ?? (() => {})}
+          txnEdit={txnEdit}
           onAdd={() => addSimple('fixed')}
           onUpdate={(id, field, value) => editSimple('fixed', idxOf(id), field, value)}
           onDelete={id => delRow('fixed', idxOf(id))}
@@ -560,6 +564,7 @@ export function LabMappingView({
           months={months}
           onCategory={(row, cat) => setCategory('sub', idxOf(row.id), cat)}
           onRecategorize={onRecategorize ?? (() => {})}
+          txnEdit={txnEdit}
           onAdd={() => addSimple('sub')}
           onUpdate={(id, field, value) => editSimple('sub', idxOf(id), field, value)}
           onDelete={id => delRow('sub', idxOf(id))}
@@ -575,6 +580,7 @@ export function LabMappingView({
           months={months}
           onCategory={(row, cat) => setCategory('ins', idxOf(row.id), cat)}
           onRecategorize={onRecategorize ?? (() => {})}
+          txnEdit={txnEdit}
           onAdd={() => addSimple('ins')}
           onUpdate={(id, field, value) => editSimple('ins', idxOf(id), field, value)}
           onDelete={id => delRow('ins', idxOf(id))}
@@ -727,6 +733,7 @@ export function LabMappingView({
                               txns={matchingTxns}
                               months={months}
                               onRecategorize={onRecategorize ?? (() => {})}
+                            {...txnEdit}
                             />
                           )}
                         </>
@@ -820,7 +827,7 @@ export function LabMappingView({
                     </span>
                   </button>
                   {isOpen && (
-                    <TxnDetailTable txns={list} months={months} onRecategorize={onRecategorize} />
+                    <TxnDetailTable txns={list} months={months} onRecategorize={onRecategorize} {...txnEdit} />
                   )}
                 </div>
               )

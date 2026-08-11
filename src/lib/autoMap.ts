@@ -1036,6 +1036,60 @@ export function applyTxnRecategorization(m: GeneratedMapping, move: RecatMove): 
 }
 
 /**
+ * Move money into or out of ONE category's row, without changing where it sits.
+ *
+ * This is what deleting a charge in the פירוט needs, and what editing its
+ * amount needs. Without it the two disagree: the advisor deletes a ₪1,289 charge
+ * that was never theirs, the detail loses it, and the row above still counts it.
+ * A total that no longer matches the detail under it is the kind of wrong that
+ * nobody catches, because both halves look right on their own.
+ *
+ * Same row-picking rule as applyTxnRecategorization: prefer the row whose name
+ * IS the merchant, else the largest row of that category, because that is the
+ * one the charge was folded into. Deliberately not shared with it — that
+ * function moves money BETWEEN sections and reports whether the debit landed,
+ * and folding the two together to save a dozen lines would put the code that
+ * moves a household's money through one more branch than it needs.
+ */
+export function adjustCategoryAmount(
+  m: GeneratedMapping,
+  x: { category: string; merchant: string; monthlyDelta: number },
+): GeneratedMapping {
+  const out: GeneratedMapping = { ...m }
+  if (!x.monthlyDelta || !x.category) return out
+  const key = keyOfSection(sectionOfCategory(x.category))
+  if (!key) return out
+
+  const merchantKey = normalizeForLookup(x.merchant) || x.merchant.trim()
+  const rows = [...out[key]]
+  const candidates = rows.map((r, i) => ({ r, i })).filter(({ r }) => r.category === x.category)
+  const exact = candidates.find(({ r }) => (normalizeForLookup(r.name) || '') === merchantKey)
+  const pick  = exact ?? [...candidates].sort((a, b) => b.r.amount - a.r.amount)[0]
+
+  // Nothing to adjust and money to add: the category has no row yet, which
+  // happens when the charge was the only one of its kind.
+  if (!pick) {
+    if (x.monthlyDelta > 0) {
+      rows.push({
+        name: x.merchant.trim() || x.category,
+        amount: x.monthlyDelta,
+        category: x.category,
+        confidence: 'high',
+        source: 'תיקון ידני',
+      })
+      out[key] = rows
+    }
+    return out
+  }
+
+  // Never below zero, and a row emptied by the change disappears rather than
+  // sitting there as a ₪0 expense somebody has to wonder about.
+  rows[pick.i] = { ...pick.r, amount: Math.max(0, pick.r.amount + x.monthlyDelta) }
+  out[key] = rows.filter((r, i) => i !== pick.i || r.amount > 0)
+  return out
+}
+
+/**
  * One row per category.
  *
  * The model liked to carve a category into a row per merchant: eight separate

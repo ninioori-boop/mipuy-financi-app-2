@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 import { CategoryPicker } from '@/components/shared/CategoryPicker'
-import { TxnDetailTable } from '@/components/automap/TxnDetailTable'
+import { TxnDetailTable, type TxnEditHandlers } from '@/components/automap/TxnDetailTable'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -49,6 +49,8 @@ export interface LabSectionPanelProps {
   months: number
   onCategory: (row: LabRow, category: string) => void
   onRecategorize: (txn: Transaction, category: string) => void
+  /** Edit controls for the פירוט: description, amount, delete. */
+  txnEdit?: TxnEditHandlers
   onAdd: () => void
   onUpdate: (id: string, field: 'name' | 'amount', value: string | number) => void
   onDelete: (id: string) => void
@@ -56,7 +58,7 @@ export interface LabSectionPanelProps {
 
 export function LabSectionPanel({
   title, icon, rows, totalLabel, totalColor = 'text-gold', colName, colAmt,
-  txnsFor, months, onCategory, onRecategorize, onAdd, onUpdate, onDelete,
+  txnsFor, months, onCategory, onRecategorize, txnEdit, onAdd, onUpdate, onDelete,
 }: LabSectionPanelProps) {
   const [open, setOpen] = useState<string | null>(null)
   const total = rows.reduce((s, r) => s + r.amount, 0)
@@ -144,7 +146,7 @@ export function LabSectionPanel({
 
               {isOpen && txns.length > 0 && (
                 <div className="mt-1">
-                  <TxnDetailTable txns={txns} months={months} onRecategorize={onRecategorize} />
+                  <TxnDetailTable txns={txns} months={months} onRecategorize={onRecategorize} {...txnEdit} />
                 </div>
               )}
             </div>

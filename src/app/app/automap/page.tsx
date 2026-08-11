@@ -17,7 +17,7 @@ import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan,
   groupByName, formatIncomeBreakdown,
   buildInstallments, buildStandingOrders, formatInstallments, formatStandingOrders, isInstallment,
-  applyTxnRecategorization, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual,
+  applyTxnRecategorization, adjustCategoryAmount, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual,
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
@@ -41,6 +41,7 @@ import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
 import IntakeFormPanel from '@/components/automap/IntakeFormPanel'
+import RecurringPanel from '@/components/automap/RecurringPanel'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -771,6 +772,71 @@ export default function AutoMapPage() {
         : `${what} הועברו מ${from} ל${to}${remembered ? ' · נשמר גם להרצות הבאות' : ''}`,
     )
   }, [result, allTxns, detectedMonths, reportMonths, setResult])
+
+  // ── editing one charge ──
+  //
+  // Ori: "הם קיימים אבל חסרים כפתורים שיש באשראי וכאן אין". The missing ones
+  // are not decoration. A bank description arrives as "‫קניה/‫( כ00) מגדל/‫טלפון ני"
+  // — truncated mid-word and stuffed with invisible direction marks — and with
+  // no edit button there is no way to make it readable. A charge that is not
+  // the household's at all had no way out.
+  //
+  // 🔴 Each of these also adjusts the row above, by the charge's MONTHLY share.
+  // Without that the advisor deletes a ₪1,289 charge, the detail loses it, and
+  // the total above still counts it: a row that no longer matches its own
+  // detail, which nobody catches because both halves look right alone.
+
+  /** The one charge being edited, in whichever list holds it. */
+  const findCharge = useCallback((t: Transaction) => {
+    const k = dupKey(t)
+    const ci = txns.findIndex(x => dupKey(x) === k)
+    if (ci >= 0) return { list: 'txns' as const, index: ci }
+    const bi = bankRows.findIndex(b => dupKey({ desc: b.desc, date: b.date, amount: b.amount }) === k)
+    return bi >= 0 ? { list: 'bank' as const, index: bi } : null
+  }, [txns, bankRows])
+
+  const editTxnDesc = useCallback((t: Transaction, desc: string) => {
+    const at = findCharge(t)
+    if (!at) { toast.error('לא נמצאה העסקה לעריכה'); return }
+    if (at.list === 'txns') setLab('txns', prev => prev.map((x, i) => i === at.index ? { ...x, desc } : x))
+    else setLab('bankRows', prev => prev.map((b, i) => i === at.index ? { ...b, desc } : b))
+    toast.success(`התיאור עודכן ל"${desc}"`)
+  }, [findCharge, setLab])
+
+  const editTxnAmount = useCallback((t: Transaction, amount: number) => {
+    const at = findCharge(t)
+    if (!at) { toast.error('לא נמצאה העסקה לעריכה'); return }
+    if (at.list === 'txns') setLab('txns', prev => prev.map((x, i) => i === at.index ? { ...x, amount } : x))
+    else setLab('bankRows', prev => prev.map((b, i) => i === at.index ? { ...b, amount } : b))
+
+    const months = Math.max(1, detectedMonths || reportMonths)
+    if (result && t.category) {
+      setResult(adjustCategoryAmount(result, {
+        category: t.category, merchant: t.desc, monthlyDelta: (amount - t.amount) / months,
+      }))
+    }
+    toast.success(`הסכום עודכן ל‑${fmt(amount)}`)
+  }, [findCharge, setLab, result, setResult, detectedMonths, reportMonths])
+
+  const deleteTxn = useCallback((t: Transaction) => {
+    const at = findCharge(t)
+    if (!at) { toast.error('לא נמצאה העסקה למחיקה'); return }
+    if (at.list === 'txns') setLab('txns', prev => prev.filter((_, i) => i !== at.index))
+    else setLab('bankRows', prev => prev.filter((_, i) => i !== at.index))
+
+    const months = Math.max(1, detectedMonths || reportMonths)
+    if (result && t.category) {
+      setResult(adjustCategoryAmount(result, {
+        category: t.category, merchant: t.desc, monthlyDelta: -t.amount / months,
+      }))
+    }
+    toast.success(`"${t.desc}" נמחקה · ${fmt(t.amount / months)} ירדו מ${t.category || 'המיפוי'}`)
+  }, [findCharge, setLab, result, setResult, detectedMonths, reportMonths])
+
+  const txnEdit = useMemo(
+    () => ({ onDescChange: editTxnDesc, onAmountChange: editTxnAmount, onDelete: deleteTxn }),
+    [editTxnDesc, editTxnAmount, deleteTxn],
+  )
 
   function confirmOneOffAsAnnual(c: { key: string; name: string; category: string; amount: number }) {
     setAnnualItem({
@@ -1511,6 +1577,13 @@ ${d.data}` })
           </div>
         )}
 
+        {/* What repeats every month, and what only looks like it does. The
+            mapping collapses every subscription into one row, so the four
+            decisions a household could actually make arrive as one number
+            nobody can act on. Shown before generation and after it alike: the
+            move goes through the same merchant-wide path the פירוט uses. */}
+        <RecurringPanel txns={allTxns} months={detectedMonths || reportMonths} onMove={recategorizeTxn} />
+
         {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
             of a client's life looks identical to one built from 95% — every
             number present reconciles and nothing says otherwise. Shown before
@@ -2029,6 +2102,7 @@ ${d.data}` })
             incomeRows={incomeRows}
             months={detectedMonths || reportMonths}
             onRecategorize={recategorizeTxn}
+            txnEdit={txnEdit}
             onChange={updateResult}
           />
 
