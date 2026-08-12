@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import {
-  applyActionCode, checkActionCode, verifyPasswordResetCode, confirmPasswordReset,
+  applyActionCode, checkActionCode, verifyPasswordResetCode, confirmPasswordReset, signOut,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
+import { raceWithTimeout, TIMED_OUT } from '@/lib/promiseTimeout'
 
 // Firebase's email ACTION HANDLER — the page every link in a Firebase-sent mail
 // lands on (verify your address, reset your password, undo an email change).
@@ -25,6 +26,12 @@ import { Button } from '@/components/ui/button'
 
 type Mode = 'verifyEmail' | 'resetPassword' | 'recoverEmail' | 'verifyAndChangeEmail'
 type View = 'working' | 'password-form' | 'done' | 'error'
+
+// This page renders ABOVE everything and AuthProvider deliberately no longer
+// rescues a signed-in visitor from it, so a request that never settles would
+// strand them on "רגע…" with nowhere to go. Same scar as ConsentGate's
+// CONSENT_CHECK_TIMEOUT_MS, same tool.
+const ACTION_TIMEOUT_MS = 15_000
 
 // An open redirect on an auth page hands an attacker a credible phishing hop,
 // so a continueUrl is honoured only for hosts we actually own.
@@ -67,6 +74,9 @@ export default function AuthActionPage() {
   const [pw2, setPw2]     = useState('')
   const [busy, setBusy]   = useState(false)
   const [formErr, setFormErr] = useState('')
+  // The account says verified but this session's TOKEN does not yet. Tracked
+  // separately because the two failure modes are invisible from each other.
+  const [staleToken, setStaleToken] = useState(false)
 
   // Read the query with the DOM rather than useSearchParams: this page must
   // render without a Suspense boundary, and it only ever runs in the browser.
@@ -84,46 +94,61 @@ export default function AuthActionPage() {
       return
     }
 
+    let alive = true
+    const fail = (msg: string) => {
+      if (!alive) return
+      setView('error'); setTitle('הקישור לא עבד'); setDetail(msg)
+    }
+
     ;(async () => {
       try {
         if (mode === 'resetPassword') {
-          const email = await verifyPasswordResetCode(auth, oobCode)
-          setTitle('בחירת סיסמה חדשה')
-          setDetail(email)
-          setView('password-form')
+          const r = await raceWithTimeout(verifyPasswordResetCode(auth, oobCode), ACTION_TIMEOUT_MS)
+          if (!alive) return
+          if (r === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב, ואם זה חוזר, לבקש קישור חדש.')
+          setTitle('בחירת סיסמה חדשה'); setDetail(r); setView('password-form')
           return
         }
 
         if (mode === 'recoverEmail') {
-          const info = await checkActionCode(auth, oobCode)
+          const info = await raceWithTimeout(checkActionCode(auth, oobCode), ACTION_TIMEOUT_MS)
+          if (!alive) return
+          if (info === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב.')
           await applyActionCode(auth, oobCode)
-          setTitle('כתובת המייל שוחזרה')
-          setDetail(info.data.email ?? '')
-          setView('done')
+          if (!alive) return
+          setTitle('כתובת המייל שוחזרה'); setDetail(info.data.email ?? ''); setView('done')
           return
         }
 
         // verifyEmail / verifyAndChangeEmail
-        await applyActionCode(auth, oobCode)
-        // The signed-in session still carries email_verified=false until the
-        // token is re-minted — the security rules read the TOKEN, not the
-        // account — so refresh it here. Without this the client verifies
-        // successfully and the app still shows them the verification screen.
-        try {
-          if (auth.currentUser) {
-            await auth.currentUser.reload()
-            await auth.currentUser.getIdToken(true)
-          }
-        } catch { /* verification itself already succeeded */ }
+        const r = await raceWithTimeout(applyActionCode(auth, oobCode), ACTION_TIMEOUT_MS)
+        if (!alive) return
+        if (r === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב, ואם זה חוזר, לבקש קישור חדש מהמערכת.')
+
+        // Two DIFFERENT things, deliberately not collapsed into one try:
+        // reload() updates user.emailVerified (what the app's gate reads), and
+        // getIdToken(true) re-mints the token (what the security rules read).
+        // If only the second fails, the user is let into the app while every
+        // rule still sees an unverified token — the consent screen then never
+        // appears and the advisor's link silently stays pending.
+        let stale = false
+        if (auth.currentUser) {
+          try { await auth.currentUser.reload() } catch { stale = true }
+          try { await auth.currentUser.getIdToken(true) } catch { stale = true }
+        }
+        if (!alive) return
+        setStaleToken(stale)
         setTitle('הכתובת אומתה ✓')
-        setDetail('אפשר להמשיך למערכת.')
+        setDetail(stale
+          ? 'נשאר לרענן את ההרשאות בחשבון. לחצו על "המשך למערכת" ונשלים את זה.'
+          : 'אפשר להמשיך למערכת.')
         setView('done')
       } catch (e) {
-        setView('error')
-        setTitle('הקישור לא עבד')
-        setDetail(hebrewError((e as { code?: string }).code))
+        fail(hebrewError((e as { code?: string }).code))
       }
     })()
+
+    return () => { alive = false }
   }, [])
 
   async function submitPassword(e: React.FormEvent) {
@@ -134,6 +159,11 @@ export default function AuthActionPage() {
     setBusy(true)
     try {
       await confirmPasswordReset(auth, oob, pw1)
+      // Changing the password revokes the refresh token. This page now runs on
+      // the SAME origin as the app, so a signed-in tab would keep going on its
+      // cached token and then die mid-session with a save error. Ending the
+      // session here is both honest and what the user is about to do anyway.
+      try { await signOut(auth) } catch { /* nothing left to protect */ }
       setTitle('הסיסמה עודכנה ✓')
       setDetail('אפשר להיכנס עכשיו עם הסיסמה החדשה.')
       setView('done')
@@ -142,6 +172,19 @@ export default function AuthActionPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function continueNow() {
+    // One more attempt at the thing that failed, before we send them into an
+    // app whose rules would refuse them.
+    if (staleToken && auth.currentUser) {
+      setBusy(true)
+      try { await auth.currentUser.getIdToken(true) } catch { /* app will retry on its own clock */ }
+      setBusy(false)
+    }
+    // A FULL navigation, not a router push: the refreshed token has to be picked
+    // up by a clean app boot, and `cont` may be another origin.
+    window.location.assign(cont)
   }
 
   return (
@@ -160,12 +203,14 @@ export default function AuthActionPage() {
         {view === 'password-form' && (
           <form onSubmit={submitPassword} className="space-y-3">
             <input
-              type="password" dir="ltr" required minLength={6} value={pw1}
+              type="password" dir="ltr" required minLength={6} value={pw1} autoFocus
+              autoComplete="new-password"
               onChange={e => setPw1(e.target.value)} placeholder="סיסמה חדשה (לפחות 6 תווים)"
               className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
             />
             <input
               type="password" dir="ltr" required minLength={6} value={pw2}
+              autoComplete="new-password"
               onChange={e => setPw2(e.target.value)} placeholder="שוב, לאימות"
               className="w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
             />
@@ -178,15 +223,18 @@ export default function AuthActionPage() {
         )}
 
         {(view === 'done' || view === 'error') && (
-          // A FULL navigation, not a router push: the refreshed ID token has to
-          // be picked up by a clean app boot, and `cont` may be another origin.
-          <Button
-            onClick={() => window.location.assign(cont)}
-            className="w-full bg-gold hover:bg-gold-light text-surface font-semibold h-10"
-          >
-            המשך למערכת
+          <Button onClick={continueNow} disabled={busy}
+            className="w-full bg-gold hover:bg-gold-light text-surface font-semibold h-10">
+            {busy ? 'רגע…' : 'המשך למערכת'}
           </Button>
         )}
+
+        {/* Visible in EVERY state, including "working". The old handler kept a
+            back link up at all times, and a page with no exit is how a slow
+            request turns into "the link is broken" all over again. */}
+        <a href={DEFAULT_CONTINUE} className="block text-xs text-muted-txt hover:text-txt transition-colors">
+          ← חזרה לעמוד הכניסה
+        </a>
       </div>
     </div>
   )

@@ -151,7 +151,11 @@ export default function ConnectPage() {
       return
     }
     try {
-      await sendPasswordResetEmail(auth, addr)
+      // Come back HERE, not to the generic sign-in screen. Setting a password is
+      // a step inside connecting expense capture, and the message below promises
+      // "חזור לכאן" — until now the link dropped them on /auth to find their own
+      // way back. (The action handler only honours our own hosts.)
+      await sendPasswordResetEmail(auth, addr, { url: `${window.location.origin}/connect` })
       setResetMsg('שלחנו לך למייל קישור לקביעת סיסמה. אחרי שתקבע — חזור לכאן והתחבר איתה.')
     } catch {
       // Don't reveal whether the address exists — same message either way.
