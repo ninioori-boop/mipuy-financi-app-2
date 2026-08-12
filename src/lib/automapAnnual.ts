@@ -82,12 +82,21 @@ export interface OneOffCandidate {
  *
  * Requires months >= 2: in a single-month window every charge appears once, so
  * the signal carries no information and the list would be pure noise.
+ *
+ * ⚠️ `confirmedMerchants` holds MERCHANT keys, not full one-off keys, and the
+ * asymmetry with `dismissed` is deliberate. A confirmed charge has already been
+ * moved into the annual block and subtracted from the monthly expenses; if the
+ * advisor then re-categorises it, a category-qualified key stops matching and
+ * the same ₪3,700 sofa is offered again, accepted again, and counted twice —
+ * once under each category. Confirmation is a fact about the CHARGE, so it
+ * survives the charge changing category. Dismissal only hides a suggestion, so
+ * a re-categorised charge legitimately earns a fresh look.
  */
 export function detectOneOffCharges(
   breakdown: CategoryBreakdown[],
   months: number,
   dismissed: Set<string> = new Set(),
-  confirmed: Set<string> = new Set(),
+  confirmedMerchants: Set<string> = new Set(),
 ): OneOffCandidate[] {
   if (months < 2) return []
   const out: OneOffCandidate[] = []
@@ -95,7 +104,7 @@ export function detectOneOffCharges(
     for (const m of cat.merchants) {
       if (m.count !== 1 || m.sum < ONE_OFF_MIN) continue
       const key = oneOffKey(cat.category, m.key)
-      if (dismissed.has(key) || confirmed.has(key)) continue
+      if (dismissed.has(key) || confirmedMerchants.has(m.key)) continue
       out.push({ key, name: m.name, category: cat.category, amount: m.sum })
     }
   }
@@ -130,4 +139,21 @@ export function formatAnnualItems(items: AnnualItem[]): string[] {
  */
 export function oneOffKey(category: string, merchantKey: string): string {
   return `${category}::${merchantKey}`
+}
+
+/**
+ * The merchant half of a one-off key.
+ *
+ * This is what "already counted as annual" must be tested on. The category half
+ * records where the charge sat WHEN IT WAS CONFIRMED, and that is exactly the
+ * part the advisor is free to change afterwards — on the real run a ₪3,700
+ * sofa confirmed under אוכל בחוץ and then corrected to ריהוט ended up in the
+ * annual block twice, ₪7,400 a year for one sofa.
+ *
+ * `indexOf`, not `split`: a category never contains "::" but a merchant name
+ * conceivably could, and splitting on every occurrence would truncate it.
+ */
+export function merchantOfOneOffKey(key: string): string {
+  const i = key.indexOf('::')
+  return i >= 0 ? key.slice(i + 2) : key
 }

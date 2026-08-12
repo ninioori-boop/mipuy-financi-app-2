@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildCategoryBreakdown, formatCategoryBreakdown, detectMonthSpan, validateMapping,
-  sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, applyTxnRecategorization,
+  sectionOfCategory, groupByName, formatIncomeBreakdown, moveLoansToDebts, fillLoanBalances,
+  applyTxnRecategorization,
   adjustCategoryAmount,
   consolidateByCategory, ensureAnnualItems, findAnnualDuplicates, dedupeAnnual, dropEmptyRows,
   type GeneratedMapping,
@@ -375,6 +376,72 @@ describe('moveLoansToDebts', () => {
     const out = moveLoansToDebts(input)
     expect(out.fixed).toEqual(input.fixed)
     expect(out.debts).toEqual([])
+  })
+})
+
+// A debt with no balance is a debt the client's net worth prices at zero, and
+// the payoff order is built from balances. On the real run a ₪80,000 loan came
+// back with a monthly payment, a term, and remainingBalance 0.
+describe('fillLoanBalances', () => {
+  const withDebts = (debts: GeneratedMapping['debts']): GeneratedMapping => ({
+    creditScore: 0, creditCards: [], bankAccounts: [],
+    income: [], fixed: [], sub: [], ins: [], variable: [], annual: [],
+    debts, installments: [], savings: [],
+    businessIncome: [], businessExpenses: [], assessment: '',
+  })
+  const loan = (over: Partial<GeneratedMapping['debts'][number]> = {}) => ({
+    name: 'הלוואה בנקאית', originalBalance: 0, remainingBalance: 0,
+    interestRate: 0, remainingMonths: 0, monthlyPayment: 0, ...over,
+  })
+
+  it('computes the balance from payment, term and rate', () => {
+    const out = fillLoanBalances(withDebts([
+      loan({ monthlyPayment: 1500, remainingMonths: 60, interestRate: 6 }),
+    ]))
+    // PV of ₪1,500 × 60 at 0.5%/mo ≈ ₪77,600. Below the undiscounted ₪90,000.
+    expect(out.debts[0].remainingBalance).toBeGreaterThan(75_000)
+    expect(out.debts[0].remainingBalance).toBeLessThan(80_000)
+  })
+
+  it('falls back to payment × term when the rate is unknown', () => {
+    const out = fillLoanBalances(withDebts([
+      loan({ monthlyPayment: 1000, remainingMonths: 24 }),
+    ]))
+    expect(out.debts[0].remainingBalance).toBe(24_000)
+  })
+
+  // 🔴 A number read off the schedule always beats a number derived from three
+  // other numbers also read off it.
+  it('never overwrites a balance the model actually read', () => {
+    const input = withDebts([
+      loan({ remainingBalance: 42_000, monthlyPayment: 1000, remainingMonths: 24 }),
+    ])
+    expect(fillLoanBalances(input)).toBe(input)
+    expect(fillLoanBalances(input).debts[0].remainingBalance).toBe(42_000)
+  })
+
+  it('stays out of it when there is nothing to compute from', () => {
+    const noTerm = withDebts([loan({ monthlyPayment: 1000 })])
+    expect(fillLoanBalances(noTerm)).toBe(noTerm)
+    const noPayment = withDebts([loan({ remainingMonths: 24 })])
+    expect(fillLoanBalances(noPayment)).toBe(noPayment)
+  })
+
+  it('cannot report owing more than was borrowed', () => {
+    const out = fillLoanBalances(withDebts([
+      loan({ originalBalance: 20_000, monthlyPayment: 1000, remainingMonths: 24 }),
+    ]))
+    expect(out.debts[0].remainingBalance).toBe(20_000)
+  })
+
+  // A computed balance and a quoted one must never look the same on screen.
+  it('stamps the row so a computed balance is never mistaken for a quoted one', () => {
+    const out = fillLoanBalances(withDebts([
+      loan({ monthlyPayment: 1000, remainingMonths: 24, source: 'לוח סילוקין' }),
+    ]))
+    expect(out.debts[0].source).toContain('לוח סילוקין')
+    expect(out.debts[0].source).toContain('יתרה מחושבת')
+    expect(out.debts[0].confidence).toBe('medium')
   })
 })
 

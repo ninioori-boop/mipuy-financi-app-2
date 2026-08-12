@@ -188,6 +188,50 @@ export function checkIncomeAgainstDeposits(
   }
 }
 
+// ── the mapping's savings, against the deposits that were actually made ──
+//
+// The mirror image of the check above, and it caught the single largest error
+// on Ori's first real run: ₪8,648 a month left the account for savings and
+// investment platforms, and all six savings rows came back with
+// monthlyContribution 0. Nothing flagged it. Every other number reconciled,
+// because money moved to savings is money that left the account either way —
+// the mapping and the bank agreed on the cash flow and disagreed only about
+// what the family had to show for it.
+//
+// One direction only, again. Saving MORE than the detected deposits is ordinary
+// (a payroll pension deduction never passes through the current account), while
+// showing zero against a stream of real deposits has one explanation.
+
+export interface SavingsCheck {
+  detectedPerMonth: number
+  mappingPerMonth:  number
+  missingPerMonth:  number
+  title:  string
+  detail: string
+}
+
+/** Below this the gap is a rounding difference or one small standing order. */
+const SAVINGS_MIN_MISSING = 500
+
+export function checkSavingsAgainstDeposits(
+  r: GeneratedMapping,
+  input: { detectedPerMonth: number },
+): SavingsCheck | null {
+  const detected = input.detectedPerMonth
+  if (detected <= 0) return null                       // nothing detected, nothing to claim
+  const mappingPerMonth = r.savings.reduce((s, x) => s + (x.monthlyContribution || 0), 0)
+  const missing = detected - mappingPerMonth
+  if (missing < SAVINGS_MIN_MISSING) return null
+
+  return {
+    detectedPerMonth: detected, mappingPerMonth, missingPerMonth: missing,
+    title: `החיסכון החודשי במיפוי נמוך ב‑${money(missing)} ממה שבאמת הופקד`,
+    detail: mappingPerMonth === 0
+      ? `זוהו הפקדות קבועות של ${money(detected)} לחודש לחיסכון ולהשקעות, ובמיפוי אין אף שורת חיסכון עם הפקדה חודשית. המשפחה הזאת חוסכת, והמיפוי מציג אותה כמי שלא חוסכת בכלל.`
+      : `זוהו הפקדות קבועות של ${money(detected)} לחודש, והמיפוי מציג ${money(mappingPerMonth)}. בדוק אילו שורות חיסכון נשארו עם הפקדה 0.`,
+  }
+}
+
 /** ₪ with a sign, because the direction is the whole message. */
 function money(n: number): string {
   const v = Math.round(n)

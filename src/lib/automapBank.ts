@@ -19,6 +19,7 @@
 // If these two ever need to agree, unify them as a separate, reviewed change.
 
 import { detectCols, classifyRow, cellNum, type BankCols, type Dir } from './bankParse'
+import { cleanDesc } from './automapText'
 
 export interface BankRow {
   desc:   string
@@ -68,18 +69,25 @@ export function detectBankHeader(rows: unknown[][]): { headerIdx: number; cols: 
   return null
 }
 
-/** The most human-readable string in the row — mirrors the עו"ש tab's heuristic. */
+/**
+ * The most human-readable string in the row — mirrors the עו"ש tab's heuristic.
+ *
+ * The cell is cleaned of bidi marks BEFORE the letter-ratio test, not after: an
+ * invisible character counts as a letter in that ratio, so a short numeric cell
+ * wrapped in embedding marks could win the "mostly letters" test and be chosen
+ * as the description over the real merchant name.
+ */
 function pickDesc(row: unknown[]): string {
   for (const c of row) {
     if (typeof c !== 'string') continue
-    const s = c.trim()
+    const s = cleanDesc(c)
     if (s.length < 2) continue
     // Mostly letters, not a date/reference/amount rendered as text.
     const letters = s.replace(/[\d\-.\/\s,]/g, '').length
     if (letters / s.length > 0.4) return s
   }
   for (const c of row) {
-    if (typeof c === 'string' && c.trim().length > 2) return c.trim()
+    if (typeof c === 'string' && cleanDesc(c).length > 2) return cleanDesc(c)
   }
   return ''
 }

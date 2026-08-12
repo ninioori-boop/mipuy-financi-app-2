@@ -21,18 +21,24 @@ import {
   type GeneratedMapping,
 } from '@/lib/autoMap'
 import { extractBankRows, isCardSettlement, type BankRow } from '@/lib/automapBank'
+import { cleanDesc } from '@/lib/automapText'
 import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
+  merchantOfOneOffKey,
 } from '@/lib/automapAnnual'
 import { buildCompletenessReport } from '@/lib/automapCompleteness'
-import { reconcile, checkIncomeAgainstDeposits } from '@/lib/automapReconcile'
+import { reconcile, checkIncomeAgainstDeposits, checkSavingsAgainstDeposits } from '@/lib/automapReconcile'
 import { sheetToText, looksLikeStatement } from '@/lib/automapSheet'
 import { buildRun } from '@/lib/automapFixture'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
   formatIntakeAnswers, formatIntakeDocs, formatIntakeRows, declaredMonthlyIncome,
+  declaredIncomeRows,
   countAnswered, type IntakeDoc, type IntakeRoute,
 } from '@/lib/automapIntake'
+import {
+  detectSavingsDeposits, formatSavingsDeposits, classifyDeposits, formatDepositSplit,
+} from '@/lib/automapFlows'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
@@ -42,6 +48,7 @@ import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
 import IntakeFormPanel from '@/components/automap/IntakeFormPanel'
 import RecurringPanel from '@/components/automap/RecurringPanel'
+import FlowsPanel from '@/components/automap/FlowsPanel'
 import type { Transaction } from '@/types/transaction'
 
 const fmt = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -249,7 +256,11 @@ export default function AutoMapPage() {
                   continue
                 }
               }
-              all.push(...txns)
+              // Same bidi cleanup the bank reader does. A credit export is far
+              // less likely to carry embedding marks, but "less likely" is not
+              // a reason to leave one path dirty — and the category is re-derived
+              // from t.desc on every read below, so cleaning it here is enough.
+              all.push(...txns.map(t => ({ ...t, desc: cleanDesc(t.desc) })))
             }
             names.push(file.name)
           } else if (isImage) {
@@ -583,16 +594,23 @@ export default function AutoMapPage() {
   // Two exclusions: installment legs (they have their own section in the
   // mapping) and charges the advisor confirmed as annual (they move from a
   // monthly category to the annual block).
-  const confirmedOneOffKeys = useMemo(
-    () => new Set(annualItems.filter(a => a.source === 'detected').map(a => a.key)),
+  // 🔴 Matched on the MERCHANT, not on category::merchant. The category half of
+  // the key records where the charge sat when it was confirmed, and that is the
+  // half the advisor can change afterwards. On the real run a ₪3,700 sofa was
+  // confirmed as annual under אוכל בחוץ and then corrected to ריהוט: the key
+  // stopped matching, the charge walked back into the monthly expenses, and the
+  // annual block still held it. ₪7,400 a year for one sofa, and both halves
+  // looked right on their own.
+  const confirmedOneOffMerchants = useMemo(
+    () => new Set(annualItems.filter(a => a.source === 'detected').map(a => merchantOfOneOffKey(a.key))),
     [annualItems],
   )
   const expenseTxns = useMemo(
     () => allTxns.filter(t =>
       !isInstallment(t) &&
-      !confirmedOneOffKeys.has(oneOffKey(t.category, normalizeForLookup(t.desc) || t.desc.trim())),
+      !confirmedOneOffMerchants.has(normalizeForLookup(t.desc) || t.desc.trim()),
     ),
-    [allTxns, confirmedOneOffKeys],
+    [allTxns, confirmedOneOffMerchants],
   )
 
   // Memoized: buildCategoryBreakdown runs normalizeForLookup (~12 regex passes)
@@ -610,6 +628,25 @@ export default function AutoMapPage() {
     [expenseTxns, incomeRows],
   )
 
+  // ── the two flows the mapping kept missing ──
+  //
+  // Together ₪21,800 a month on the real run, against ~₪700 for every other
+  // finding combined. Both are computed here rather than asked of the model:
+  // what it produced was a defensible reading of what it was given, so the fix
+  // is to hand it different input, not a sterner instruction.
+  //
+  // allTxns, not expenseTxns: a savings deposit is not an expense, and the
+  // exclusions expenseTxns applies (installment legs, charges confirmed as
+  // annual) have nothing to say about one.
+  const savingsFlow = useMemo(
+    () => detectSavingsDeposits(allTxns, detectedMonths || reportMonths),
+    [allTxns, detectedMonths, reportMonths],
+  )
+  const depositSplit = useMemo(
+    () => classifyDeposits(incomeLines, declaredIncomeRows(intakeRows.incomeMonths), detectedMonths || reportMonths),
+    [incomeLines, intakeRows, detectedMonths, reportMonths],
+  )
+
   // Large charges that appeared exactly once. Suspicious for annual, never
   // assumed to be — a new sofa and a yearly insurance premium look identical
   // from the data alone, so this only raises the question.
@@ -618,9 +655,9 @@ export default function AutoMapPage() {
       breakdown,
       detectedMonths || reportMonths,
       new Set(dismissedOneOffs),
-      confirmedOneOffKeys,
+      confirmedOneOffMerchants,
     ),
-    [breakdown, detectedMonths, reportMonths, dismissedOneOffs, confirmedOneOffKeys],
+    [breakdown, detectedMonths, reportMonths, dismissedOneOffs, confirmedOneOffMerchants],
   )
 
   // What the mapping is MISSING, as opposed to what in it is wrong. Deterministic
@@ -707,6 +744,15 @@ export default function AutoMapPage() {
     [result, flows, intakeFiles, declaredIncome],
   )
 
+  // The mirror check, and the one that caught the biggest miss: real deposits
+  // to savings against what the mapping says the family puts aside.
+  const savingsCheck = useMemo(
+    () => (result ? checkSavingsAgainstDeposits(result, {
+      detectedPerMonth: savingsFlow.monthlyRecurring,
+    }) : null),
+    [result, savingsFlow],
+  )
+
   // A duplicate inside a result generated before the fix stays there for as
   // long as the result lives, because the result is persisted and the guard
   // runs at generation. A button was not enough — it has to be found, and the
@@ -758,6 +804,16 @@ export default function AutoMapPage() {
       remembered = true
     }
 
+    // A charge already confirmed as annual keeps its identity — the exclusion
+    // above is keyed on the merchant — but its key and its label must follow it
+    // to the new category, or the annual block goes on telling the model this is
+    // אוכל בחוץ after the advisor said ריהוט.
+    const annualHit = annualItems.find(a => a.source === 'detected' && merchantOfOneOffKey(a.key) === key)
+    if (annualHit && annualHit.category !== to) {
+      removeAnnualItem(annualHit.key)
+      setAnnualItem({ ...annualHit, key: oneOffKey(to, key), category: to })
+    }
+
     if (!result || !from) { toast.success(`"${t.desc}" סווג כ${to}`); return }
     const months = Math.max(1, detectedMonths || reportMonths)
     const { mapping, nothingDebited } = applyTxnRecategorization(result, {
@@ -771,7 +827,8 @@ export default function AutoMapPage() {
         ? `${what} נוספו ל${to}. לא נמצאה שורה של ${from} לגרוע ממנה, בדוק את הסכומים`
         : `${what} הועברו מ${from} ל${to}${remembered ? ' · נשמר גם להרצות הבאות' : ''}`,
     )
-  }, [result, allTxns, detectedMonths, reportMonths, setResult])
+  }, [result, allTxns, detectedMonths, reportMonths, setResult,
+      annualItems, setAnnualItem, removeAnnualItem])
 
   // ── editing one charge ──
   //
@@ -876,10 +933,23 @@ ${d.data}` })
       lines.push('')
     }
     if (incomeLines.length) {
-      lines.push(declaredIncome > 0
-        ? '== הפקדות שזוהו בעו"ש (אימות בלבד — ההכנסה נמסרה בשאלון) =='
-        : '== הכנסות והפקדות שזוהו בעו"ש ==')
-      lines.push(...formatIncomeBreakdown(incomeLines, reportMonths, declaredIncome > 0))
+      // 🔴 With income declared, the deposits are NOT simply "already counted".
+      // The declared salary is; a reserve-duty grant arriving beside it is not,
+      // and the flat verification-only header took ₪13,200 a month down with it
+      // on the real run. Split the list against what was declared instead of
+      // labelling the whole of it.
+      if (declaredIncome > 0) {
+        lines.push('== ההפקדות שנצפו בעו"ש, מול ההכנסה שנמסרה בשאלון ==')
+        lines.push(...formatDepositSplit(depositSplit, reportMonths))
+      } else {
+        lines.push('== הכנסות והפקדות שזוהו בעו"ש ==')
+        lines.push(...formatIncomeBreakdown(incomeLines, reportMonths, false))
+      }
+      lines.push('')
+    }
+    if (savingsFlow.deposits.length) {
+      lines.push('== הפקדות לחיסכון והשקעות שיצאו מהחשבון ==')
+      lines.push(...formatSavingsDeposits(savingsFlow, reportMonths))
       lines.push('')
     }
     if (annualItems.length) {
@@ -1584,6 +1654,13 @@ ${d.data}` })
             move goes through the same merchant-wide path the פירוט uses. */}
         <RecurringPanel txns={allTxns} months={detectedMonths || reportMonths} onMove={recategorizeTxn} />
 
+        <FlowsPanel
+          savings={savingsFlow}
+          deposits={depositSplit}
+          hasDeclared={declaredIncome > 0}
+          months={detectedMonths || reportMonths}
+        />
+
         {/* What's MISSING, as opposed to what's wrong. A mapping built from 60%
             of a client's life looks identical to one built from 95% — every
             number present reconciles and nothing says otherwise. Shown before
@@ -2001,6 +2078,31 @@ ${d.data}` })
                 <div className="bg-surface border border-line rounded-lg p-2">
                   <div className="text-[10px] text-muted-txt">הפרש</div>
                   <div className="text-sm font-bold text-expense tabular-nums">{fmt(incomeCheck.excessPerMonth)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* The savings the family really makes, against what the mapping
+              credits them with. Sits beside the income check because it is the
+              same class of error: money the account can account for and the
+              mapping cannot. */}
+          {savingsCheck && (
+            <div className="rounded-xl border-2 border-gold/40 bg-gold/5 p-3 space-y-2">
+              <div className="text-sm font-semibold text-gold">⚠️ {savingsCheck.title}</div>
+              <div className="text-xs text-txt leading-relaxed">{savingsCheck.detail}</div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">הופקד בפועל</div>
+                  <div className="text-sm font-bold text-income tabular-nums">{fmt(savingsCheck.detectedPerMonth)}</div>
+                </div>
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">לפי המיפוי</div>
+                  <div className="text-sm font-bold text-txt tabular-nums">{fmt(savingsCheck.mappingPerMonth)}</div>
+                </div>
+                <div className="bg-surface border border-line rounded-lg p-2">
+                  <div className="text-[10px] text-muted-txt">חסר</div>
+                  <div className="text-sm font-bold text-gold tabular-nums">{fmt(savingsCheck.missingPerMonth)}</div>
                 </div>
               </div>
             </div>

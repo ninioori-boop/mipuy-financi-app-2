@@ -521,6 +521,7 @@ export const AUTOMAP_SYSTEM_PROMPT = `אתה "${BRAND.nameHe}" — יועץ פי
   🔴 **נכס ששוויו נמסר — בשאלון או בטקסט החופשי — חייב להיכנס לכאן כשורה, גם אם אין לו הפקדה חודשית.** נדל"ן, קרן כספית, מטבעות דיגיטליים, פוליסת חיסכון, תיק מסחר: accumulated = השווי, monthlyContribution = 0. סכום ששמישהו טרח לכתוב ולא מופיע בשום מקום במיפוי הוא נכס שנעלם — אל תסתפק באזכור ב‑assessment.
   🔴 **תיק ניירות ערך הוא שורה אחת: שווי התיק כולו.** אם קיבלת צילום מסך של תיק השקעות, אל תיצור שורה לכל מניה ואל תפרט אחזקות. השווי של כל נייר בנפרד הוא רעש: הוא משתנה כל יום, אין ליועץ מה לעשות איתו במיפוי, והוא מפוצץ את הסעיף בעשרות שורות. שורה אחת, בשם החשבון או בית ההשקעות, עם השווי הכולל ב‑accumulated.
   קניית נייר ערך היא **העברה לנכס, לא הוצאה** — אל תכניס אותה ל‑variable או ל‑fixed גם אם היא מופיעה בעו"ש כחיוב.
+  🔴 **monthlyContribution נשאר 0 רק כשאין הפקדה בנתונים.** אם הודעה זו כוללת בלוק "הפקדות לחיסכון והשקעות שיצאו מהחשבון" — כל הפקדה חוזרת שם היא monthlyContribution של שורה ב‑savings, והסכום כבר מחושב. מיפוי שמראה שווי צבור ומראה שהמשפחה מפקידה 0 בחודש הוא מיפוי ששולל מהיועץ בדיוק את הנתון שהוא בא לראות.
 
 ## תמונת מצב הלקוח (נתונים נקודתיים — לא חודשיים)
 אם הנתונים כוללים אותם, חלץ גם:
@@ -940,6 +941,57 @@ export function moveLoansToDebts(m: GeneratedMapping): GeneratedMapping {
   return out
 }
 
+/**
+ * The remaining balance of a loan, computed instead of left at zero.
+ *
+ * On Ori's first real run a loan arrived with ₪80,000 of original principal, a
+ * monthly payment and a term — and a remaining balance of 0, because the
+ * schedule PDF stated the balance in a table the model would not read a number
+ * out of. A debt with no balance is not a small blemish: it is a debt the
+ * client's net-worth line prices at zero, and the payoff order is built from
+ * balances.
+ *
+ * The balance of an amortizing loan is fully determined by what we already
+ * have, so this is arithmetic, not a guess:
+ *
+ *     balance = PMT × (1 − (1 + i)^−n) / i        i = annual rate / 12
+ *     balance = PMT × n                            when the rate is 0
+ *
+ * 🔴 Filled ONLY when the balance is missing. A number the model actually read
+ * off the schedule always wins over a number derived from three other numbers
+ * it also read. And the row is stamped, so nobody mistakes a computed balance
+ * for a quoted one.
+ *
+ * Rate handling: a loan whose interest is genuinely unknown is computed at 0,
+ * which UNDERSTATES nothing — with i = 0 the formula returns PMT × n, the
+ * largest balance the payment stream can justify. Better to be high on a debt
+ * than to leave it at zero.
+ */
+export function fillLoanBalances(m: GeneratedMapping): GeneratedMapping {
+  let touched = false
+  const debts = m.debts.map(d => {
+    if (d.remainingBalance > 0 || !(d.monthlyPayment > 0) || !(d.remainingMonths > 0)) return d
+    const n = Math.round(d.remainingMonths)
+    const i = d.interestRate > 0 ? d.interestRate / 100 / 12 : 0
+    const raw = i > 0
+      ? d.monthlyPayment * (1 - Math.pow(1 + i, -n)) / i
+      : d.monthlyPayment * n
+    if (!Number.isFinite(raw) || raw <= 0) return d
+    // A remaining balance above the original principal means one of the inputs
+    // is wrong; clamp rather than publish an impossible figure.
+    const balance = d.originalBalance > 0 ? Math.min(raw, d.originalBalance) : raw
+    touched = true
+    const how = i > 0 ? `${n} תשלומים בריבית ${d.interestRate}%` : `${n} תשלומים, ריבית לא ידועה`
+    return {
+      ...d,
+      remainingBalance: Math.round(balance),
+      confidence: 'medium' as GenConfidence,
+      source: [d.source, `יתרה מחושבת: ${how}`].filter(Boolean).join(' · '),
+    }
+  })
+  return touched ? { ...m, debts } : m
+}
+
 // ── moving one transaction between categories ──
 //
 // Reading the פירוט without being able to change it is only half a tool: the
@@ -1307,7 +1359,10 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
   const json = extractJsonObject(text)
   const raw = obj(JSON.parse(json.replace(/,\s*([}\]])/g, '$1')))
 
-  return dropEmptyRows(consolidateByCategory(moveLoansToDebts({
+  // fillLoanBalances runs AFTER moveLoansToDebts: a repayment the model filed
+  // under קבועות only becomes a debt row there, and it is exactly the row that
+  // arrives with no balance at all.
+  return dropEmptyRows(consolidateByCategory(fillLoanBalances(moveLoansToDebts({
     creditScore:  num(raw.creditScore),
     creditCards:  arr(raw.creditCards).map(obj).map(r => ({
       name: str(r.name), limit: num(r.limit), chargeDay: num(r.chargeDay) || 2, ...meta(r),
@@ -1341,7 +1396,7 @@ export function parseGeneratedMapping(text: string): GeneratedMapping {
     businessIncome:   simple(arr(raw.businessIncome)),
     businessExpenses: simple(arr(raw.businessExpenses)),
     assessment: str(raw.assessment),
-  })))
+  }))))
 }
 
 export function emptyGeneratedMapping(): GeneratedMapping {

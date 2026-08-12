@@ -45,6 +45,30 @@ describe('extractBankRows', () => {
     ])
   })
 
+  // 🔴 136 of the 142 rows in Ori's first real statement carry U+202B. The
+  // description reaches the categorizer as "מגדל/‫טלפון", which cannot contain
+  // the curated key "מגדל/טלפון" — a ₪967/month securities purchase filed as
+  // insurance, with nothing on screen to explain why.
+  it('strips the invisible direction marks the bank writes into every row', () => {
+    const RLE = '‫'
+    const rows = extractBankRows(bankRows(
+      [d('2026-06-05'), `קניה/${RLE}( כ00) מגדל/${RLE}טלפון ני`, '1', 967, null, 20000],
+    ))
+    expect(rows[0].desc).toContain('מגדל/טלפון')
+    expect(rows[0].desc).not.toMatch(/[​-‏‪-‮⁦-⁩]/)
+  })
+
+  // The marks also sit around the amount and reference cells. Cleaning has to
+  // happen BEFORE the "mostly letters" test picks a description, or a wrapped
+  // number can win the vote over the real merchant name.
+  it('still picks the merchant name when other cells are wrapped in marks', () => {
+    const RLE = '‫'
+    const rows = extractBankRows(bankRows(
+      [d('2026-06-05'), `${RLE}112233`, `${RLE}שופרסל דיל`, 250, null, 19750],
+    ))
+    expect(rows[0].desc).toBe('שופרסל דיל')
+  })
+
   it('reads a charge as money OUT', () => {
     const rows = extractBankRows(bankRows(
       [d('2026-06-05'), 'ארנונה עיריית חיפה', '445566', 620, null, 20380],

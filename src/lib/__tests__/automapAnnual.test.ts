@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   ANNUAL_CHECKLIST, ONE_OFF_MIN, detectOneOffCharges, formatAnnualItems, oneOffKey,
+  merchantOfOneOffKey,
   type AnnualItem,
 } from '@/lib/automapAnnual'
 import { buildCategoryBreakdown } from '@/lib/autoMap'
@@ -66,8 +67,36 @@ describe('detectOneOffCharges', () => {
   })
 
   it('never offers a charge already confirmed as annual', () => {
-    const key = detectOneOffCharges(breakdown(), 3)[0].key
-    expect(detectOneOffCharges(breakdown(), 3, new Set(), new Set([key]))).toEqual([])
+    const merchant = merchantOfOneOffKey(detectOneOffCharges(breakdown(), 3)[0].key)
+    expect(detectOneOffCharges(breakdown(), 3, new Set(), new Set([merchant]))).toEqual([])
+  })
+
+  // 🔴 The regression that cost ₪3,700 a year on the real run. A sofa confirmed
+  // as annual under אוכל בחוץ and then corrected to ריהוט was offered a second
+  // time, accepted a second time, and counted under both categories. Confirming
+  // is a fact about the CHARGE, so it has to survive the category changing.
+  it('still excludes a confirmed charge after it is re-categorised', () => {
+    const before = buildCategoryBreakdown([tx('אלוף הספות', 3700, 'אוכל בחוץ')])
+    const merchant = merchantOfOneOffKey(detectOneOffCharges(before, 3)[0].key)
+
+    const after = buildCategoryBreakdown([tx('אלוף הספות', 3700, 'ריהוט והבית')])
+    expect(detectOneOffCharges(after, 3, new Set(), new Set([merchant]))).toEqual([])
+  })
+
+  // Dismissal is the opposite: it hides a SUGGESTION, and a charge that moved
+  // to another category earns a fresh look.
+  it('offers a dismissed charge again once it changes category', () => {
+    const before = buildCategoryBreakdown([tx('אלוף הספות', 3700, 'אוכל בחוץ')])
+    const key = detectOneOffCharges(before, 3)[0].key
+
+    const after = buildCategoryBreakdown([tx('אלוף הספות', 3700, 'ריהוט והבית')])
+    expect(detectOneOffCharges(after, 3, new Set([key]))).toHaveLength(1)
+  })
+
+  it('reads the merchant back out of a key, however the name is spelled', () => {
+    expect(merchantOfOneOffKey('ביטוח רכב::הראל')).toBe('הראל')
+    expect(merchantOfOneOffKey('שונות::a::b')).toBe('a::b')   // only the first separator splits
+    expect(merchantOfOneOffKey('בלי מפריד')).toBe('בלי מפריד')
   })
 
   it('sorts biggest first', () => {
