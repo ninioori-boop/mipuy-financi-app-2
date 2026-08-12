@@ -622,3 +622,68 @@ describe('applyImport — imported transaction detail (txns) rides along', () =>
     expect('txns' in cat).toBe(false)
   })
 })
+
+describe('logged (expense-log snapshot) — editable and deletable in the month', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  function seed(monthId: string) {
+    const s = useMonthlyStore.getState()
+    s.initMonth(monthId)
+    s.applyExpenseLog(monthId, [
+      { name: 'אוכל בחוץ ובילויים', amount: 525 },
+      { name: 'ציוד עסקי/משרדי',    amount: 324 },
+      { name: 'חופשה וטיול',        amount: 296 },
+    ])
+    return monthId
+  }
+
+  it('editing a row changes only that row', () => {
+    const m = seed('log-edit')
+    useMonthlyStore.getState().updateLoggedRow(m, 1, 'amount', 400)
+    useMonthlyStore.getState().updateLoggedRow(m, 1, 'name', 'ציוד משרדי')
+    expect(useMonthlyStore.getState().months[m].logged).toEqual([
+      { name: 'אוכל בחוץ ובילויים', amount: 525 },
+      { name: 'ציוד משרדי',         amount: 400 },
+      { name: 'חופשה וטיול',        amount: 296 },
+    ])
+  })
+
+  it('amounts are rounded and junk input falls back to 0, never NaN', () => {
+    const m = seed('log-num')
+    useMonthlyStore.getState().updateLoggedRow(m, 0, 'amount', 12.6)
+    useMonthlyStore.getState().updateLoggedRow(m, 2, 'amount', '')
+    const logged = useMonthlyStore.getState().months[m].logged
+    expect(logged[0].amount).toBe(13)
+    expect(logged[2].amount).toBe(0)
+    // A NaN here would poison the section total on screen.
+    expect(logged.every(r => Number.isFinite(r.amount))).toBe(true)
+  })
+
+  it('deleting removes exactly one row and keeps the rest in order', () => {
+    const m = seed('log-del')
+    useMonthlyStore.getState().deleteLoggedRow(m, 0)
+    expect(useMonthlyStore.getState().months[m].logged.map(r => r.name))
+      .toEqual(['ציוד עסקי/משרדי', 'חופשה וטיול'])
+    // Deleting the last remaining rows empties the section rather than throwing.
+    useMonthlyStore.getState().deleteLoggedRow(m, 1)
+    useMonthlyStore.getState().deleteLoggedRow(m, 0)
+    expect(useMonthlyStore.getState().months[m].logged).toEqual([])
+  })
+
+  it('an out-of-range index is a no-op, not a wipe', () => {
+    const m = seed('log-oob')
+    useMonthlyStore.getState().deleteLoggedRow(m, 9)
+    useMonthlyStore.getState().updateLoggedRow(m, 9, 'amount', 1)
+    expect(useMonthlyStore.getState().months[m].logged).toHaveLength(3)
+  })
+
+  it('editing the snapshot never leaks into the budget sections', () => {
+    const m = seed('log-isolated')
+    const before = useMonthlyStore.getState().months[m]
+    const snap = JSON.stringify([before.fixed, before.variable, before.sub, before.ins])
+    useMonthlyStore.getState().updateLoggedRow(m, 0, 'amount', 9999)
+    useMonthlyStore.getState().deleteLoggedRow(m, 1)
+    const after = useMonthlyStore.getState().months[m]
+    expect(JSON.stringify([after.fixed, after.variable, after.sub, after.ins])).toBe(snap)
+  })
+})

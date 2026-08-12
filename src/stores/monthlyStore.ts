@@ -138,6 +138,10 @@ interface MonthlyState {
   updateOsh:  (monthId: string, day: OshDay, value: number) => void
   // Replace this month's expense-log snapshot (from the תיעוד הוצאות tab).
   applyExpenseLog: (monthId: string, items: { name: string; amount: number }[]) => void
+  // Hand-edit a transferred row. Rows are addressed by position: the snapshot is
+  // a short list rendered in stored order, and nothing reorders it.
+  updateLoggedRow: (monthId: string, index: number, field: 'name' | 'amount', value: string | number) => void
+  deleteLoggedRow: (monthId: string, index: number) => void
 
   addRow:    (monthId: string, section: SimpleSection, name?: string) => void
   updateRow: (monthId: string, section: SimpleSection, id: string, field: 'name' | 'plan' | 'actual', value: string | number) => void
@@ -233,6 +237,27 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       updateMonth(monthId, m => ({
         ...m,
         logged: items.map(i => ({ name: i.name, amount: Math.round(i.amount) })),
+      })),
+
+    // Edits stay inside the month. The expense-log itself is never written back
+    // to from here — fixing a label in the monthly summary must not rewrite the
+    // client's journal entries.
+    updateLoggedRow: (monthId, index, field, value) =>
+      updateMonth(monthId, m => ({
+        ...m,
+        logged: (m.logged ?? []).map((r, i) =>
+          i === index
+            ? field === 'amount'
+              ? { ...r, amount: Math.round(Number(value) || 0) }
+              : { ...r, name: String(value) }
+            : r,
+        ),
+      })),
+
+    deleteLoggedRow: (monthId, index) =>
+      updateMonth(monthId, m => ({
+        ...m,
+        logged: (m.logged ?? []).filter((_, i) => i !== index),
       })),
 
     addRow: (monthId, section, name = '') =>

@@ -262,6 +262,10 @@ export default function ExpensesPage() {
   function transferToMonthly() {
     if (monthEntries.length === 0) { toast.error('אין רישומים להעברה בחודש זה'); return }
     if (!targetMonth) { toast.error('חודש לא תקין'); return }
+    // The transferred summary is editable in the monthly tab, so a re-transfer
+    // can throw away hand corrections made there. Ask before replacing it.
+    if ((months[targetMonth.id]?.logged?.length ?? 0) > 0 &&
+        !confirm(`כבר קיים סיכום תיעוד ב${targetMonth.name}. העברה חדשה תחליף אותו, כולל עריכות שנעשו שם. להמשיך?`)) return
     initMonth(targetMonth.id)
     applyExpenseLog(targetMonth.id, catTotals.map(([name, amount]) => ({ name, amount })))
     toast.success(`✅ הסיכום הועבר ל${targetMonth.name} בטאב החודשי (${fmt(monthTotal)})`, {

@@ -19,7 +19,8 @@ export default function MonthlyPage() {
   const { months, initMonth, syncFromMapping, setYear, addRow, updateRow, deleteRow,
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
-          addSavingRow, updateSavingRow, deleteSavingRow, updateOsh } = useMonthlyStore()
+          addSavingRow, updateSavingRow, deleteSavingRow, updateOsh,
+          updateLoggedRow, deleteLoggedRow } = useMonthlyStore()
 
   // Initialize the month and immediately mirror mapping (all 4 budget sections
   // + installments/debts/savings). The sync uses fromMapping:true so subsequent
@@ -348,12 +349,55 @@ export default function MonthlyPage() {
           </div>
           <p className="hidden sm:block text-[11px] text-muted-txt -mt-1">
             סיכום מהטאב &quot;תיעוד הוצאות&quot;. מוצג בנפרד ואינו משפיע על התכנון/ביצוע או על נתוני הייבוא.
+            אפשר לערוך ולמחוק כאן, בלי שזה ישנה את היומן עצמו. העברה חדשה מהיומן תחליף את הרשימה הזו.
           </p>
+          {/* Rows are rendered in stored order (already descending when transferred)
+              and never re-sorted, so a row doesn't jump away while it's being typed in. */}
           <div className="space-y-1">
-            {[...data.logged].sort((a, b) => b.amount - a.amount).map((r, i) => (
-              <div key={`${r.name}-${i}`} className="flex items-center justify-between gap-3 text-sm px-2 py-1.5 rounded bg-surface/50">
-                <span className="text-txt truncate">{r.name}</span>
-                <span className="tabular-nums text-txt shrink-0">{fmt(r.amount)}</span>
+            {data.logged.map((r, i) => (
+              <div key={i} className="group">
+                <div className="hidden sm:grid grid-cols-[1fr_8rem_1.5rem] gap-2 items-center">
+                  <input
+                    value={r.name}
+                    onChange={e => updateLoggedRow(monthId, i, 'name', e.target.value)}
+                    placeholder="קטגוריה"
+                    className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+                  />
+                  <input
+                    type="number" inputMode="decimal" min={0}
+                    value={r.amount || ''}
+                    onChange={e => updateLoggedRow(monthId, i, 'amount', parseFloat(e.target.value) || 0)}
+                    placeholder="₪"
+                    style={{ direction: 'ltr' }}
+                    className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                  />
+                  <button
+                    onClick={() => deleteLoggedRow(monthId, i)}
+                    aria-label={`מחק ${r.name}`}
+                    className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none"
+                  >×</button>
+                </div>
+                <div className="sm:hidden flex items-center gap-2 bg-surface/40 rounded-lg p-2">
+                  <input
+                    value={r.name}
+                    onChange={e => updateLoggedRow(monthId, i, 'name', e.target.value)}
+                    placeholder="קטגוריה"
+                    className="flex-1 min-w-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
+                  />
+                  <input
+                    type="number" inputMode="decimal" min={0}
+                    value={r.amount || ''}
+                    onChange={e => updateLoggedRow(monthId, i, 'amount', parseFloat(e.target.value) || 0)}
+                    placeholder="₪"
+                    style={{ direction: 'ltr' }}
+                    className="w-24 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
+                  />
+                  <button
+                    onClick={() => deleteLoggedRow(monthId, i)}
+                    aria-label={`מחק ${r.name}`}
+                    className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm"
+                  >×</button>
+                </div>
               </div>
             ))}
           </div>
