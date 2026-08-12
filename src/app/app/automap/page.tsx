@@ -42,7 +42,8 @@ import {
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
-import { isPaymentRailKey } from '@/lib/learnedSharing'
+import { isPaymentRailKey, shareableLearnedEntry } from '@/lib/learnedSharing'
+import { saveLearnedEntry } from '@/lib/firestoreService'
 import { VAR_CATEGORIES } from '@/lib/constants'
 import { BrandNameHe } from '@/components/layout/BrandProvider'
 import { LabMappingView } from '@/components/automap/LabMappingView'
@@ -790,18 +791,52 @@ export default function AutoMapPage() {
     const mine = allTxns.filter(x => txnKey(x) === key)
     const total = mine.reduce((s, x) => s + (x.isRefund ? -x.amount : x.amount), 0)
 
-    // 🔴 Remembered for THIS CLIENT ONLY, never pushed to the shared pool.
-    // Today's case is the argument: "מגדל חברה לביטוח = קרן השתלמות" is true
-    // for this household and false in general, and shared it would file another
-    // client's life-insurance premium as savings. The exact normalized
-    // description is learned, not a guessed fragment — a short key is what let
-    // a learned "מגדל" hijack the curated "מגדל/טלפון" all afternoon.
-    // Payment rails are never learned, local included: the same rail carries a
-    // different payee every time, so there is nothing true to remember.
+    // 🔴 Two destinations, and they are not the same promise.
+    //
+    // The client's own learnedDB is written immediately: the correction is a
+    // fact about THIS household and takes effect on its next run, full stop.
+    //
+    // The shared pool is only PROPOSED to (Ori, 2026-08-12). It is written when
+    // a second, different household reaches the same answer — "מגדל חברה
+    // לביטוח = קרן השתלמות" is true here and false in general, and one voice
+    // used to be enough to file another client's life-insurance premium as
+    // savings. The exact normalized description is what travels, never a
+    // fragment of it: a short key is how a learned "מגדל" hijacked the curated
+    // "מגדל/טלפון" for an afternoon.
+    //
+    // Payment rails are never learned at all, local included: the same rail
+    // carries a different payee every time, so there is nothing true to
+    // remember. Fire-and-forget, exactly like the credit tab — learning must
+    // never block the screen, and the local half already succeeded.
+    // 🔴 In VIEW-mode impersonation this setState never reaches disk: DataSync
+    // hard-blocks every save path while acting as a client outside edit mode,
+    // and view is the ordinary way the lab is driven. The correction still holds
+    // for this session through txnOverrides, which is persisted locally — so the
+    // toast below says "להרצה הזאת" rather than naming a document the write
+    // does not reach.
+    const persists = !impersonated || useImpersonationStore.getState().mode === 'edit'
     let remembered = false
     if (!isPaymentRailKey(key)) {
       useCreditStore.setState(s => ({ learnedDB: { ...s.learnedDB, [key]: to } }))
       remembered = true
+      if (shareableLearnedEntry(key, to)) {
+        // The household is the CLIENT being worked on, not the advisor at the
+        // keyboard. Without it every correction Ori ever makes is one household
+        // and nothing he does could ever corroborate anything. The server
+        // verifies the link and answers 403 if it is not his client.
+        //
+        // Reported only AFTER the server answers. The client-side guard knows
+        // nothing about the route's 40-character key cap, the rate limit, or the
+        // link check — and bank descriptors routinely exceed 40 characters, so
+        // announcing the proposal up front would have been wrong more often
+        // than right.
+        saveLearnedEntry(key, to, impersonated?.uid)
+          .then(r => {
+            if (r.shared) toast.success(`"${t.desc}" נלמד למאגר המשותף`)
+            else if (r.votes) toast.info(`נרשם למאגר המשותף: ${r.votes} מתוך ${r.needed ?? 2} לקוחות`)
+          })
+          .catch(() => {})
+      }
     }
 
     // A charge already confirmed as annual keeps its identity — the exclusion
@@ -821,14 +856,22 @@ export default function AutoMapPage() {
     })
     setResult(mapping)
 
+    // 🔴 Every claim here has to be one that already happened. The shared pool
+    // is reported separately, by the handler above, once the server answers —
+    // it is written only when a second household agrees, and a toast promising
+    // "נלמד לכולם" would be a promise the next client's mapping cannot keep.
+    const learned =
+      !remembered ? ''
+      : persists  ? ' · נשמר לתיק הלקוח'
+      :             ' · נשמר להרצה הזאת'
     const what = mine.length > 1 ? `${mine.length} חיובים של "${t.desc}"` : `"${t.desc}"`
     toast.success(
       nothingDebited
         ? `${what} נוספו ל${to}. לא נמצאה שורה של ${from} לגרוע ממנה, בדוק את הסכומים`
-        : `${what} הועברו מ${from} ל${to}${remembered ? ' · נשמר גם להרצות הבאות' : ''}`,
+        : `${what} הועברו מ${from} ל${to}${learned}`,
     )
   }, [result, allTxns, detectedMonths, reportMonths, setResult,
-      annualItems, setAnnualItem, removeAnnualItem])
+      annualItems, setAnnualItem, removeAnnualItem, impersonated?.uid])
 
   // ── editing one charge ──
   //

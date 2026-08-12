@@ -7,6 +7,10 @@ import { isAccountDeleted } from '@/lib/deletionTombstone'
 import { checkRateLimit } from '@/lib/rateLimit'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { shareableLearnedEntry } from '@/lib/learnedSharing'
+import {
+  foldProposal, proposalDocId, voterId, LEARN_QUORUM,
+  type ProposalDoc, type ProposalOutcome,
+} from '@/lib/learnedQuorum'
 import { ALL_CATEGORIES } from '@/lib/constants'
 
 // firebase-admin needs the Node runtime (not Edge).
@@ -36,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'bad request body' }, { status: 400 })
   }
-  const { token, merchant, category } = body as Record<string, unknown>
+  const { token, merchant, category, subjectUid } = body as Record<string, unknown>
 
   // Two callers, two credentials:
   //  • Android tracker app — per-user HMAC device token in the body (original path).
@@ -138,6 +142,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad merchant' }, { status: 400 })
   }
 
+  // ── whose household is this correction evidence about ──
+  //
+  // The quorum below counts DISTINCT HOUSEHOLDS, and for the automap lab the
+  // caller is never the household: Ori works inside a client's account through
+  // impersonation. Counting the signed-in uid there would mean every correction
+  // he ever makes is one household, and nothing he does could reach quorum.
+  //
+  // 🔴 So the caller may name a subject — and it is verified, never trusted.
+  // Without the link check, one account could reach quorum alone by sending two
+  // invented uids, which is precisely the single-voice promotion this whole
+  // change exists to stop. Fails CLOSED: this field decides whose evidence
+  // counts, and there is no safe default when the lookup is uncertain.
+  // Trimmed BEFORE the comparison. Untrimmed, a caller sending their own uid
+  // with a stray space fell through to the link lookup, where their own
+  // clientLinks doc names their ADVISOR as invitedByUid — so their own vote
+  // came back 403.
+  let subject = uid
+  const wanted = typeof subjectUid === 'string' ? subjectUid.trim() : ''
+  if (wanted && wanted !== uid) {
+    const target = wanted
+    if (target.length > 128) {
+      return NextResponse.json({ error: 'bad subject' }, { status: 400 })
+    }
+    try {
+      const link = await db.collection('clientLinks').doc(target).get()
+      const data = link.data() as { invitedByUid?: string; status?: string } | undefined
+      if (!link.exists || data?.status !== 'active' || data?.invitedByUid !== uid) {
+        return NextResponse.json({ error: 'not your client' }, { status: 403 })
+      }
+    } catch {
+      return NextResponse.json({ error: 'not your client' }, { status: 403 })
+    }
+    subject = target
+  }
+
   // Payment rails / personal "untracked" targets / short wildcard keys never
   // enter the shared pool — one person's Bit is another person's rent, and this
   // pool applies to EVERY account. Answer ok (the tracker app fires-and-forgets;
@@ -168,9 +207,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, shared: false })
   }
 
-  // Single-field merge — only adds/updates this one key, never replaces the doc.
-  await ref.set({ db: { [key]: category } }, { merge: true })
+  // Already the pool's answer: nothing to promote, and re-writing it would only
+  // reset nothing. Answer ok so the caller sees no difference.
+  if (existing[key] === category) {
+    return NextResponse.json({ ok: true, shared: true, votes: LEARN_QUORUM })
+  }
 
-  console.log(`[learn] uid=${uid} cat=${category}`)
-  return NextResponse.json({ ok: true })
+  // ── corroboration (Ori, 2026-08-12) ──
+  //
+  // One household's correction no longer redefines a merchant for everyone. It
+  // is recorded as a proposal, and the pool is written on the call that brings
+  // a SECOND household to the same answer.
+  //
+  // A transaction, not a merge with arrayUnion: the read and the count decide
+  // whether 40 clients get a new mapping, and two advisors correcting the same
+  // merchant in the same minute must not each see one vote and promote nothing.
+  //
+  // ⚠️ Fails CLOSED, unlike every other guard on this route. Elsewhere a read
+  // blip costs one lost correction; here it would cost a promotion made without
+  // ever counting the votes.
+  const proposalRef = db.collection('learnedProposals').doc(await proposalDocId(key))
+  const voter = await voterId(subject)
+  let outcome: ProposalOutcome
+  try {
+    outcome = await db.runTransaction(async tx => {
+      const snap = await tx.get(proposalRef)
+      const folded = foldProposal(snap.data() as ProposalDoc | undefined, key, category, voter)
+      tx.set(proposalRef, { ...folded.next, updatedAt: new Date() }, { merge: true })
+      return folded
+    })
+  } catch (err) {
+    console.warn('[learn] proposal transaction failed —', err)
+    return NextResponse.json({ error: 'try again' }, { status: 503 })
+  }
+
+  if (!outcome.promote) {
+    console.log(`[learn] uid=${uid} cat=${category} — ${outcome.votes}/${LEARN_QUORUM} votes, rival ${outcome.rival}${outcome.duplicate ? ' (repeat)' : ''}`)
+    return NextResponse.json({
+      ok: true, shared: false, votes: outcome.votes, needed: LEARN_QUORUM,
+    })
+  }
+
+  // 🔴 Guarded, unlike before. The votes are already durable at this point, so
+  // an unhandled throw here returned a bare 500 with no log line while the
+  // proposal sat at quorum with nothing in the pool. A 503 is a signal the
+  // caller can retry on, and the retry now works: promotion no longer requires
+  // the voter to be new (see foldProposal).
+  //
+  // Single-field merge — only adds/updates this one key, never replaces the doc.
+  try {
+    await ref.set({ db: { [key]: category } }, { merge: true })
+  } catch (err) {
+    console.error(`[learn] PROMOTION WRITE FAILED for "${key}" → ${category} —`, err)
+    return NextResponse.json({ error: 'try again' }, { status: 503 })
+  }
+
+  console.log(`[learn] uid=${uid} cat=${category} — PROMOTED on ${outcome.votes} households`)
+  return NextResponse.json({ ok: true, shared: true, votes: outcome.votes })
 }

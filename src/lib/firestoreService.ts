@@ -124,20 +124,44 @@ export async function loadSharedLearnedDB(): Promise<Record<string, string>> {
     : {}
 }
 
-export async function saveLearnedEntry(key: string, category: string): Promise<void> {
+/**
+ * Propose a correction to the shared pool.
+ *
+ * `subjectUid` names the HOUSEHOLD the correction is evidence about, which is
+ * not the signed-in account when an advisor works inside a client's portfolio.
+ * The server verifies the advisor→client link before it counts; passing a uid
+ * that is not yours is a 403, not a silent no-op. Omit it and the caller's own
+ * account is the household, which is what every existing caller wants.
+ */
+export interface LearnResult {
+  /** True when this call actually wrote the shared pool. */
+  shared: boolean
+  /** Households now backing this answer, and how many are needed. */
+  votes?:  number
+  needed?: number
+}
+
+export async function saveLearnedEntry(
+  key: string, category: string, subjectUid?: string,
+): Promise<LearnResult> {
   // Browser writes to shared/learnedDB are CLOSED at the rules layer (any
   // signed-in user could overwrite every value, and the hasAll guard meant the
   // doc could never shrink). The pool accepts writes only through /api/learn,
   // which validates the category, drops payment rails, rate-limits per user
   // and enforces the key ceiling — for the web session, authed by the Firebase
   // ID token. Callers treat this as fire-and-forget (.catch), same as before.
+  //
+  // Resolves with what the server DID, so a caller that wants to tell the user
+  // about the shared pool can report the outcome instead of assuming it. Since
+  // 2026-08-12 the pool is written only on a second household's agreement, so
+  // "we sent it" and "it was learned" are no longer the same event.
   const user = auth.currentUser
-  if (!user) return
+  if (!user) throw new Error('learn failed: no session')
   const idToken = await user.getIdToken()
   const res = await fetch('/api/learn', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ merchant: key, category }),
+    body: JSON.stringify(subjectUid ? { merchant: key, category, subjectUid } : { merchant: key, category }),
   })
   if (!res.ok) {
     // Callers swallow this rejection by design (learning must never block the
@@ -145,5 +169,11 @@ export async function saveLearnedEntry(key: string, category: string): Promise<v
     // means the shared pool silently stops learning and nobody can tell.
     console.warn(`shared-pool learn failed: ${res.status} for "${key}"`)
     throw new Error(`learn failed: ${res.status}`)
+  }
+  const body = await res.json().catch(() => ({}))
+  return {
+    shared: body?.shared === true,
+    votes:  typeof body?.votes === 'number' ? body.votes : undefined,
+    needed: typeof body?.needed === 'number' ? body.needed : undefined,
   }
 }

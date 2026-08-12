@@ -5,6 +5,7 @@ import type { Transaction } from '@/types/transaction'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { saveLearnedEntry } from '@/lib/firestoreService'
 import { shareableLearnedEntry, isPaymentRailKey } from '@/lib/learnedSharing'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 
 interface CreditState {
   transactions: Transaction[]
@@ -67,7 +68,14 @@ export const useCreditStore = create<CreditState>((set, get) => ({
     if (!key || isPaymentRailKey(key)) return
     set({ learnedDB: { ...get().learnedDB, [key]: category } })
     if (shareableLearnedEntry(key, category)) {
-      saveLearnedEntry(key, category).catch(() => {})
+      // 🔴 The HOUSEHOLD, not the person at the keyboard. The shared pool now
+      // promotes on two distinct households, and while an advisor is acting as
+      // a client the signed-in uid is the ADVISOR — so without this, the same
+      // correction made here for client A and for client B counted as one voice
+      // (harmless), while the same correction made in the automap lab counted
+      // as two (not harmless: one household, two identities, quorum reached
+      // alone). Both surfaces now name the same household.
+      saveLearnedEntry(key, category, useImpersonationStore.getState().client?.uid).catch(() => {})
     }
   },
 

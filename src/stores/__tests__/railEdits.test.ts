@@ -11,6 +11,7 @@ vi.mock('@/lib/firestoreService', () => ({
 }))
 
 import { useCreditStore } from '@/stores/creditStore'
+import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveLearnedEntry } from '@/lib/firestoreService'
 import type { Transaction } from '@/types/transaction'
 
@@ -24,6 +25,9 @@ function makeTxn(id: string, desc: string, category = 'ביט ללא מעקב'):
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Impersonation is module-level state shared across tests: leaving a client
+  // set would silently attribute every later correction to that household.
+  useImpersonationStore.setState({ client: null, mode: 'view' })
   useCreditStore.setState({
     transactions: [], uploadedFileNames: [],
     learnedDB: {}, sharedLearnedDB: {},
@@ -60,7 +64,23 @@ describe('payment-rail one-time edits', () => {
     // while city-stripped keys ("מאפיית ירושלים" → "מאפיית") were wildcard
     // hijacks. The key IS the merchant string, normalized.
     expect(useCreditStore.getState().learnedDB['שופרסל דיל רמת גן']).toBe('מזון לבית')
-    expect(saveLearnedEntry).toHaveBeenCalledWith('שופרסל דיל רמת גן', 'מזון לבית')
+    // The third argument is the HOUSEHOLD the correction is about — undefined
+    // when nobody is being impersonated, which means "my own account".
+    expect(saveLearnedEntry).toHaveBeenCalledWith('שופרסל דיל רמת גן', 'מזון לבית', undefined)
+  })
+
+  // 🔴 The shared pool promotes on two distinct HOUSEHOLDS, and while an
+  // advisor acts as a client the signed-in uid is the advisor's. If this
+  // surface named the advisor while the automap lab named the client, one
+  // household would hold two identities and could reach quorum on its own.
+  it('names the impersonated client as the household, not the advisor', () => {
+    useImpersonationStore.setState({ client: { uid: 'client-1', name: 'ל', email: 'l@x.com' }, mode: 'view' })
+    const store = useCreditStore.getState()
+    store.setTransactions([makeTxn('a', 'ארומה תל אביב', 'שונות')], ['t.xlsx'])
+
+    store.updateCategory(0, 'אוכל בחוץ ובילויים')
+
+    expect(saveLearnedEntry).toHaveBeenCalledWith('ארומה תל אביב', 'אוכל בחוץ ובילויים', 'client-1')
   })
 
   it('learn() refuses rail descriptors outright (covers the expenses-page path)', () => {
