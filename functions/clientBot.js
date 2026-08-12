@@ -50,6 +50,15 @@ const ALL_SECRETS = [
 const GRAPH_VERSION = "v21.0";
 const APP_URL = "https://app.orimipuy.com";
 const DEFAULT_BOT_NAME = "הכלכלן של הבית";
+// The bot's own name, deliberately separate from the firm's. `brand.nameHe` is
+// WHOSE bot this is and changes per practice (white-label); the persona is WHO
+// the client is talking to and is the same everywhere, the way a product name
+// is. Keeping them apart is what lets another firm's client meet the same
+// assistant under their own advisor's name. Ori chose it on 12/08/2026.
+// NOTE: this is not the WhatsApp display name in the chat header — that one is
+// Meta's `verified_name`, it must resemble the registered business, and it
+// cannot be approved at all until business verification lands.
+const BOT_PERSONA = "חבר פיננסי";
 
 /**
  * White-label: the bot speaks in the CLIENT'S FIRM'S name, not the platform's.
@@ -96,7 +105,8 @@ async function botBrand(practiceId) {
 
 function helpText(brand) {
   return (
-    `אני הבוט של ${brand.nameHe} 🙂\n` +
+    `אני ${BOT_PERSONA} ואני כאן לעזור לך לשלוט בהוצאות שלך 🙂\n` +
+    `הבוט של ${brand.nameHe}.\n` +
     "אפשר:\n" +
     '• לרשום הוצאה: "קניתי ב-50 בסופר"\n' +
     '• לשאול: "כמה נשאר לי לאוכל החודש?"\n' +
@@ -403,7 +413,7 @@ async function understand(message, brand) {
     system: INTENT_SYSTEM,
     messages: [{
       role: "user",
-      content: `התאריך היום (Asia/Jerusalem): ${todayKey()}\nזהות הבוט: אתה הבוט של "${b.nameHe}". אם ה-reply שאתה כותב מזכיר את שמך או מפנה לאפליקציה, השתמש רק בשם ובקישור האלה: ${b.url}. אל תמציא שם או קישור אחר.\n\nההודעה של הלקוח:\n${message}`,
+      content: `התאריך היום (Asia/Jerusalem): ${todayKey()}\nזהות הבוט: קוראים לך "${BOT_PERSONA}", ואתה הבוט של "${b.nameHe}". אם ה-reply שאתה כותב מזכיר את שמך, קרא לעצמך "${BOT_PERSONA}"; אם הוא מפנה לאפליקציה או למשרד, השתמש רק בשם "${b.nameHe}" ובקישור ${b.url}. אל תמציא שם או קישור אחר.\n\nההודעה של הלקוח:\n${message}`,
     }],
   });
   const text = res.content.find((block) => block.type === "text")?.text || "{}";
@@ -515,7 +525,7 @@ exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) 
       const welcomeTenancy = await resolveTenancy(consumed.uid);
       const brand = await botBrand(welcomeTenancy.practiceId || consumed.practiceId);
       await sendText(msg.from,
-        `מעולה, התחברת ל${brand.nameHe}! ✅\nמעכשיו אפשר לרשום הוצאות (למשל "קניתי ב-50 בסופר") ולשאול שאלות ("כמה נשאר לי לאוכל?").`);
+        `מעולה, התחברת ל${brand.nameHe}! ✅\nאני ${BOT_PERSONA} ואני כאן לעזור לך לשלוט בהוצאות שלך.\nמעכשיו אפשר לרשום הוצאות (למשל "קניתי ב-50 בסופר") ולשאול שאלות ("כמה נשאר לי לאוכל?").`);
       return res.sendStatus(200);
     }
 
