@@ -162,8 +162,9 @@
 ## שמירת נתונים (Persistence)
 
 [src/lib/dataSync.ts](src/lib/dataSync.ts) מרכז את כל השמירה לענן (Firestore):
-- **נשמר:** `monthly`, `annual`, `mapping`, `goals`, `meetings`, `business`, `businessAnnual`, ומ‑`credit` רק `learnedDB` + `reportMonths`.
-- **לא נשמר (ephemeral בכוונה):** `bankStore.rawRows`, `creditStore.transactions`, מצב UI של sync.
+- **נשמר:** `monthly`, `annual`, `mapping`, `goals`, `meetings`, `business`, `businessAnnual`, ומ‑`credit` גם `learnedDB` + `reportMonths` וגם `transactions` (המיפוי קורא ממנו את הפירוט לכל שורה).
+- **נשמר, אבל עם קידוד:** `bankStore.rawRows` (מאז 09/08/2026) ו-`importStore`. רשת הגיליון היא מערך של מערכים, ו-Firestore מסרב לכתוב מסמך כזה **כולו**, לכן כל שורה נעטפת באובייקט ותאי תאריך מתויגים. ראה את בלוק "Bank grid encoding" ב-`dataSync.ts`. דוח מעל 150KB (בערך 1,550 שורות) לא נשמר בכלל, כדי לא לשרוף את תקציב ה-900KB של המסמך, והטאב אומר את זה על המסך.
+- **לא נשמר:** מצב UI של sync.
 - שמירה אוטומטית (ראה `SaveStatusBar`). ב‑logout `resetAllStores()` מנקה הכל כדי למנוע דליפת נתונים בין משתמשים.
 
 > כשמוסיפים/משנים שדה ב‑store כלשהו — חובה לחווט אותו דרך `dataSync.ts` (Snapshot + collectSnapshot + applySnapshot + resetAllStores), אחרת הוא יאבד ב‑reload. יש subagent ייעודי (`store-sync-validator`) שבודק בדיוק את זה.

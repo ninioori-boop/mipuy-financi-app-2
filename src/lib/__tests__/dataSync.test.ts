@@ -22,6 +22,8 @@ import { useRecurringStore } from '@/stores/recurringStore'
 import { useBusinessStore } from '@/stores/businessStore'
 import { useBusinessAnnualStore } from '@/stores/businessAnnualStore'
 import { useBusinessRosterStore, PRIMARY_BUSINESS_ID } from '@/stores/businessRosterStore'
+import { useBankStore } from '@/stores/bankStore'
+import { firestoreViolation } from './firestoreShape'
 import { duplicateBusiness, addBusiness, removeBusiness } from '@/lib/businessProfiles'
 
 // Regression net for the bug-family the user has been hit by twice
@@ -210,6 +212,18 @@ function populateAllStores() {
       },
     },
   })
+
+  // The bank tab's grid. Persisted since 2026-08-09; the shape it is persisted
+  // IN is covered in bankGridPersist.test.ts (Firestore refuses nested arrays).
+  useBankStore.setState({
+    rawRows: [
+      ['תאריך', 'תיאור', 'חובה'],
+      [new Date(2026, 6, 14), 'סופר ברקת', 312.9],
+    ],
+    fileName: 'osh.xlsx',
+    sentRows: [1],
+    reportMonths: 2,
+  })
 }
 
 describe('DataSync — snapshot round-trip', () => {
@@ -228,6 +242,17 @@ describe('DataSync — snapshot round-trip', () => {
     const after = collectSnapshot()
 
     expect(after).toEqual(before)
+  })
+
+  it('a fully populated portfolio is a legal Firestore document', () => {
+    // 2026-08-12: the bank tab's raw grid was a nested array, which Firestore
+    // rejects — and it rejects the ENTIRE write, so one tab's payload silently
+    // took down saving for the mapping, the monthly plan and the expense log
+    // too. This walks every field the way Firestore does, so the next field
+    // with an illegal shape fails here instead of in a client's face.
+    populateAllStores()
+
+    expect(firestoreViolation(collectSnapshot())).toBeNull()
   })
 
   it('applySnapshot is a no-op on null / non-object / empty input', () => {

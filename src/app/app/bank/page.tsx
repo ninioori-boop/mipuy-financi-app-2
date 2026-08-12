@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useBankStore } from '@/stores/bankStore'
 import { parseExcelFile } from '@/lib/parseExcel'
+import { bankGridTooLargeToPersist } from '@/lib/dataSync'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 import { aiHeaders } from '@/lib/getAuthToken'
 import { fetchWithRetry } from '@/lib/fetchWithRetry'
@@ -210,6 +211,10 @@ export default function BankPage() {
       setIsLoading(false)
     }
   }, [setData])
+
+  // Long statements are left out of the portfolio document on purpose — the
+  // whole portfolio shares one ~900KB doc. Cheap to ask (identity-cached).
+  const gridTooLarge = bankGridTooLargeToPersist(rawRows)
 
   // header row = the one with the most non-empty string cells
   const headerIdx = rawRows.reduce((best, r, i) =>
@@ -617,6 +622,18 @@ export default function BankPage() {
       {fileName && totalTxCount === 0 && (
         <div className="rounded-xl border border-yellow-400/30 bg-yellow-400/5 p-4 text-sm text-yellow-300">
           לא זוהו עסקאות בקובץ. ייתכן שהפורמט אינו נתמך.
+        </div>
+      )}
+
+      {/* The grid is too big for the portfolio document, so it is not saved.
+          Say so: the user cannot infer it, and would come back to an empty tab
+          and conclude the upload failed. What they SEND to the mapping is
+          saved normally, which is the part that matters. */}
+      {gridTooLarge && (
+        <div className="rounded-xl border border-yellow-400/30 bg-yellow-400/5 p-4 text-sm text-yellow-300">
+          ⚠️ הדוח הזה ארוך מדי כדי להישמר. הוא יישאר על המסך כל עוד הדף פתוח,
+          אבל אחרי רענון תצטרך להעלות אותו שוב. מה שתשלח למיפוי נשמר כרגיל,
+          אז אפשר לעבוד עליו עכשיו בשקט.
         </div>
       )}
     </div>

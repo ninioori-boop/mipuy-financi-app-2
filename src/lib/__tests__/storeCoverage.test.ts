@@ -18,9 +18,13 @@ import { join } from 'path'
 const STORES_DIR = join(process.cwd(), 'src/stores')
 const DATA_SYNC = readFileSync(join(process.cwd(), 'src/lib/dataSync.ts'), 'utf8')
 
-// Cleared by resetSessionStores() — per-person, NOT in the snapshot. These hold
-// data belonging to whoever is at the screen and must not survive an identity
-// change (sign-out, view/edit-as-client, account deletion).
+// Cleared by resetSessionStores() — these hold data belonging to whoever is at
+// the screen and must not survive an identity change (sign-out,
+// view/edit-as-client, account deletion). Being a session store no longer
+// implies being absent from the snapshot: bankStore's grid IS persisted (since
+// 2026-08-09), because re-uploading and re-running the AI extraction on every
+// visit was the complaint. What makes it a session store is who it belongs to,
+// not whether it is written down.
 const SESSION_STORES = ['bankStore', 'autoMapStore']
 
 // Deliberately never reset: session/UI state that is meaningless to persist and

@@ -38,7 +38,10 @@ import { useImportStore } from '@/stores/importStore'
 import { useBankStore } from '@/stores/bankStore'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { saveUserData, saveClientDataAsAdvisor, loadUserData, loadSharedLearnedDB, createVersion } from '@/lib/firestoreService'
-import { collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize } from '@/lib/dataSync'
+import {
+  collectSnapshot, applySnapshot, resetAllStores, resetSessionStores, snapshotSize,
+  keepOversizeGrid, restoreOversizeGrid,
+} from '@/lib/dataSync'
 import { heldEventBlocksSave } from '@/lib/heldEventConflict'
 import { needsIdentityTeardown } from '@/lib/identitySwitch'
 import { registerSaveBaselineBump } from '@/lib/saveBaseline'
@@ -139,6 +142,7 @@ function writeLocalBackup(uid: string, snapshot: unknown) {
     window.localStorage.setItem(backupKey(uid), JSON.stringify({ ts: Date.now(), snapshot }))
   } catch { /* quota exceeded — non-fatal, network save is still primary */ }
 }
+
 
 export function DataSync({ children }: { children: React.ReactNode }) {
   const user            = useAuthStore(s => s.user)
@@ -369,6 +373,9 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     // snapshot, and resetAllStores clears them — it is loaded once per session,
     // so without this every apply would silently degrade auto-categorization.
     const shared = useCreditStore.getState().sharedLearnedDB
+    // Same reason as `shared`: too big to be in the snapshot, so the reset below
+    // would destroy it outright. See keepOversizeGrid above.
+    const keptGrid = keepOversizeGrid()
     const prevJson = lastSavedJson.current
     try {
       resetAllStores()
@@ -382,10 +389,12 @@ export function DataSync({ children }: { children: React.ReactNode }) {
         resetAllStores()
         if (prevJson) applySnapshot(JSON.parse(prevJson))
       } catch { /* nothing better to try */ }
+      restoreOversizeGrid(keptGrid)   // the rollback snapshot cannot hold it either
       setStatus('error', 'טעינת עדכון מרוחק נכשלה')
       return null
     }
     if (shared && Object.keys(shared).length) useCreditStore.setState({ sharedLearnedDB: shared })
+    restoreOversizeGrid(keptGrid)
     const json = JSON.stringify(collectSnapshot())
     lastSavedJson.current  = json
     lastBackupJson.current = json

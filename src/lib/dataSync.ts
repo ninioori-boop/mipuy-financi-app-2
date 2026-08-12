@@ -6,11 +6,14 @@
  * Handles collecting persistable state from all stores into a single
  * snapshot and hydrating stores back from that snapshot.
  *
- * Only data fields are persisted — never actions/methods.
- * Ephemeral stores (bankStore raw rows, sync UI state) are intentionally
- * excluded. creditStore.transactions WAS ephemeral but is now persisted —
- * the mapping tab's per-row breakdown reads from creditStore, so without
- * persistence the breakdown vanished on every refresh.
+ * Only data fields are persisted — never actions/methods. Sync UI state is
+ * intentionally excluded. Two stores that WERE ephemeral are now persisted, in
+ * both cases because re-running an upload and a paid AI extraction on every
+ * visit was the actual complaint: creditStore.transactions (the mapping tab's
+ * per-row breakdown reads from it) and bankStore's raw grid, which needs the
+ * encoding described in the bank-grid block below to be a legal Firestore
+ * value at all. Both still count as SESSION stores for reset purposes — they
+ * belong to whoever is at the screen (see storeCoverage.test.ts).
  */
 
 import { useMonthlyStore } from '@/stores/monthlyStore'
@@ -96,8 +99,9 @@ export interface Snapshot {
     reportMonths:      number
   }
   // The bank tab's extracted rows (2026-08-09) — same persistence rule.
+  // Stored ENCODED, one object per row: see the bank-grid block below.
   bank: {
-    rawRows:      unknown[][]
+    rawRows:      PersistedBankRow[]
     fileName:     string
     sentRows:     number[]
     reportMonths: number
@@ -146,6 +150,186 @@ export interface Snapshot {
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/* ── Bank grid encoding ───────────────────────────────────────────────────
+ * Firestore REFUSES a document holding an array inside an array, and it
+ * refuses the whole write — not just the offending field. The bank tab holds a
+ * spreadsheet grid (rows of cells), so from 2026-08-09 (fd2fd0a, "bank+import
+ * analyses persist like credit") until this fix, every save of the ENTIRE
+ * portfolio failed from the moment a statement was loaded: mapping, monthly,
+ * expense log, all of it, with Firebase's raw English message on screen. The
+ * feature never worked either — no grid ever reached the cloud to be restored.
+ *
+ * So each row is wrapped in an object on the way out. Cells need their own
+ * care for two reasons:
+ *   · the bank flow keys off `c instanceof Date` (pickDate / detectBankHeader /
+ *     looksLikeTransaction). Firestore hands a stored Date back as a Timestamp
+ *     and JSON hands it back as a string, so a naive round-trip would restore a
+ *     grid whose dates are gone and whose rows no longer look like transactions
+ *     — the tab would then blame the file ("לא זוהו עסקאות"). Date cells are
+ *     tagged explicitly and rebuilt on load.
+ *   · sheet_to_json produces sparse rows, and Firestore rejects `undefined`
+ *     just as hard as it rejects nested arrays. Holes become null.
+ */
+
+type PersistedCell = string | number | boolean | null | { d: string }
+export interface PersistedBankRow { c: PersistedCell[] }
+
+/**
+ * Ceiling for the persisted grid. The whole portfolio shares ONE ~900KB
+ * document (MAX_BYTES in DataSync), so a long statement must not eat the room
+ * the rest of the portfolio needs — blowing that budget blocks EVERY save, a
+ * worse failure than not keeping the grid. Over the cap the grid is dropped
+ * from the snapshot entirely, file name and sent-marks included, so the tab
+ * shows its plain "upload a file" state rather than accusing the file of being
+ * unreadable.
+ *
+ * ~1,550 rows crosses this. That is a plausible 12-month statement, so the
+ * over-cap path is a real path, not a theoretical one:
+ *   · the rows live on in memory, and applyRemote() carries them over its
+ *     reset (see keepOversizeGrid in DataSync.tsx) — otherwise a remote save
+ *     from the advisor or another device would wipe a statement mid-review and
+ *     the only way back is another upload plus another paid AI extraction.
+ *   · the bank tab says so on screen, because "it will be gone after you
+ *     refresh" is not something the user can infer.
+ */
+export const BANK_PERSIST_MAX_BYTES = 150_000
+
+function encodeCell(v: unknown): PersistedCell {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : { d: v.toISOString() }
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v
+  return null   // undefined (sparse row), nested structures, anything exotic
+}
+
+export function encodeBankRows(rows: unknown[][]): PersistedBankRow[] {
+  // Array.from at BOTH levels, never .map: .map preserves holes, and a hole is
+  // read back as `undefined` — the very thing this encoder exists to keep out
+  // of the payload. Outer-level holes are not reachable from today's callers
+  // (both build dense arrays), which is exactly why they would go unnoticed.
+  return Array.from(rows, r => ({ c: Array.isArray(r) ? Array.from(r, encodeCell) : [] }))
+}
+
+function decodeCell(v: unknown): unknown {
+  if (isObject(v) && typeof v.d === 'string') {
+    const d = new Date(v.d)
+    return isNaN(d.getTime()) ? null : d
+  }
+  return v ?? null
+}
+
+// Full ISO timestamps only. Applied ONLY to the legacy shape below, where
+// JSON.stringify had already flattened Date cells to strings — a bank cell's
+// own text never looks like this, so nothing real gets converted by mistake.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+
+function decodeLegacyCell(v: unknown): unknown {
+  if (typeof v === 'string' && ISO_DATE_RE.test(v)) {
+    const d = new Date(v)
+    if (!isNaN(d.getTime())) return d
+  }
+  return decodeCell(v)
+}
+
+/** Rebuild the live grid from a snapshot. Returns null when there is none. */
+export function decodeBankRows(raw: unknown): unknown[][] | null {
+  if (!Array.isArray(raw)) return null
+  return raw.map(r => {
+    // Legacy shape: a localStorage backup written between 2026-08-09 and this
+    // fix holds the plain nested array (JSON allowed what Firestore did not).
+    // Those restore here and get re-encoded on the next save.
+    if (Array.isArray(r)) return Array.from(r, decodeLegacyCell)
+    if (isObject(r) && Array.isArray(r.c)) return Array.from(r.c, decodeCell)
+    return []
+  })
+}
+
+// collectSnapshot runs on every keystroke-debounce; warn once per file, not
+// once per call.
+let warnedOversizeGrid = ''
+
+// Encoding + measuring a grid is O(cells), and collectSnapshot is called
+// several times per save cycle plus on every 500ms backup tick — on a
+// thousand-row statement that is real work to repeat while someone is typing.
+// Keyed on the array IDENTITY, which is sound for the same reason the save is
+// scheduled at all: bankStore only ever REPLACES rawRows (setData / reset), and
+// zustand subscribers — including DataSync's — fire on reference change.
+let gridCacheSrc: unknown[][] | null = null
+let gridCacheOut: { rows: PersistedBankRow[]; bytes: number } | null = null
+
+function encodeGrid(rows: unknown[][]): { rows: PersistedBankRow[]; bytes: number } {
+  if (gridCacheSrc === rows && gridCacheOut) return gridCacheOut
+  const encoded = encodeBankRows(rows)
+  const out = {
+    rows:  encoded,
+    bytes: encoded.length ? new TextEncoder().encode(JSON.stringify(encoded)).length : 0,
+  }
+  gridCacheSrc = rows
+  gridCacheOut = out
+  return out
+}
+
+/**
+ * True when this grid cannot be persisted at all. Cheap to call from render:
+ * it rides the same identity-keyed cache as the encoder.
+ */
+export function bankGridTooLargeToPersist(rows: unknown[][]): boolean {
+  return rows.length > 0 && encodeGrid(rows).bytes > BANK_PERSIST_MAX_BYTES
+}
+
+/* ── An unsaveable grid survives a live-sync apply ────────────────────────
+ * A statement over the cap is left out of the snapshot on purpose, so there is
+ * nothing in the cloud for applySnapshot to put back after resetAllStores.
+ * Without the pair below, one remote write — the advisor saving, the user's own
+ * phone saving, the focus refetch — makes a long statement vanish from under
+ * someone reviewing it, recoverable only by uploading again and paying for
+ * another AI extraction. It is also what the sign-out path already claims to
+ * protect: "Deliberately NOT done in applyRemote(), which resets stores within
+ * ONE identity and would otherwise wipe a bank statement mid-review".
+ *
+ * Safe across identities BY CONSTRUCTION, which matters because carrying store
+ * state over a reset is exactly how client data has leaked between people here
+ * before: applyRemote is synchronous, so no sign-in, sign-out or act-as-client
+ * entry can interleave between the capture and the restore. And a grid small
+ * enough to persist is never carried, so an empty grid arriving from the cloud
+ * still means "cleared on another device" and is honored.
+ */
+export type KeptGrid = ReturnType<typeof useBankStore.getState> | null
+
+export function keepOversizeGrid(): KeptGrid {
+  const b = useBankStore.getState()
+  return bankGridTooLargeToPersist(b.rawRows) ? b : null
+}
+
+export function restoreOversizeGrid(kept: KeptGrid): void {
+  if (!kept) return
+  useBankStore.setState({
+    rawRows:      kept.rawRows,
+    fileName:     kept.fileName,
+    sentRows:     kept.sentRows,
+    reportMonths: kept.reportMonths,
+  })
+}
+
+function collectBank(): Snapshot['bank'] {
+  const b = useBankStore.getState()
+  const { rows: rawRows, bytes } = encodeGrid(b.rawRows)
+  if (bytes > BANK_PERSIST_MAX_BYTES) {
+    if (warnedOversizeGrid !== b.fileName) {
+      warnedOversizeGrid = b.fileName
+      console.warn(
+        `[dataSync] bank grid too large to persist (${Math.round(bytes / 1024)}KB > ` +
+        `${Math.round(BANK_PERSIST_MAX_BYTES / 1024)}KB) — kept in memory for this session only`,
+      )
+    }
+    return { rawRows: [], fileName: '', sentRows: [], reportMonths: b.reportMonths }
+  }
+  return {
+    rawRows,
+    fileName:     b.fileName,
+    sentRows:     b.sentRows,
+    reportMonths: b.reportMonths,
+  }
 }
 
 /** Pull a serializable snapshot from all live stores. */
@@ -201,12 +385,7 @@ export function collectSnapshot(): Snapshot {
       uploadedFileNames: useImportStore.getState().uploadedFileNames,
       reportMonths:      useImportStore.getState().reportMonths,
     },
-    bank: {
-      rawRows:      useBankStore.getState().rawRows,
-      fileName:     useBankStore.getState().fileName,
-      sentRows:     useBankStore.getState().sentRows,
-      reportMonths: useBankStore.getState().reportMonths,
-    },
+    bank: collectBank(),
     meetings: { meetings: mt.meetings },
     expenseLog: { entries: el.entries },
     categoryBudgets: { budgets: cb.budgets },
@@ -379,11 +558,13 @@ export function applySnapshot(raw: unknown): void {
     })
   }
 
-  // bank — same back-compat shape guards.
+  // bank — same back-compat shape guards, plus the grid decode (which also
+  // accepts the pre-2026-08-12 plain-array shape still sitting in localStorage).
   if (isObject(raw.bank)) {
     const b = raw.bank as Partial<Snapshot['bank']>
+    const bankRows = decodeBankRows(b.rawRows)
     useBankStore.setState({
-      ...(Array.isArray(b.rawRows)            ? { rawRows: b.rawRows }           : {}),
+      ...(bankRows                            ? { rawRows: bankRows }            : {}),
       ...(typeof b.fileName === 'string'      ? { fileName: b.fileName }         : {}),
       ...(Array.isArray(b.sentRows)           ? { sentRows: b.sentRows }         : {}),
       ...(typeof b.reportMonths === 'number'  ? { reportMonths: b.reportMonths } : {}),
