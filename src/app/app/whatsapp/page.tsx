@@ -11,6 +11,12 @@ import { auth } from '@/lib/firebase'
 // NEXT_PUBLIC_WA_BOT_NUMBER still overrides it, for a per-firm number later on.
 const WA_BOT_NUMBER = process.env.NEXT_PUBLIC_WA_BOT_NUMBER || '972542544043'
 
+// Same number, formatted for a human to dial or search for by hand — the escape
+// hatch when the wa.me handoff fails on a device we cannot test.
+const DISPLAY_NUMBER = WA_BOT_NUMBER.startsWith('972')
+  ? `0${WA_BOT_NUMBER.slice(3)}`.replace(/^(\d{3})(\d{3})(\d{4})$/, '$1-$2-$3')
+  : `+${WA_BOT_NUMBER}`
+
 type Phase = 'idle' | 'loading' | 'ready' | 'error'
 
 /**
@@ -83,9 +89,14 @@ export default function WhatsAppLinkPage() {
             </div>
             <p className="text-muted-txt text-xs text-center mb-5">בתוקף ל-15 דקות</p>
 
+            {/* Deliberately NOT target="_blank": inside the native Android shell
+                this page runs in a WebView, and a WebView opens no new window
+                unless the host app implements onCreateWindow — so _blank made
+                the button do nothing at all. A same-frame navigation instead
+                reaches shouldOverrideUrlLoading, which is what hands the link
+                to WhatsApp. Browsers behave the same either way. */}
             <a
               href={waHref}
-              target="_blank"
               rel="noreferrer"
               className="block w-full bg-gold text-surface font-bold rounded-xl px-6 py-3 text-center hover:bg-gold-light transition-colors"
             >
@@ -94,6 +105,15 @@ export default function WhatsAppLinkPage() {
             <p className="text-muted-txt text-xs text-center mt-3 leading-relaxed">
               נפתח צ'אט עם הבוט והקוד כבר מוכן, רק לשלוח. אחרי זה אפשר לכתוב לו
               "קניתי ב-50 בסופר" או "כמה נשאר לי לאוכל?".
+            </p>
+
+            {/* Never a dead end: if the handoff fails on some device, the code
+                and the number are both on screen, so the link is a shortcut and
+                not the only way through. */}
+            <p className="text-muted-txt text-xs text-center mt-4 leading-relaxed border-t border-line pt-4">
+              הכפתור לא עבד? פתחו וואטסאפ ידנית, התחילו צ'אט עם{' '}
+              <span dir="ltr" className="text-gold font-semibold select-all">{DISPLAY_NUMBER}</span>
+              {' '}ושלחו את ההודעה: <span className="text-gold font-semibold select-all">קוד {code}</span>
             </p>
 
             <button
