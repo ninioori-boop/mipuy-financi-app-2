@@ -29,7 +29,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try { sessionStorage.setItem('postLoginPath', pathname) } catch {}
         router.replace('/auth')
       }
-      if (user && pathname.startsWith('/auth')) {
+      // /auth/action is the Firebase email action handler, and the person
+      // clicking a verification link is ALREADY SIGNED IN (that is exactly who
+      // sits on the verify screen). Bouncing them to the app here would discard
+      // the oobCode before it is applied, and they would land back on the very
+      // screen the link was supposed to clear.
+      if (user && pathname.startsWith('/auth') && !pathname.startsWith('/auth/action')) {
         let dest = '/welcome'
         try {
           // A branded-firm device skips the welcome page (it is the DEFAULT
