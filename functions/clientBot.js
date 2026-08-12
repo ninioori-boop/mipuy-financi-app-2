@@ -162,14 +162,29 @@ async function practiceAiConfig(practiceId) {
  * (config/ai.killSwitch) and both deploys honour it. Cached briefly so the
  * highest-frequency AI surface does not pay a read per message.
  */
-let killCache = { at: 0, value: false };
+// `value` is the last state read SUCCESSFULLY, and a failed read must not reset
+// it to false: the switch is flipped during an incident, which is exactly when
+// Firestore is the likely casualty. Resetting on error meant a blip silently
+// released the panic button. `everRead` keeps "known off" apart from "never
+// managed to look", so a cold start during an outage still fails open rather
+// than blacking out the bot on its own. Mirrors src/lib/aiBudget.ts — the two
+// copies of this switch must not drift.
+let killCache = { at: 0, value: false, everRead: false };
 async function aiKillSwitchOn() {
   if (Date.now() - killCache.at < 60_000) return killCache.value;
   try {
     const snap = await db().collection("config").doc("ai").get();
-    killCache = { at: Date.now(), value: snap.exists && snap.data().killSwitch === true };
+    killCache = {
+      at: Date.now(),
+      value: snap.exists && snap.data().killSwitch === true,
+      everRead: true,
+    };
   } catch {
-    killCache = { at: Date.now(), value: false };   // fail-open
+    killCache = { ...killCache, at: Date.now() };
+    console.warn(
+      `[clientBot] kill-switch read failed; retaining killSwitch=${killCache.value}` +
+        (killCache.everRead ? "" : " (never read successfully — failing open)"),
+    );
   }
   return killCache.value;
 }

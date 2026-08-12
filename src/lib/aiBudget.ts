@@ -21,7 +21,17 @@ const DAY_MS = 86_400_000
 // The Firestore switch is cached briefly: it is read on every AI call, and a
 // minute of latency on a panic button is an acceptable trade for not paying a
 // read per request.
-let killCache = { at: 0, value: false }
+//
+// `value` is the last state read SUCCESSFULLY. A failed read must never downgrade
+// it to false: the switch is flipped during an incident, and an incident is
+// exactly when Firestore is most likely to be the thing that broke. Resetting to
+// false on error meant a blip silently un-pressed the panic button.
+// `everRead` separates "we know it is off" from "we have never managed to look",
+// so a cold start during an outage still fails open (no self-inflicted blackout
+// on a deploy that has never reached Firestore) while an already-observed ON
+// state survives. Both facts go to the log, because a control that degrades in
+// silence is the failure mode this whole block exists to prevent.
+let killCache = { at: 0, value: false, everRead: false }
 
 async function firestoreKillSwitch(): Promise<boolean> {
   if (Date.now() - killCache.at < 60_000) return killCache.value
@@ -30,9 +40,19 @@ async function firestoreKillSwitch(): Promise<boolean> {
   if (!db) return false
   try {
     const snap = await db.collection('config').doc('ai').get()
-    killCache = { at: Date.now(), value: snap.exists && snap.data()?.killSwitch === true }
+    killCache = {
+      at: Date.now(),
+      value: snap.exists && snap.data()?.killSwitch === true,
+      everRead: true,
+    }
   } catch {
-    killCache = { at: Date.now(), value: false }   // fail-open
+    // Retain the last known state. `at` is re-stamped so a sustained outage
+    // retries once a minute rather than on every single AI call.
+    killCache = { ...killCache, at: Date.now() }
+    console.warn(
+      `[aiBudget] kill-switch read failed; retaining killSwitch=${killCache.value}` +
+        (killCache.everRead ? '' : ' (never read successfully — failing open)'),
+    )
   }
   return killCache.value
 }
