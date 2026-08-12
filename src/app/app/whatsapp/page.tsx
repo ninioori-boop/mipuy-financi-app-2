@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { getIdToken } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
-import { embeddedKind } from '@/lib/isEmbedded'
+import { canOpenExternalSchemes } from '@/lib/isEmbedded'
 
 // The product bot's WhatsApp number (digits only, no +). The default is the real
 // production number — deliberately not left to an env var, because a missing one
@@ -29,16 +29,17 @@ export default function WhatsAppLinkPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
-  // Inside the Kotlin WebView shell a wa.me link cannot reach WhatsApp at all:
-  // wa.me redirects to `whatsapp://`, the WebView has no handler for a non-http
-  // scheme, and the client lands on ERR_UNKNOWN_URL_SCHEME. Nothing the web can
-  // send fixes that — only the host app can (MainActivity's
-  // shouldOverrideUrlLoading). So in the app we stop pretending the button works
-  // and hand over a copy-and-paste flow that does. Detection runs in an effect
-  // because it reads navigator, and the first render is the server's.
-  const [inAndroidApp, setInAndroidApp] = useState(false)
+  // A wa.me link ends at `whatsapp://`, and an Android shell older than 3.18 has
+  // no handler for a non-http scheme — the client lands on
+  // ERR_UNKNOWN_URL_SCHEME instead of WhatsApp. Nothing the web can send fixes
+  // that, so where the handoff cannot work we offer copy-and-paste instead of a
+  // button that lies. `canOpenExternalSchemes` reads the marker the shell stamps
+  // on its user agent, so the one-tap link comes back on its own the moment a
+  // client updates the app — no second web deploy, no version table here.
+  // Starts false so the server-rendered first paint never promises the link.
+  const [canHandOff, setCanHandOff] = useState(false)
   const [copied, setCopied] = useState(false)
-  useEffect(() => { setInAndroidApp(embeddedKind() === 'android-app') }, [])
+  useEffect(() => { setCanHandOff(canOpenExternalSchemes()) }, [])
 
   async function copyCodeMessage() {
     const text = `קוד ${code}`
@@ -124,8 +125,8 @@ export default function WhatsAppLinkPage() {
             </div>
             <p className="text-muted-txt text-xs text-center mb-5">בתוקף ל-15 דקות</p>
 
-            {inAndroidApp ? (
-              /* In the app the link is a dead end (ERR_UNKNOWN_URL_SCHEME), so
+            {!canHandOff ? (
+              /* Old shell: the link is a dead end (ERR_UNKNOWN_URL_SCHEME), so
                  don't show one. Copy + paste is three taps and always works. */
               <>
                 <button

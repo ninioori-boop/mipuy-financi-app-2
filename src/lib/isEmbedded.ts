@@ -34,3 +34,25 @@ export function embeddedKind(): EmbeddedKind {
 export function isEmbeddedBrowser(): boolean {
   return embeddedKind() !== null
 }
+
+/**
+ * Can this shell hand a non-http link (whatsapp:, tel:, mailto:) to the app that
+ * owns it? A raw WebView cannot: it dies with ERR_UNKNOWN_URL_SCHEME, which is
+ * what a client hit when the WhatsApp connect button tried to reach wa.me and
+ * wa.me redirected to `whatsapp://`. The Kotlin shell gained the handler in 3.18
+ * and stamps `ExtSchemes/1` on its user agent to say so.
+ *
+ * Ask this — never the app version — before offering a link that leaves the app.
+ * The web ships continuously and the installed app does not, so both builds are
+ * always in the wild at once, and only the app can declare what it supports.
+ * A plain browser answers true: it has always handled these schemes.
+ */
+export function canOpenExternalSchemes(): boolean {
+  if (typeof window === 'undefined') return false
+  if (embeddedKind() !== 'android-app') return true
+  try {
+    return /\bExtSchemes\/1\b/.test(navigator.userAgent || '')
+  } catch {
+    return false
+  }
+}
