@@ -27,10 +27,10 @@ const CLIENT_TABS = [
   { href: '/app/meetings',    emoji: '📝', label: 'פגישות' },
 ]
 const BUSINESS_TAB = { href: '/app/business', emoji: '🏢', label: 'עסק' }
-// WhatsApp connect in the client (phone) menu. Pilot-gated (lab only) until the
-// real WhatsApp number is live — on the Meta test number the bot can't message
-// clients outside the ~5 verified recipients, so a general link would silently
-// fail. At go-live, drop the isAdvisor guard below so every client sees it.
+// WhatsApp connect in the client (phone) menu. Open to every client since
+// go-live on the real Israeli number (11/08/2026) — while the bot sat on the
+// Meta test number it could only reach ~5 verified recipients, so this was
+// lab-gated to keep a general link from silently failing.
 const WHATSAPP_TAB = { href: '/app/whatsapp', emoji: '💬', label: 'חיבור וואטסאפ' }
 
 type TabItem  = { href: string; emoji: string; label: string; advisorOnly?: boolean }
@@ -66,6 +66,7 @@ const groups: TabGroup[] = [
     title: 'כלים',
     items: [
       { href: '/app/expenses', emoji: '🧾', label: 'תיעוד הוצאות' },
+      { href: '/app/whatsapp', emoji: '💬', label: 'חיבור וואטסאפ' },
       { href: '/app/checking', emoji: '💧', label: 'התנהלות עו"ש' },
       { href: '/app/goals',    emoji: '🎯', label: 'יעדים' },
       { href: '/app/loans',    emoji: '💰', label: 'הלוואות' },
@@ -92,7 +93,6 @@ const groups: TabGroup[] = [
       { href: '/app/automap',          emoji: '🧪', label: 'מיפוי AI',      advisorOnly: true },
       { href: '/app/transaction-test', emoji: '💳', label: 'קליטת עסקה',    advisorOnly: true },
       { href: '/app/subscriptions',    emoji: '🔁', label: 'מנויים קבועים', advisorOnly: true },
-      { href: '/app/whatsapp',         emoji: '💬', label: 'חיבור וואטסאפ', advisorOnly: true },
     ],
   },
 ]
@@ -306,7 +306,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const clientTabs = [
       ...CLIENT_TABS,
       ...(hasBusiness ? [BUSINESS_TAB] : []),
-      ...(isAdvisor ? [WHATSAPP_TAB] : []),   // pilot-gated; remove isAdvisor at go-live
+      WHATSAPP_TAB,
     ]
     return (
       <div className="flex flex-col min-h-screen">

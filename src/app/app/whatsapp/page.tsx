@@ -4,9 +4,12 @@ import { useState } from 'react'
 import { getIdToken } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 
-// The product bot's WhatsApp number (digits only, no +). Set NEXT_PUBLIC_WA_BOT_NUMBER
-// per environment; falls back to the Meta test number for pre-go-live testing.
-const WA_BOT_NUMBER = process.env.NEXT_PUBLIC_WA_BOT_NUMBER || '15551717704'
+// The product bot's WhatsApp number (digits only, no +). The default is the real
+// production number — deliberately not left to an env var, because a missing one
+// used to fall back to the Meta test number, which reaches ~5 verified recipients
+// and would silently swallow every client's very first message.
+// NEXT_PUBLIC_WA_BOT_NUMBER still overrides it, for a per-firm number later on.
+const WA_BOT_NUMBER = process.env.NEXT_PUBLIC_WA_BOT_NUMBER || '972542544043'
 
 type Phase = 'idle' | 'loading' | 'ready' | 'error'
 

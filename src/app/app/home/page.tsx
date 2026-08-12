@@ -193,23 +193,20 @@ export default function HomePage() {
       {/* Nav — big, readable rows (easy to scan and tap) */}
       <div className="space-y-3">
         {/* WhatsApp connect — prominent gold card at the top of the list.
-            Pilot-gated (lab) until the real number is live; drop the isAdvisor
-            guard at go-live to show it to every client. */}
-        {isAdvisor && (
-          <Link
-            href="/app/whatsapp"
-            className="flex items-center gap-4 p-4 min-h-[74px] rounded-2xl border border-gold/40 bg-gold/10 hover:bg-gold/20 transition-colors"
-          >
-            <span className="w-[52px] h-[52px] shrink-0 grid place-items-center rounded-2xl text-2xl bg-gold/15 border border-gold/30">
-              💬
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-lg font-bold text-txt">חיבור וואטסאפ</span>
-              <span className="block text-sm text-muted-txt truncate">תעד הוצאות ושאל על הכסף ישירות בצ'אט</span>
-            </span>
-            <span dir="ltr" className="text-xl text-gold">‹</span>
-          </Link>
-        )}
+            Open to every client since go-live on the real number (11/08/2026). */}
+        <Link
+          href="/app/whatsapp"
+          className="flex items-center gap-4 p-4 min-h-[74px] rounded-2xl border border-gold/40 bg-gold/10 hover:bg-gold/20 transition-colors"
+        >
+          <span className="w-[52px] h-[52px] shrink-0 grid place-items-center rounded-2xl text-2xl bg-gold/15 border border-gold/30">
+            💬
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-lg font-bold text-txt">חיבור וואטסאפ</span>
+            <span className="block text-sm text-muted-txt truncate">תעד הוצאות ושאל על הכסף ישירות בצ'אט</span>
+          </span>
+          <span dir="ltr" className="text-xl text-gold">‹</span>
+        </Link>
         {tiles.map(t => (
           <Link
             key={t.href}
