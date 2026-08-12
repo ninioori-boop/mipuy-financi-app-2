@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { getIdToken } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
+import { embeddedKind } from '@/lib/isEmbedded'
 
 // The product bot's WhatsApp number (digits only, no +). The default is the real
 // production number — deliberately not left to an env var, because a missing one
@@ -28,6 +29,40 @@ export default function WhatsAppLinkPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  // Inside the Kotlin WebView shell a wa.me link cannot reach WhatsApp at all:
+  // wa.me redirects to `whatsapp://`, the WebView has no handler for a non-http
+  // scheme, and the client lands on ERR_UNKNOWN_URL_SCHEME. Nothing the web can
+  // send fixes that — only the host app can (MainActivity's
+  // shouldOverrideUrlLoading). So in the app we stop pretending the button works
+  // and hand over a copy-and-paste flow that does. Detection runs in an effect
+  // because it reads navigator, and the first render is the server's.
+  const [inAndroidApp, setInAndroidApp] = useState(false)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => { setInAndroidApp(embeddedKind() === 'android-app') }, [])
+
+  async function copyCodeMessage() {
+    const text = `קוד ${code}`
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // Older WebViews expose no async clipboard. execCommand is deprecated
+      // everywhere else but it is exactly what still works here.
+      try {
+        const el = document.createElement('textarea')
+        el.value = text
+        el.style.position = 'fixed'
+        el.style.opacity = '0'
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+        setCopied(true)
+      } catch {
+        setCopied(false)
+      }
+    }
+  }
 
   async function generate() {
     setPhase('loading')
@@ -89,32 +124,55 @@ export default function WhatsAppLinkPage() {
             </div>
             <p className="text-muted-txt text-xs text-center mb-5">בתוקף ל-15 דקות</p>
 
-            {/* Deliberately NOT target="_blank": inside the native Android shell
-                this page runs in a WebView, and a WebView opens no new window
-                unless the host app implements onCreateWindow — so _blank made
-                the button do nothing at all. A same-frame navigation instead
-                reaches shouldOverrideUrlLoading, which is what hands the link
-                to WhatsApp. Browsers behave the same either way. */}
-            <a
-              href={waHref}
-              rel="noreferrer"
-              className="block w-full bg-gold text-surface font-bold rounded-xl px-6 py-3 text-center hover:bg-gold-light transition-colors"
-            >
-              פתח וואטסאפ ושלח את הקוד
-            </a>
-            <p className="text-muted-txt text-xs text-center mt-3 leading-relaxed">
-              נפתח צ'אט עם הבוט והקוד כבר מוכן, רק לשלוח. אחרי זה אפשר לכתוב לו
-              "קניתי ב-50 בסופר" או "כמה נשאר לי לאוכל?".
-            </p>
+            {inAndroidApp ? (
+              /* In the app the link is a dead end (ERR_UNKNOWN_URL_SCHEME), so
+                 don't show one. Copy + paste is three taps and always works. */
+              <>
+                <button
+                  onClick={copyCodeMessage}
+                  className="block w-full bg-gold text-surface font-bold rounded-xl px-6 py-3 text-center hover:bg-gold-light transition-colors"
+                >
+                  {copied ? '✓ ההודעה הועתקה' : 'העתק את ההודעה'}
+                </button>
+                <ol className="text-muted-txt text-xs mt-4 space-y-2 leading-relaxed ps-4 list-decimal">
+                  <li>לוחצים על הכפתור להעתקת ההודעה</li>
+                  <li>
+                    פותחים וואטסאפ ומתחילים צ'אט עם{' '}
+                    <span dir="ltr" className="text-gold font-semibold select-all">{DISPLAY_NUMBER}</span>
+                  </li>
+                  <li>מדביקים ושולחים. זהו, פעם אחת בלבד</li>
+                </ol>
+                <p className="text-muted-txt text-xs mt-3 leading-relaxed">
+                  אחרי החיבור אפשר לכתוב לבוט "קניתי ב-50 בסופר" או "כמה נשאר לי
+                  לאוכל?".
+                </p>
+              </>
+            ) : (
+              /* Deliberately NOT target="_blank": a WebView opens no new window
+                 unless the host app implements onCreateWindow, so _blank made the
+                 button do nothing at all. Browsers behave the same either way. */
+              <>
+                <a
+                  href={waHref}
+                  rel="noreferrer"
+                  className="block w-full bg-gold text-surface font-bold rounded-xl px-6 py-3 text-center hover:bg-gold-light transition-colors"
+                >
+                  פתח וואטסאפ ושלח את הקוד
+                </a>
+                <p className="text-muted-txt text-xs text-center mt-3 leading-relaxed">
+                  נפתח צ'אט עם הבוט והקוד כבר מוכן, רק לשלוח. אחרי זה אפשר לכתוב לו
+                  "קניתי ב-50 בסופר" או "כמה נשאר לי לאוכל?".
+                </p>
 
-            {/* Never a dead end: if the handoff fails on some device, the code
-                and the number are both on screen, so the link is a shortcut and
-                not the only way through. */}
-            <p className="text-muted-txt text-xs text-center mt-4 leading-relaxed border-t border-line pt-4">
-              הכפתור לא עבד? פתחו וואטסאפ ידנית, התחילו צ'אט עם{' '}
-              <span dir="ltr" className="text-gold font-semibold select-all">{DISPLAY_NUMBER}</span>
-              {' '}ושלחו את ההודעה: <span className="text-gold font-semibold select-all">קוד {code}</span>
-            </p>
+                {/* Never a dead end: the code and the number are both on screen,
+                    so the link is a shortcut and not the only way through. */}
+                <p className="text-muted-txt text-xs text-center mt-4 leading-relaxed border-t border-line pt-4">
+                  הכפתור לא עבד? פתחו וואטסאפ ידנית, התחילו צ'אט עם{' '}
+                  <span dir="ltr" className="text-gold font-semibold select-all">{DISPLAY_NUMBER}</span>
+                  {' '}ושלחו את ההודעה: <span className="text-gold font-semibold select-all">קוד {code}</span>
+                </p>
+              </>
+            )}
 
             <button
               onClick={generate}
