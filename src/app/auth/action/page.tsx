@@ -53,6 +53,26 @@ function safeContinue(raw: string | null): string {
   }
 }
 
+/**
+ * An oobCode is single-use, and this component mounts TWICE.
+ *
+ * AuthProvider renders children, swaps them for a spinner once `mounted` flips
+ * while auth is still resolving, then renders them again — so the effect below
+ * fires twice on one page load. The first call consumed the code and the second
+ * came back `auth/invalid-action-code`, which overwrote the success message:
+ * the account really was verified and the screen said "הקישור לא עבד". Caught
+ * end-to-end against production, 2026-08-12.
+ *
+ * Keyed at module scope so the second mount awaits the SAME promise and sees the
+ * same outcome, whatever causes the remount.
+ */
+const inFlight = new Map<string, Promise<unknown>>()
+function once<T>(key: string, run: () => Promise<T>): Promise<T> {
+  let p = inFlight.get(key) as Promise<T> | undefined
+  if (!p) { p = run(); inFlight.set(key, p) }
+  return p
+}
+
 function hebrewError(code?: string): string {
   switch (code) {
     case 'auth/expired-action-code':  return 'הקישור פג תוקף. אפשר לבקש קישור חדש מעמוד הכניסה.'
@@ -103,7 +123,8 @@ export default function AuthActionPage() {
     ;(async () => {
       try {
         if (mode === 'resetPassword') {
-          const r = await raceWithTimeout(verifyPasswordResetCode(auth, oobCode), ACTION_TIMEOUT_MS)
+          const r = await raceWithTimeout(
+            once(`reset:${oobCode}`, () => verifyPasswordResetCode(auth, oobCode)), ACTION_TIMEOUT_MS)
           if (!alive) return
           if (r === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב, ואם זה חוזר, לבקש קישור חדש.')
           setTitle('בחירת סיסמה חדשה'); setDetail(r); setView('password-form')
@@ -111,17 +132,19 @@ export default function AuthActionPage() {
         }
 
         if (mode === 'recoverEmail') {
-          const info = await raceWithTimeout(checkActionCode(auth, oobCode), ACTION_TIMEOUT_MS)
+          const info = await raceWithTimeout(
+            once(`check:${oobCode}`, () => checkActionCode(auth, oobCode)), ACTION_TIMEOUT_MS)
           if (!alive) return
           if (info === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב.')
-          await applyActionCode(auth, oobCode)
+          await once(`apply:${oobCode}`, () => applyActionCode(auth, oobCode))
           if (!alive) return
           setTitle('כתובת המייל שוחזרה'); setDetail(info.data.email ?? ''); setView('done')
           return
         }
 
         // verifyEmail / verifyAndChangeEmail
-        const r = await raceWithTimeout(applyActionCode(auth, oobCode), ACTION_TIMEOUT_MS)
+        const r = await raceWithTimeout(
+          once(`apply:${oobCode}`, () => applyActionCode(auth, oobCode)), ACTION_TIMEOUT_MS)
         if (!alive) return
         if (r === TIMED_OUT) return fail('החיבור איטי ולא קיבלנו תשובה. כדאי לנסות שוב, ואם זה חוזר, לבקש קישור חדש מהמערכת.')
 
