@@ -17,15 +17,18 @@
 // locally, is never uploaded anywhere, and must stay out of git.
 
 import {
-  reconcile, checkIncomeAgainstDeposits, mappingIncome, mappingSurplus,
+  reconcile, checkIncomeAgainstDeposits, checkSavingsAgainstDeposits,
+  mappingIncome, mappingSurplus,
 } from './automapReconcile'
 import {
-  findAnnualDuplicates, resolveRowTxns, sectionOfCategory,
+  findAnnualDuplicates, resolveRowTxns, sectionOfCategory, groupByName,
   type GeneratedMapping,
 } from './autoMap'
+import { detectSavingsDeposits, classifyDeposits } from './automapFlows'
+import { cleanDesc } from './automapText'
 import { normalizeForLookup } from './normalizeForLookup'
 import { isCardSettlement } from './automapBank'
-import { declaredMonthlyIncome, type IntakeRow } from './automapQuestions'
+import { declaredMonthlyIncome, declaredIncomeRows, type IntakeRow } from './automapQuestions'
 import { categorize } from './categorize'
 import type { Transaction } from '@/types/transaction'
 import type { BankRow } from './automapBank'
@@ -86,18 +89,24 @@ export function summarizeRun(run: AutomapRun): RunSummary {
   const hasCreditDetail = run.txns.length > 0
 
   const overridden = (t: Transaction) => run.txnOverrides[normalizeKey(t.desc)] ?? t.category
+  // 🔴 cleanDesc, exactly where the page applies it. A run saved BEFORE the bidi
+  // fix still holds the raw descriptions, so without this the replay keeps
+  // reproducing the old categorisation and the fix looks like it did nothing.
   const all: Transaction[] = [
-    ...run.txns.map(t => ({ ...t, category: overridden(t) })),
+    ...run.txns.map(t => ({ ...t, desc: cleanDesc(t.desc), category: overridden(t) })),
     // Bank rows are categorised here exactly as the page does. Defaulting them
     // to 'שונות' instead would report rows as having no detail when the screen
     // shows them perfectly — a summary that lies in the safe direction is still
     // a summary of a screen nobody is looking at.
-    ...run.bankRows.filter(b => b.dir === 'out').map(b => ({
-      desc: b.desc, amount: b.amount, originalAmount: null,
-      category: run.txnOverrides[normalizeKey(b.desc)] ?? categorize(b.desc),
-      source: 'עו"ש', notes: '', date: b.date,
-      installment: null, isStandingOrder: false, isRefund: false,
-    } as Transaction)),
+    ...run.bankRows.filter(b => b.dir === 'out').map(b => {
+      const desc = cleanDesc(b.desc)
+      return {
+        desc, amount: b.amount, originalAmount: null,
+        category: run.txnOverrides[normalizeKey(desc)] ?? categorize(desc),
+        source: 'עו"ש', notes: '', date: b.date,
+        installment: null, isStandingOrder: false, isRefund: false,
+      } as Transaction
+    }),
   ]
   const deposits = run.bankRows.filter(b => b.dir === 'in').reduce((s, b) => s + b.amount, 0)
 
@@ -204,6 +213,39 @@ export function summarizeRun(run: AutomapRun): RunSummary {
       findings.push({
         severity: 'gap',
         text: `נמסרה הכנסה של ${money(declared)} לחודש, ובמיפוי יש ${money(carried)}`,
+      })
+    }
+  }
+
+  // ── the two flows, replayed against the saved data ──
+  //
+  // These are computed from the run's own transactions, not read out of the
+  // saved result, so the replay says what the CURRENT code would produce. That
+  // is the whole point: it is how a fix is checked against Ori's real household
+  // without a run and without spend.
+  const savings = detectSavingsDeposits(all, months)
+  if (savings.deposits.length) {
+    lines.push(
+      `הפקדות לחיסכון: ${money(savings.monthlyRecurring)} לחודש קבוע` +
+      (savings.oneOffTotal > 0 ? ` · ${money(savings.oneOffTotal)} חד־פעמי` : ''),
+    )
+    const sav = checkSavingsAgainstDeposits(r, { detectedPerMonth: savings.monthlyRecurring })
+    if (sav) findings.push({ severity: 'gap', text: sav.title })
+  }
+
+  if (declared > 0) {
+    const split = classifyDeposits(
+      groupByName(run.bankRows.filter(b => b.dir === 'in').map(b => ({
+        desc: cleanDesc(b.desc), amount: b.amount, date: b.date,
+      }))),
+      declaredIncomeRows(run.intakeRows?.incomeMonths),
+      months,
+    )
+    if (split.unexplained.length) {
+      findings.push({
+        severity: 'gap',
+        text: `${money(split.unexplainedMonthly)} לחודש נכנסים לחשבון ואינם מוסברים בשאלון: ` +
+          split.unexplained.map(l => l.name).join(', '),
       })
     }
   }

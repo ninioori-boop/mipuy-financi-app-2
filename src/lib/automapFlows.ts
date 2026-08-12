@@ -23,6 +23,7 @@
 
 import { normalizeForLookup } from './normalizeForLookup'
 import { isPaymentRailKey } from './learnedSharing'
+import { categorize } from './categorize'
 import { monthKeyOf } from './automapRecurring'
 
 // ── money leaving to savings ──
@@ -88,16 +89,21 @@ export function detectSavingsDeposits(
     groups.set(key, g)
   }
 
-  // Present in most of the window, and about one deposit a month. Same
-  // discriminator as the subscription detector, and for the same reason: a
-  // trading account funded nine times in three months is being traded in, not
-  // contributed to on a schedule.
+  // 🔴 Present in most of the window, and that is the WHOLE test.
+  //
+  // The subscription detector also requires about one charge a month, and
+  // copying that rule here was wrong. Replaying the real run exposed it: אקסלנס
+  // was funded 6 times in 3 months, אלטשולר 10 times, קסם אקטיב 12 — so all
+  // four of the household's largest deposits failed the charge-count test and
+  // ₪8,648 a month of saving was reported as ₪506. A person who buys into a
+  // fund four times a month is saving monthly; only a SUBSCRIPTION has to be
+  // billed exactly once, because that is what makes it a subscription.
   const minMonths = Math.max(2, Math.ceil(window * 0.6))
 
   const deposits: SavingsDeposit[] = []
   for (const [key, g] of groups) {
     const months = g.months.size
-    const recurring = months >= minMonths && g.charges <= months * 1.5 + 0.5
+    const recurring = months >= minMonths
     deposits.push({
       key, name: g.name, category: g.category,
       monthly: months > 0 ? g.total / months : g.total,
@@ -157,6 +163,17 @@ export interface DepositSplit {
   unexplained: DepositLine[]
   /** One-time arrivals. Real money, but not a monthly income rate. */
   oneOff:      DepositLine[]
+  /**
+   * The household's own money coming back: a Bit withdrawal to the current
+   * account, a transfer from another account of theirs.
+   *
+   * 🔴 This bucket is why the split is four ways and not three. Replaying the
+   * real run with three buckets reported ₪15,022/month of "undeclared income",
+   * of which only ₪13,200 was real — the rest was אורי moving his own money
+   * back from Bit. Calling that income inflates the household's earnings by the
+   * exact amount it already counted as an expense on the way out.
+   */
+  transfers:   DepositLine[]
   /** Monthly total of the unexplained recurring ones. */
   unexplainedMonthly: number
 }
@@ -224,17 +241,43 @@ export function classifyDeposits(
     if (best) best.claimed = true
   }
 
-  const explained: DepositLine[] = [], unexplained: DepositLine[] = [], oneOff: DepositLine[] = []
+  const explained: DepositLine[] = [], unexplained: DepositLine[] = []
+  const oneOff: DepositLine[] = [], transfers: DepositLine[] = []
   for (const c of pool) {
     if (c.claimed) explained.push(c.line)
+    else if (isOwnMoney(c.line.name)) transfers.push(c.line)
     else if (c.months >= minMonths) unexplained.push(c.line)
     else oneOff.push(c.line)
   }
 
   return {
-    explained, unexplained, oneOff,
+    explained, unexplained, oneOff, transfers,
     unexplainedMonthly: unexplained.reduce((s, l) => s + l.monthly, 0),
   }
+}
+
+/**
+ * A deposit that is the household's own money returning, not income.
+ *
+ * Two tests, both reusing machinery that already exists rather than a new list
+ * of phrases: the payment-rail detector (a Bit withdrawal back to the current
+ * account), and the categorizer landing the description in העברות ואשראי. The
+ * curated DB is already the project's answer to "what is a transfer", and a
+ * second opinion here would drift from it silently.
+ *
+ * Checked AFTER the declared-salary matching, deliberately: if a salary is paid
+ * by a route that reads as a transfer, the questionnaire's own figure still
+ * claims it, and a declared salary is never reclassified as noise.
+ */
+function isOwnMoney(name: string): boolean {
+  const key = normalizeForLookup(name) || name.trim()
+  if (!key) return false
+  if (isPaymentRailKey(key)) return true
+  const cat = categorize(name)
+  // Selling a fund is not earning. On the real run four "מכירה/…" and
+  // "ביטול העברה/…" lines came back from the same platforms the household had
+  // just bought into, and every one of them was money it already owned.
+  return cat === 'העברות ואשראי' || SAVINGS_CATEGORIES.has(cat)
 }
 
 /**
@@ -263,6 +306,11 @@ export function formatDepositSplit(split: DepositSplit, months: number): string[
   if (split.oneOff.length) {
     out.push('הפקדות שהופיעו בחודש אחד בלבד. כנראה חד־פעמיות ולא הכנסה חודשית. הזכר אותן ב‑assessment ואל תכניס אותן ל‑income בלי סיבה:')
     for (const l of split.oneOff) out.push(`  - ${l.name}: ${Math.round(l.sum)} בסך הכל (${l.count} הפקדות)`)
+  }
+
+  if (split.transfers.length) {
+    out.push('כסף של הלקוח שחוזר לחשבון (משיכה מביט, העברה מחשבון אחר שלו). **זו לא הכנסה.** אל תכניס אותן ל‑income בשום מקרה:')
+    for (const l of split.transfers) out.push(`  - ${l.name}: ${Math.round(l.monthly)} לחודש`)
   }
 
   return out

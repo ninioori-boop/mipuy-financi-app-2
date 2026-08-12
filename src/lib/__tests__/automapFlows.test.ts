@@ -104,10 +104,26 @@ describe('detectSavingsDeposits', () => {
     expect(flow.deposits).toEqual([])
   })
 
-  it('does not call an account traded in nine times a monthly contribution', () => {
-    const many = Array.from({ length: 9 }, (_, i) =>
-      out('איטורו', 500, 'השקעות', `2026-0${5 + (i % 3)}-${String(10 + i).padStart(2, '0')}`))
-    expect(detectSavingsDeposits(many, 3).deposits[0].recurring).toBe(false)
+  // 🔴 The rule the real run corrected. A subscription must be billed about once
+  // a month — that is what makes it a subscription. A person buying into a fund
+  // four times a month is saving monthly all the same, and copying the
+  // subscription discriminator here reported ₪8,648/mo of real saving as ₪506.
+  it('counts a fund bought into several times a month as a monthly contribution', () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      out('קסם אקטיב', 458, 'חסכונות', `2026-0${5 + (i % 3)}-${String(10 + i).padStart(2, '0')}`))
+    const flow = detectSavingsDeposits(many, 3)
+    expect(flow.deposits[0].recurring).toBe(true)
+    expect(Math.round(flow.monthlyRecurring)).toBe(1832)
+  })
+
+  // The months test still bites: two deposits at the edges of a three-month
+  // window are not a monthly habit.
+  it('needs the deposits spread across the window, not clustered', () => {
+    const flow = detectSavingsDeposits([
+      out('מיטב', 5000, 'השקעות', '2026-05-05'),
+      out('מיטב', 5000, 'השקעות', '2026-05-20'),
+    ], 3)
+    expect(flow.deposits[0].recurring).toBe(false)
   })
 
   it('says nothing at all when there is nothing to say', () => {
@@ -191,6 +207,31 @@ describe('classifyDeposits', () => {
       3,
     )
     expect(s.explained).toHaveLength(1)
+  })
+
+  // 🔴 Both of these were reported as undeclared INCOME on the real run, which
+  // would have credited the household with money it already owned — and, in the
+  // Bit case, with the same money it was also charged for on the way out.
+  it('does not call the client\'s own money coming back an income', () => {
+    const s = classifyDeposits([
+      { name: 'ב.הפועלים-ביט/אורי ניניו/משיכה לחשבון ה', sum: 2166, count: 5, months: 3 },
+      { name: 'מכירה/אלטשולר שחם/טלפון ני', sum: 2673, count: 2, months: 1 },
+    ], [], 3)
+    expect(s.transfers.map(l => l.name)).toHaveLength(2)
+    expect(s.unexplained).toEqual([])
+    expect(s.unexplainedMonthly).toBe(0)
+  })
+
+  // Checked AFTER matching, so a salary paid by a route that reads as a
+  // transfer is still claimed by the figure the client declared for it.
+  it('never reclassifies a declared salary as noise', () => {
+    const s = classifyDeposits(
+      [{ name: 'העברה בנקאית', sum: 36000, count: 3, months: 3 }],
+      [{ name: 'בעל', monthly: 12000 }],
+      3,
+    )
+    expect(s.explained).toHaveLength(1)
+    expect(s.transfers).toEqual([])
   })
 
   it('tells the model to ADD the unexplained rather than swap it in', () => {
