@@ -1,0 +1,5 @@
+#!/bin/sh
+# Tracked hook. Activated per clone with:
+#   git config core.hooksPath .githooks
+# Bypass a false positive with: git commit --no-verify
+node scripts/check-secrets.js || exit 1

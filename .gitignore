@@ -65,3 +65,18 @@ data-report.html
 # Saved automap run: one household's real transactions. Local only, never committed.
 scripts/.automap-run.json
 automap-run.json
+
+# Commercial documents living untracked at the repo root: quotes, contracts,
+# pricing, invoices. A reflexive `git add -A` would put a named client's
+# commercial terms into the git history permanently, and pushing makes that
+# public to anyone with repo access. The `safe-commit` skill listed these as
+# already ignored; they were not. Now they are.
+/hatzaa-*
+/hoskem-*
+/proposal-*
+/tguva-*
+/costs-operating.html
+/doch-avtachat-hamaarechet.docx
+/invoicing/
+# Word lock files (`~$name.docx`) appear whenever one of the above is open.
+~$*
