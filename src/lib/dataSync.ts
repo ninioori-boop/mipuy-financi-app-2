@@ -451,8 +451,14 @@ export function applySnapshot(raw: unknown): void {
       // this would blank the summary out of those months entirely.
       // Idempotent — applyLogRows drops existing fromLog rows first and empties
       // `logged`, so a second pass over the same data changes nothing.
+      // The old list held one total per category with no record of who produced
+      // the entries. Carried over as CAPTURED money, the conservative reading:
+      // an import that covers the category takes it back, which is the outcome
+      // that cannot inflate a client's spending.
       const legacy = migrated[id] as MonthDataShape
-      if (legacy.logged.length > 0) migrated[id] = applyLogRows(legacy, legacy.logged)
+      if (legacy.logged.length > 0) {
+        migrated[id] = applyLogRows(legacy, legacy.logged.map(l => ({ name: l.name, manual: 0, auto: l.amount })))
+      }
     }
     useMonthlyStore.setState({ months: migrated as ReturnType<typeof useMonthlyStore.getState>['months'] })
   }

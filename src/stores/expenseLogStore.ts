@@ -31,6 +31,40 @@ export interface ExpenseEntry {
   src?: string
 }
 
+/**
+ * Was this entry produced by a machine rather than typed by a person?
+ *
+ * It decides how the monthly tab treats the money. A machine-made entry is a
+ * card charge (or a standing rule for one), so the same shekels arrive again in
+ * the credit/bank report and the report must win. A hand-typed entry is the
+ * cash and Bit the report never sees, so it is ADDED on top of the report.
+ *
+ * Machine-made, three marks:
+ *   src        — drained from the phone inbox (Android + iPhone both land here)
+ *   note #ref  — captured through the deep link, which tags the merchant
+ *   note ⟳     — materialised by a recurring rule (rent, subscriptions). Those
+ *                are real charges that the statement reports too, so they count
+ *                as machine-made even though a person wrote the rule.
+ *
+ * Person-made, one mark that has to be checked FIRST:
+ *   note #wa:  — the WhatsApp bot, where a client typed "קניתי ב-50 בסופר".
+ *                That is a person reporting a purchase, exactly like typing it
+ *                into the app. It reaches the log through the same inbox as the
+ *                phone automation (clientBot posts to /api/transaction with
+ *                ref "wa:<msgId>"), so it carries `src` and a #ref tag and
+ *                would otherwise be mistaken for a captured card charge.
+ *
+ * The blind spot, stated plainly: a card purchase somebody reported by hand —
+ * typed in the app or sent to the bot — is indistinguishable from cash, and
+ * will be added on top of the report. Nothing in the data can tell them apart.
+ */
+export function isAutoCaptured(e: Pick<ExpenseEntry, 'note' | 'src'>): boolean {
+  if (/ #wa:/.test(e.note)) return false
+  if (e.src) return true
+  if (/ #\S+$/.test(e.note)) return true
+  return e.note.includes('⟳')
+}
+
 type NewEntry = {
   date: string; amount: number; category: string; note: string
   foreignAmount?: number; foreignCurrency?: string; fxRate?: number

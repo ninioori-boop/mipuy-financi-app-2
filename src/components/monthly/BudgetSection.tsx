@@ -67,10 +67,9 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
 
       <div className="space-y-1.5">
         {rows.map(row => {
-          // One marker for both cases: a row the journal created and a planned
-          // row the journal filled look the same to the reader — the number
-          // beside the name came from the journal, not from a report.
-          const fromJournal = Boolean(row.fromLog || row.logFilled)
+          // Marks any row whose actual carries journal money, whether the
+          // transfer created the row or only added to a line already there.
+          const fromJournal = Boolean(row.logManual || row.logAuto)
           return (
           <div key={row.id} className="group">
             {/* Desktop row */}

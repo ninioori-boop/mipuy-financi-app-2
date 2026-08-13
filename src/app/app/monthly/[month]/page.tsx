@@ -105,29 +105,35 @@ export default function MonthlyPage() {
   const oshFilled = OSH_POINTS.map(p => data.osh?.[p.key] ?? 0).filter(v => v !== 0)
   const oshDelta  = oshFilled.length >= 2 ? oshFilled[oshFilled.length - 1] - oshFilled[0] : null
 
-  // How much of this month's ביצוע came from the expense-log rather than an
-  // imported report. Derived from the rows themselves — never stored separately.
+  // How much of this month's ביצוע was put there by the expense-log transfer.
+  // Read off the rows themselves, never stored a second time.
   const EXP_SECTIONS = ['fixed', 'variable', 'sub', 'ins'] as const
-  const loggedTotal = EXP_SECTIONS
-    .reduce((s, sec) => s + data[sec].filter(r => r.fromLog || r.logFilled).reduce((t, r) => t + r.actual, 0), 0)
+  const loggedTotal = EXP_SECTIONS.reduce(
+    (s, sec) => s + data[sec].reduce((t, r) => t + (r.logManual ?? 0) + (r.logAuto ?? 0), 0), 0)
 
-  // Journal money this month that did NOT make it into a row, because an
-  // imported report (or a hand-typed figure) already held that category. Read
-  // straight from the journal so it stays true no matter what order the client
-  // transferred things in. Money that is not counted must still be visible.
+  // Journal money this month that is NOT in the ביצוע, category by category.
+  // Compared against the journal itself rather than against a stored figure, so
+  // it stays true whatever order things were transferred in. Almost always this
+  // is captured card spending that the imported report restated; money that
+  // stops counting must never stop being visible.
   const setAside = (() => {
     const ym = `${data.year}-${String(MONTHS_LIST.findIndex(x => x.id === monthId) + 1).padStart(2, '0')}`
-    const byCat = new Map<string, number>()
+    const inJournal = new Map<string, number>()
     for (const e of logEntries) {
       if (e.date.slice(0, 7) !== ym) continue
-      byCat.set(e.category, (byCat.get(e.category) ?? 0) + e.amount)
+      if (sectionOfCategory(e.category) === null) continue
+      inJournal.set(e.category, (inJournal.get(e.category) ?? 0) + e.amount)
     }
-    const counted = new Set(
-      EXP_SECTIONS.flatMap(sec => data[sec].filter(r => r.fromLog || r.logFilled).map(r => r.name)),
-    )
-    return [...byCat.entries()]
-      .filter(([cat, amount]) => amount > 0 && !counted.has(cat) && sectionOfCategory(cat) !== null)
-      .map(([name, amount]) => ({ name, amount }))
+    const counted = new Map<string, number>()
+    for (const sec of EXP_SECTIONS) {
+      for (const r of data[sec]) {
+        const mine = (r.logManual ?? 0) + (r.logAuto ?? 0)
+        if (mine > 0) counted.set(r.name, (counted.get(r.name) ?? 0) + mine)
+      }
+    }
+    return [...inJournal.entries()]
+      .map(([name, amount]) => ({ name, amount: Math.round(amount - (counted.get(name) ?? 0)) }))
+      .filter(r => r.amount > 0)
       .sort((a, b) => b.amount - a.amount)
   })()
 
@@ -380,7 +386,7 @@ export default function MonthlyPage() {
           {setAside.length > 0 && (
             <div className="text-xs text-muted-txt space-y-1 border-t border-line pt-2">
               <div className="text-txt">
-                {fmt(setAside.reduce((s, r) => s + r.amount, 0))} מהיומן לא נספרו, כי כבר יש מספר בקטגוריות האלה:
+                {fmt(setAside.reduce((s, r) => s + r.amount, 0))} מהיומן לא נספרו, כי הם חיובי כרטיס שהדוח כבר מדווח עליהם:
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 {setAside.map(r => (

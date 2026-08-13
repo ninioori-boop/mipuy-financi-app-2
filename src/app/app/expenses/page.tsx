@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { useExpenseLogStore, type ExpenseEntry } from '@/stores/expenseLogStore'
+import { useExpenseLogStore, isAutoCaptured, type ExpenseEntry } from '@/stores/expenseLogStore'
 import { formatMoneyLoose } from '@/lib/currency'
 import { useCategoryBudgetStore } from '@/stores/categoryBudgetStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
@@ -148,6 +148,20 @@ export default function ExpensesPage() {
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [monthEntries])
 
+  // The same breakdown, split by who produced each entry. The monthly tab needs
+  // the split, not the total: money a person typed is cash the credit report
+  // will never show and gets added on top of it, while a charge captured from
+  // the phone is the very charge the report restates.
+  const catSplit = useMemo(() => {
+    const map = new Map<string, { manual: number; auto: number }>()
+    for (const e of monthEntries) {
+      const cur = map.get(e.category) ?? { manual: 0, auto: 0 }
+      if (isAutoCaptured(e)) cur.auto += e.amount; else cur.manual += e.amount
+      map.set(e.category, cur)
+    }
+    return [...map.entries()].map(([name, v]) => ({ name, ...v }))
+  }, [monthEntries])
+
   // All months that have any entries, each with its total — for the month dropdown.
   // The current month is always included (even if empty) so you can land on it.
   const monthsWithData = useMemo(() => {
@@ -268,13 +282,16 @@ export default function ExpensesPage() {
     const prev = months[targetMonth.id]
     const hasPrev = prev
       ? (['fixed', 'variable', 'sub', 'ins'] as const)
-          .some(sec => prev[sec]?.some(r => r.fromLog || r.logFilled))
+          .some(sec => prev[sec]?.some(r => r.logManual || r.logAuto))
       : false
     if (hasPrev &&
         !confirm(`כבר הועבר סיכום ל${targetMonth.name}. העברה חדשה תחשב אותו מחדש. להמשיך?`)) return
     initMonth(targetMonth.id)
-    applyExpenseLog(targetMonth.id, catTotals.map(([name, amount]) => ({ name, amount })))
-    toast.success(`✅ ${fmt(monthTotal)} נכנסו לביצוע של ${targetMonth.name}`, {
+    applyExpenseLog(targetMonth.id, catSplit)
+    // Never promise the whole total: in a category the report already covers,
+    // only the hand-typed part is added. The monthly screen lists what was left
+    // out, so the toast points there instead of claiming a number it cannot know.
+    toast.success(`✅ הסיכום הועבר לביצוע של ${targetMonth.name}`, {
       action: { label: 'פתח חודשי', onClick: () => router.push(`/app/monthly/${targetMonth.id}`) },
     })
   }

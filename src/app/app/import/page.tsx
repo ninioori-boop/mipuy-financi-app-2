@@ -102,7 +102,7 @@ export default function ImportPage() {
   const [targetMonth,      setTargetMonth]       = useState('')
 
   const mapping = useMappingStore()
-  const { initMonth, applyImport } = useMonthlyStore()
+  const { months, initMonth, applyImport } = useMonthlyStore()
   const router = useRouter()
 
   // ── local transaction edits ──
@@ -298,6 +298,28 @@ export default function ImportPage() {
   function sendToBudget() {
     if (!targetMonth) { toast.error('יש לבחור חודש יעד לפני השליחה'); return }
     if (!transactions.length) { toast.error('אין עסקאות — העלה קובץ קודם'); return }
+
+    // Say what is about to happen before it happens. Plain consequences only,
+    // never the mechanism: the client is deciding, not debugging. The journal
+    // lines appear only when this month actually has journal money to affect,
+    // so a client who never logs expenses just sees the first two lines.
+    const name = MONTHS_LIST.find(m => m.id === targetMonth)?.name ?? targetMonth
+    const month = months[targetMonth]
+    const hasJournal = month
+      ? (['fixed', 'variable', 'sub', 'ins'] as const)
+          .some(sec => month[sec]?.some(r => r.logManual || r.logAuto))
+      : false
+    const lines = [
+      `להעביר את הדוח לתקציב של ${name}?`,
+      '',
+      '• הביצוע בכל קטגוריה יתעדכן לפי הדוח.',
+      '• סכום שהזנת ידנית בתקציב יישאר כמו שהוא.',
+      ...(hasJournal ? [
+        '• מה שנקלט אוטומטית מהכרטיס בתיעוד ההוצאות לא ייספר פעמיים.',
+        '• מזומן וביט שרשמת בעצמך יתווספו על הדוח.',
+      ] : []),
+    ]
+    if (!confirm(lines.join('\n'))) return
 
     // שולחים את כל העסקאות (ללא פילטר תאריך) — המשתמש בוחר לאיזה חודש.
     // Refunds NET their category and their merchant (Ori, 2026-08-06): a

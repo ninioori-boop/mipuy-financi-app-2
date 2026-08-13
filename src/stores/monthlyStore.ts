@@ -21,14 +21,20 @@ export interface BudgetRow {
   plan: number
   actual: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
-  // The journal (תיעוד הוצאות) put the actual here. One category holds ONE
-  // number: an imported report always wins, and the journal only fills what the
-  // report left empty. The two flags differ solely in how a re-transfer undoes
-  // them — fromLog rows are removed, logFilled rows are emptied and kept,
-  // because those are the client's own planned lines. A hand edit clears both,
-  // which makes the row manual and immune to the next transfer (see updateRow).
-  fromLog?: boolean     // the transfer CREATED this row
-  logFilled?: boolean   // the transfer filled an existing, empty row
+  // How much of `actual` above was put here by the expense-log transfer, split
+  // by who produced the journal entry (see isAutoCaptured):
+  //   logManual — typed by a person. Cash and Bit the report never sees, so it
+  //               is ADDED on top of whatever the report reports.
+  //   logAuto   — captured from a card, or fired by a recurring rule. The same
+  //               charges arrive in the report, so the report REPLACES this.
+  // Storing the two parts is what lets a transfer be recomputed from scratch and
+  // an import take back only the half it duplicates, in any order.
+  logManual?: number
+  logAuto?:   number
+  // The transfer created this row (as opposed to filling a line that already
+  // existed). Only that kind may be removed when the journal stops covering the
+  // category — deleting a planned line would take the client's plan with it.
+  fromLog?: boolean
   // Set by applyImport when the actual came from an imported report — lets the
   // month show WHICH charges built the number. Optional: rows created before
   // this existed, and hand-typed actuals, simply have none.
@@ -119,6 +125,9 @@ export type SimpleSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins'
 /** The four sections an expense-log category can land in. */
 export type ExpenseSection = 'fixed' | 'variable' | 'sub' | 'ins'
 
+/** One category's journal total for a month, split by who produced the entries. */
+export type LogItem = { name: string; manual: number; auto: number }
+
 /**
  * Which monthly section a category belongs to — the SAME routing applyImport
  * uses, so a category coming from the journal lands exactly where the same
@@ -152,55 +161,64 @@ export function sectionOfCategory(cat: string): ExpenseSection | null {
  * Exported because the one-time carry-over of legacy `logged` data runs from
  * dataSync, and both paths must build rows identically.
  */
-export function applyLogRows(m: MonthData, items: { name: string; amount: number }[]): MonthData {
+export function applyLogRows(m: MonthData, items: LogItem[]): MonthData {
   const out: MonthData = {
     ...m,
-    fixed:    clearLogContribution(m.fixed),
-    variable: clearLogContribution(m.variable),
-    sub:      clearLogContribution(m.sub),
-    ins:      clearLogContribution(m.ins),
+    fixed:    withoutJournal(m.fixed),
+    variable: withoutJournal(m.variable),
+    sub:      withoutJournal(m.sub),
+    ins:      withoutJournal(m.ins),
     logged: [],
   }
 
-  for (const { name, amount } of items) {
-    const section = sectionOfCategory(name)
-    const rounded = Math.round(amount)
-    if (!section || rounded <= 0) continue
+  for (const item of items) {
+    const section = sectionOfCategory(item.name)
+    if (!section) continue
+    const manual = Math.max(0, Math.round(item.manual))
+    const auto   = Math.max(0, Math.round(item.auto))
+    if (manual + auto <= 0) continue
 
     const rows = out[section]
-    const existing = rows.find(r => r.name === name)
-    // Someone already put a number here: an imported report, or the advisor by
-    // hand. That number wins and the journal's amount is set aside — the month
-    // screen names it and its amount so the money is never lost quietly.
-    if (existing && existing.actual > 0) continue
+    const existing = rows.find(r => r.name === item.name)
+    // `existing.actual` at this point is purely someone else's figure — the
+    // journal's own share was stripped above. A report (or a hand-typed number)
+    // sitting there means the card side is already accounted for, so only the
+    // hand-typed half is added on top; the captured half would be a duplicate.
+    const covered = Boolean(existing && existing.actual > 0)
+    const add = covered ? manual : manual + auto
+    if (add <= 0) continue
 
+    const share = { logManual: manual, ...(covered ? {} : { logAuto: auto }) }
     if (existing) {
-      // An empty row is waiting (usually a planned line). Fill it instead of
-      // opening a second row beside it, so the category stays one line with
-      // its plan next to its actual.
-      out[section] = rows.map(r => r === existing ? { ...r, actual: rounded, logFilled: true } : r)
+      out[section] = rows.map(r => r === existing
+        ? { ...r, actual: r.actual + add, ...share }
+        : r)
     } else {
-      out[section] = [...rows, { id: uid(), name, plan: 0, actual: rounded, fromLog: true }]
+      out[section] = [...rows, { id: uid(), name: item.name, plan: 0, actual: add, fromLog: true, ...share }]
     }
   }
   return out
 }
 
 /**
- * Undo whatever the journal last put into a section, so a transfer can always
- * be recomputed from scratch. Rows the journal CREATED are removed; rows it
- * merely filled are handed back empty, because they were the client's own
- * planned lines and deleting them would take the plan with them.
+ * Hand a section back the way it looked before the journal touched it, so a
+ * transfer is always recomputed from scratch rather than stacked on itself.
+ * Rows the transfer CREATED disappear once their journal money is gone; rows it
+ * only added to keep their own figure, because that figure belongs to a report
+ * or to the client.
  */
-function clearLogContribution(rows: BudgetRow[]): BudgetRow[] {
-  return rows
-    .filter(r => !r.fromLog)
-    .map(r => {
-      if (!r.logFilled) return r
-      const next = { ...r, actual: 0 }
-      delete next.logFilled
-      return next
-    })
+function withoutJournal(rows: BudgetRow[]): BudgetRow[] {
+  return rows.reduce<BudgetRow[]>((acc, r) => {
+    const share = (r.logManual ?? 0) + (r.logAuto ?? 0)
+    if (share === 0) { acc.push(r); return acc }
+    const rest = Math.max(0, r.actual - share)
+    if (r.fromLog && rest === 0 && r.plan === 0) return acc   // nothing left of it
+    const next = { ...r, actual: rest }
+    delete next.logManual
+    delete next.logAuto
+    acc.push(next)
+    return acc
+  }, [])
 }
 
 function makeDefaultMonth(): MonthData {
@@ -232,9 +250,10 @@ interface MonthlyState {
   initMonth:  (monthId: string) => void
   setYear:    (monthId: string, year: number) => void
   updateOsh:  (monthId: string, day: OshDay, value: number) => void
-  // Carry the תיעוד הוצאות summary into this month as real fromLog rows, so the
-  // journal's spending counts in ביצוע. Replaces any previous transfer.
-  applyExpenseLog: (monthId: string, items: { name: string; amount: number }[]) => void
+  // Carry the תיעוד הוצאות summary into this month's ביצוע. Items arrive split
+  // by producer: hand-typed money is added on top of whatever a report already
+  // reported, captured money defers to it. Replaces any previous transfer.
+  applyExpenseLog: (monthId: string, items: LogItem[]) => void
 
   addRow:    (monthId: string, section: SimpleSection, name?: string) => void
   updateRow: (monthId: string, section: SimpleSection, id: string, field: 'name' | 'plan' | 'actual', value: string | number) => void
@@ -335,17 +354,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateRow: (monthId, section, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        // Clear fromMapping AND fromLog on user edit — the row becomes "manual"
-        // for this specific month, so neither a future mapping sync nor a
-        // re-transfer from the journal will overwrite what was typed by hand.
-        // fromLog is written back only when the row actually had it: every row
-        // in every month passes through here, and an unconditional `false`
-        // would add a dead field to all of them inside a 900KB-capped document.
+        // A hand edit makes the row the client's own: it stops belonging to the
+        // mapping sync and to the journal transfer, so neither can overwrite it
+        // again. The journal fields are deleted rather than set false because
+        // every row in every month passes through here, and dead fields would
+        // accumulate inside a 900KB-capped document.
         [section]: m[section].map(r => {
           if (r.id !== id) return r
           const next = { ...r, [field]: value, fromMapping: false }
           delete next.fromLog
-          delete next.logFilled
+          delete next.logManual
+          delete next.logAuto
           return next
         }),
       })),
@@ -493,25 +512,36 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
             .map(s => ({ id: uid(), name: s.name, plan: s.amount, actual: 0, fromMapping: true }))
           return [...filled, ...added]
         }
-        // Step 1b: the report takes back every category it actually reports on.
-        // A category holds ONE number, and when both sources have something to
-        // say the report is the one that counts — the journal auto-captures
-        // Apple/Google Pay charges, which are the very charges the statement
-        // reports, so adding the two would count the same purchase twice.
-        // Categories the report is silent about (cash, Bit) keep their journal
-        // number untouched.
+        // Step 1b: in every category the report actually reports on, the report
+        // takes back the CAPTURED half of the journal — those are Apple/Google
+        // Pay charges and recurring rules, the very charges the statement is
+        // about to restate, and counting both would count them twice. The
+        // hand-typed half is cash and Bit the statement never saw, so it is set
+        // aside here and added back on top after the fill passes. Categories
+        // the report says nothing about are left completely alone.
+        const covered = (name: string) => (catSums[name] ?? 0) > 0
+        const manualHeld: Record<string, number> = {}
         function releaseCovered(rows: BudgetRow[]): BudgetRow[] {
-          const covered = (name: string) => (catSums[name] ?? 0) > 0
-          return rows
-            .filter(r => !(r.fromLog && covered(r.name)))
-            .map(r => {
-              if (!r.logFilled || !covered(r.name)) return r
-              // Emptied and unflagged, so the fill pass below writes the
-              // report's figure into it like into any other planned row.
-              const next = { ...r, actual: 0 }
-              delete next.logFilled
-              return next
-            })
+          return rows.map(r => {
+            if (!covered(r.name)) return r
+            const share = (r.logManual ?? 0) + (r.logAuto ?? 0)
+            if (share === 0) return r
+            if (r.logManual) manualHeld[r.name] = (manualHeld[r.name] ?? 0) + r.logManual
+            // Stripped back to the non-journal figure so the fill passes below
+            // write the report's number into it like into any other row.
+            const next = { ...r, actual: Math.max(0, r.actual - share) }
+            delete next.logManual
+            delete next.logAuto
+            return next
+          })
+        }
+        // Put the hand-typed money back once the report has written its figure.
+        function restoreManual(rows: BudgetRow[]): BudgetRow[] {
+          return rows.map(r => {
+            const held = manualHeld[r.name]
+            if (!held || r.logManual) return r
+            return { ...r, actual: r.actual + held, logManual: held }
+          })
         }
         const varMonthly = mappingVariable.map(s => ({ name: s.name, amount: Math.round(s.amount / Math.max(1, varMonths)) }))
         let fixed    = releaseCovered(mergePlan(m.fixed,    mappingFixed, del.fixed))
@@ -534,7 +564,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
             // Any journal row still carrying its flag here belongs to a category
             // the report is silent about (releaseCovered took the rest). A zero
             // entry in catSums must not be allowed to blank it out.
-            if (s === undefined || !cats.has(r.name) || r.fromLog || r.logFilled) return r
+            if (s === undefined || !cats.has(r.name) || r.logManual || r.logAuto) return r
             // Conditional spread, never an explicit undefined — Firestore
             // rejects undefined values and would fail the whole snapshot save.
             // STALE detail is dropped first: a re-send that fills this actual
@@ -579,7 +609,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           }
           // Normalized names of this section's NAMED (non-category) rows.
           const namedKeys = new Set(
-            rows.filter(r => !cats.has(r.name) && !r.fromLog).map(r => normalizeForLookup(r.name)).filter(Boolean),
+            rows.filter(r => !cats.has(r.name) && !r.logManual && !r.logAuto).map(r => normalizeForLookup(r.name)).filter(Boolean),
           )
           // Amount consumed by named rows, per category — subtracted from leftover.
           const consumed: Record<string, number> = {}
@@ -589,7 +619,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           // Pass 1 — fill named (per-business) rows from their matched total.
           // No match in this import → leave the row's existing actual untouched.
           let out = rows.map(r => {
-            if (cats.has(r.name) || r.fromLog || r.logFilled) return r
+            if (cats.has(r.name) || r.logManual || r.logAuto) return r
             const hit = byKey.get(normalizeForLookup(r.name))
             if (!hit) return r
             const t = capTxns(hit.txns)
@@ -605,7 +635,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           out = out.map(r => {
             // Same guard as fillActual: what is still flagged here is journal
             // money for a category the report never mentioned.
-            if (!cats.has(r.name) || r.fromLog || r.logFilled) return r
+            if (!cats.has(r.name) || r.logManual || r.logAuto) return r
             const total = catSums[r.name]
             if (total === undefined) return r
             const t = leftoverTxnsOf(r.name)
@@ -630,10 +660,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // Per-item actual for the three "named row" sections; variable stays
         // category-level (only fixed/sub/ins carry per-business rows worth
         // reconciling against the report).
-        fixed    = fillActualPerItem(fixed,    FIXED_CATEGORIES)
-        variable = fillActual(variable, variableCats)
-        sub      = fillActualPerItem(sub,      SUB_CATEGORIES)
-        ins      = fillActualPerItem(ins,      INSURANCE_CATEGORIES)
+        fixed    = restoreManual(fillActualPerItem(fixed,    FIXED_CATEGORIES))
+        variable = restoreManual(fillActual(variable, variableCats))
+        sub      = restoreManual(fillActualPerItem(sub,      SUB_CATEGORIES))
+        ins      = restoreManual(fillActualPerItem(ins,      INSURANCE_CATEGORIES))
 
         // Step 3: merge installments / debts / savings from mapping into the
         // month's own sections. Skip rows already present in the month by name
