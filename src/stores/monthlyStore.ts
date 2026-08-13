@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES } from '@/lib/constants'
+import { MONTH_DEFAULT_ROWS, LEGACY_DEFAULT_ALIASES, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES } from '@/lib/constants'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 function uid() { return Math.random().toString(36).slice(2) }
@@ -21,6 +21,12 @@ export interface BudgetRow {
   plan: number
   actual: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
+  // true → managed by the annual-plan→monthly auto-sync (annual ÷ 12).
+  // A SECOND owner tag, deliberately separate from fromMapping: each sync drops
+  // any row it owns whose name left its source, so one shared tag would make the
+  // two syncs delete each other's rows on alternating runs. Where both sources
+  // carry the same category, mapping wins (Ori, 2026-08-13) — see syncFromAnnual.
+  fromAnnual?: boolean
   // How much of `actual` above was put here by the expense-log transfer, split
   // by who produced the journal entry (see isAutoCaptured):
   //   logManual — typed by a person. Cash and Bit the report never sees, so it
@@ -58,6 +64,7 @@ export interface DebtRow {
   monthly: number
   months: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
+  fromAnnual?:  boolean   // true → managed by the annual-plan→monthly auto-sync
 }
 
 export interface SavingRow {
@@ -66,6 +73,7 @@ export interface SavingRow {
   monthly: number
   accumulated: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync
+  fromAnnual?:  boolean   // true → managed by the annual-plan→monthly auto-sync
 }
 
 // Checking-account (עו"ש) balance snapshots at 5 fixed days in the month.
@@ -89,6 +97,10 @@ export const OSH_POINTS = [
 export type OshDay = keyof OshBalances
 
 const EMPTY_OSH: OshBalances = { d2: 0, d10: 0, d15: 0, d20: 0, d30: 0 }
+
+const EMPTY_DELETED_ANNUAL = {
+  income: [], fixed: [], variable: [], sub: [], ins: [], debts: [], savings: [],
+} as const
 
 export interface MonthData {
   year: number
@@ -115,6 +127,18 @@ export interface MonthData {
     sub:           string[]
     ins:           string[]
     installments:  string[]
+    debts:         string[]
+    savings:       string[]
+  }
+  // Same idea for the annual-plan sync, tracked separately so deleting a row one
+  // source owns says nothing about the other. Includes `income`, which the
+  // mapping sync never touches but the annual plan does.
+  deletedFromAnnual: {
+    income:        string[]
+    fixed:         string[]
+    variable:      string[]
+    sub:           string[]
+    ins:           string[]
     debts:         string[]
     savings:       string[]
   }
@@ -221,6 +245,13 @@ function withoutJournal(rows: BudgetRow[]): BudgetRow[] {
   }, [])
 }
 
+/** The tracker is injected on load (dataSync) and by makeDefaultMonth, but a
+ *  month reaching the sync without it would throw and take the whole monthly
+ *  tab down with it. In a live tab that is not a trade worth making. */
+function deletedAnnualOf(m: MonthData): MonthData['deletedFromAnnual'] {
+  return m.deletedFromAnnual ?? { ...EMPTY_DELETED_ANNUAL }
+}
+
 function makeDefaultMonth(): MonthData {
   function rows(names: string[]): BudgetRow[] {
     return names.map(name => ({ id: uid(), name, plan: 0, actual: 0 }))
@@ -240,6 +271,9 @@ function makeDefaultMonth(): MonthData {
     deletedFromMapping: {
       fixed: [], variable: [], sub: [], ins: [],
       installments: [], debts: [], savings: [],
+    },
+    deletedFromAnnual: {
+      income: [], fixed: [], variable: [], sub: [], ins: [], debts: [], savings: [],
     },
   }
 }
@@ -317,6 +351,44 @@ interface MonthlyState {
     varMonths: number,
     monthId?: string,
   ) => void
+
+  /**
+   * Mirror the annual plan into the months of that same year, each figure
+   * divided by 12 (Ori, 2026-08-13: "אוכל בחוץ ובילויים 120 → 10 בכל חודש").
+   *
+   * Runs ALONGSIDE syncFromMapping, not instead of it: a client who only maps
+   * never fills the annual tab, and vice versa. The two never fight because
+   *   - rows carry separate owner tags (fromMapping / fromAnnual), and
+   *   - where both sources name the same category, mapping wins: this sync
+   *     leaves fromMapping rows alone, and syncFromMapping takes over any
+   *     fromAnnual row whose category it also covers.
+   *
+   * Only months whose `year` matches `plan.year` are touched, so planning next
+   * year cannot rewrite the months of this one.
+   *
+   * Per section:
+   *   - fromAnnual row still in the plan → plan figure updated in place.
+   *   - fromAnnual row no longer in the plan → plan zeroed and the tag released;
+   *     the row is removed outright only when it holds no ביצוע and is not one
+   *     of the month's default lines.
+   *   - untagged row with no plan of its own → adopted, so the annual figure
+   *     lands on the EXISTING line instead of opening a second one for the same
+   *     category (one category, one number).
+   *   - untagged row that already carries a plan → never touched. The client's
+   *     own number outranks both syncs.
+   */
+  syncFromAnnual: (
+    plan: {
+      year:     number
+      income:   { name: string; annual: number }[]
+      fixed:    { name: string; annual: number }[]
+      variable: { name: string; annual: number }[]
+      sub:      { name: string; annual: number }[]
+      savings:  { name: string; annual: number }[]
+      debt:     { name: string; annual: number; balance: number }[]
+    },
+    monthId?: string,
+  ) => void
 }
 
 export const useMonthlyStore = create<MonthlyState>((set, get) => {
@@ -362,6 +434,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         [section]: m[section].map(r => {
           if (r.id !== id) return r
           const next = { ...r, [field]: value, fromMapping: false }
+          delete next.fromAnnual
           delete next.fromLog
           delete next.logManual
           delete next.logAuto
@@ -373,22 +446,28 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       updateMonth(monthId, m => {
         const target = m[section].find(r => r.id === id)
         const filtered = m[section].filter(r => r.id !== id)
+        let next = { ...m, [section]: filtered }
         // If we just deleted a row that came from mapping, remember its name
         // so the next sync doesn't undo the deletion.
         if (target?.fromMapping && target.name && section !== 'income') {
           const list = m.deletedFromMapping[section as keyof MonthData['deletedFromMapping']]
           if (!list.includes(target.name)) {
-            return {
-              ...m,
-              [section]: filtered,
-              deletedFromMapping: {
-                ...m.deletedFromMapping,
-                [section]: [...list, target.name],
-              },
+            next = {
+              ...next,
+              deletedFromMapping: { ...next.deletedFromMapping, [section]: [...list, target.name] },
             }
           }
         }
-        return { ...m, [section]: filtered }
+        // Same for the annual plan. Checked independently of the mapping branch
+        // above: a row can be released by one source and still owned by neither,
+        // and income is tracked here even though mapping never touches it.
+        if (target?.fromAnnual && target.name) {
+          const da = deletedAnnualOf(m)
+          if (!da[section].includes(target.name)) {
+            next = { ...next, deletedFromAnnual: { ...da, [section]: [...da[section], target.name] } }
+          }
+        }
+        return next
       }),
 
     addInstRow: (monthId) =>
@@ -432,24 +511,32 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       updateMonth(monthId, m => ({
         ...m,
         // Clear fromMapping on user edit — see updateInstRow comment.
-        debts: m.debts.map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
+        debts: m.debts.map(r => {
+          if (r.id !== id) return r
+          const next = { ...r, [field]: value, fromMapping: false }
+          delete next.fromAnnual
+          return next
+        }),
       })),
 
     deleteDebtRow: (monthId, id) =>
       updateMonth(monthId, m => {
         const target = m.debts.find(r => r.id === id)
         const filtered = m.debts.filter(r => r.id !== id)
+        let next = { ...m, debts: filtered }
         if (target?.fromMapping && target.name && !m.deletedFromMapping.debts.includes(target.name)) {
-          return {
-            ...m,
-            debts: filtered,
-            deletedFromMapping: {
-              ...m.deletedFromMapping,
-              debts: [...m.deletedFromMapping.debts, target.name],
-            },
+          next = {
+            ...next,
+            deletedFromMapping: { ...next.deletedFromMapping, debts: [...next.deletedFromMapping.debts, target.name] },
           }
         }
-        return { ...m, debts: filtered }
+        if (target?.fromAnnual && target.name) {
+          const da = deletedAnnualOf(m)
+          if (!da.debts.includes(target.name)) {
+            next = { ...next, deletedFromAnnual: { ...da, debts: [...da.debts, target.name] } }
+          }
+        }
+        return next
       }),
 
     addSavingRow: (monthId) =>
@@ -462,24 +549,32 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
       updateMonth(monthId, m => ({
         ...m,
         // Clear fromMapping on user edit — see updateInstRow comment.
-        savings: m.savings.map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
+        savings: m.savings.map(r => {
+          if (r.id !== id) return r
+          const next = { ...r, [field]: value, fromMapping: false }
+          delete next.fromAnnual
+          return next
+        }),
       })),
 
     deleteSavingRow: (monthId, id) =>
       updateMonth(monthId, m => {
         const target = m.savings.find(r => r.id === id)
         const filtered = m.savings.filter(r => r.id !== id)
+        let next = { ...m, savings: filtered }
         if (target?.fromMapping && target.name && !m.deletedFromMapping.savings.includes(target.name)) {
-          return {
-            ...m,
-            savings: filtered,
-            deletedFromMapping: {
-              ...m.deletedFromMapping,
-              savings: [...m.deletedFromMapping.savings, target.name],
-            },
+          next = {
+            ...next,
+            deletedFromMapping: { ...next.deletedFromMapping, savings: [...next.deletedFromMapping.savings, target.name] },
           }
         }
-        return { ...m, savings: filtered }
+        if (target?.fromAnnual && target.name) {
+          const da = deletedAnnualOf(m)
+          if (!da.savings.includes(target.name)) {
+            next = { ...next, deletedFromAnnual: { ...da, savings: [...da.savings, target.name] } }
+          }
+        }
+        return next
       }),
 
     applyImport: (monthId, catSums, mappingFixed, mappingVariable, mappingSub, mappingIns, mappingInstallments, mappingDebts, mappingSavings, varMonths, merchantSums, catTxns) => {
@@ -753,9 +848,30 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
               result.push({ ...r, plan: Math.round(byName.get(r.name)!) })
               continue
             }
+            // Mapping outranks the annual plan (Ori, 2026-08-13): when both
+            // describe the same category, mapping takes the row over rather than
+            // leaving a stale ÷12 figure in place. Without this the winner would
+            // be whichever source happened to fill the category first.
+            if (r.fromAnnual && !r.fromMapping) {
+              const mapped = byName.get(r.name)
+              if (mapped === undefined) { result.push(r); continue }  // mapping silent — annual keeps it
+              const taken = { ...r, plan: Math.round(mapped), fromMapping: true }
+              delete taken.fromAnnual
+              result.push(taken)
+              continue
+            }
             if (!r.fromMapping) { result.push(r); continue }  // manual — leave untouched
             const newPlan = byName.get(r.name)
-            if (newPlan === undefined) continue                // mapping removed → drop
+            if (newPlan === undefined) {
+              // Mapping dropped the category. Taking the row with it also takes
+              // any ביצוע standing on it — real spending from an import or the
+              // journal, with no way back. Only an empty row leaves.
+              if (r.actual === 0 && !r.txns?.length) continue
+              const released = { ...r, plan: 0 }
+              delete released.fromMapping
+              result.push(released)
+              continue
+            }
             result.push({ ...r, plan: Math.round(newPlan) })
           }
           for (const [name, amount] of byName) {
@@ -819,6 +935,21 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const debtExisting = new Set(m.debts.map(r => r.name))
           const debts: DebtRow[] = []
           for (const r of m.debts) {
+            // Mapping outranks the annual plan — see syncBudgetSection.
+            if (r.fromAnnual && !r.fromMapping) {
+              const src = debtByName.get(r.name)
+              if (!src) { debts.push(r); continue }
+              const taken = {
+                ...r,
+                remaining: Math.round(src.remainingBalance),
+                monthly:   Math.round(src.monthlyPayment),
+                months:    src.remainingMonths,
+                fromMapping: true,
+              }
+              delete taken.fromAnnual
+              debts.push(taken)
+              continue
+            }
             if (!r.fromMapping) { debts.push(r); continue }
             const src = debtByName.get(r.name)
             if (!src) continue
@@ -847,6 +978,20 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const savExisting = new Set(m.savings.map(r => r.name))
           const savings: SavingRow[] = []
           for (const r of m.savings) {
+            // Mapping outranks the annual plan — see syncBudgetSection.
+            if (r.fromAnnual && !r.fromMapping) {
+              const src = savByName.get(r.name)
+              if (!src) { savings.push(r); continue }
+              const taken = {
+                ...r,
+                monthly:     Math.round(src.monthlyContribution),
+                accumulated: Math.round(src.accumulated),
+                fromMapping: true,
+              }
+              delete taken.fromAnnual
+              savings.push(taken)
+              continue
+            }
             if (!r.fromMapping) { savings.push(r); continue }
             const src = savByName.get(r.name)
             if (!src) continue
@@ -870,6 +1015,234 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           }
 
           newMonths[mid] = { ...m, fixed, variable, sub, ins, installments, debts, savings }
+        })
+
+        return { months: newMonths }
+      })
+    },
+
+    syncFromAnnual: (plan, monthId) => {
+      set(s => {
+        const targets = monthId ? [monthId] : Object.keys(s.months)
+        if (targets.length === 0) return s
+
+        // Annual figure → monthly plan. Rounding leaves a few shekels of drift
+        // over a year (1,000 → 83, ×12 = 996), the same drift the ÷12 column in
+        // the annual tab already displays.
+        const toMap = (rows: { name: string; annual: number }[]) => {
+          const out = new Map<string, number>()
+          for (const r of rows) {
+            const name = r.name.trim()
+            if (!name) continue
+            const amount = Math.round(r.annual / 12)
+            if (amount <= 0) continue
+            // Two annual lines sharing a name describe one category between
+            // them; summing beats letting the last one silently win.
+            out.set(name, (out.get(name) ?? 0) + amount)
+          }
+          return out
+        }
+
+        const incomeByName = toMap(plan.income)
+        const fixedByName  = toMap(plan.fixed)
+        const varByName    = toMap(plan.variable)
+        // The annual tab keeps subscriptions and insurance in ONE section while
+        // the month splits them. Route by the canonical insurance list so a
+        // ביטוח line lands in the month's ביטוחים block, not beside המנויים.
+        const subByName = new Map<string, number>()
+        const insByName = new Map<string, number>()
+        // The canonical list holds the common policies; the startsWith catches
+        // the ones a client types themselves (ביטוח דירה, ביטוח נסיעות), which
+        // would otherwise be measured against the subscriptions budget.
+        for (const [name, amount] of toMap(plan.sub)) {
+          const isInsurance = INSURANCE_CATEGORIES.has(name) || name.startsWith('ביטוח')
+          ;(isInsurance ? insByName : subByName).set(name, amount)
+        }
+
+        /**
+         * A row is a PLACEHOLDER — one of the empty lines this app puts in a new
+         * month, never touched since — and so may be filled from the plan.
+         *
+         * Anything else belongs to the client, even when it currently reads 0: a
+         * line they added themselves, a line they deliberately zeroed, a line
+         * carrying spending from an import or the journal. The mapping sync never
+         * writes into rows it did not create, and neither may this one.
+         *
+         * `fromMapping === undefined` is the "never hand-edited" signal: every
+         * edit path in this store stamps `fromMapping: false` explicitly.
+         */
+        function isPlaceholder(r: BudgetRow, defaultSet: Set<string>): boolean {
+          return defaultSet.has(r.name)
+            && r.fromMapping === undefined
+            && r.plan === 0
+            && r.actual === 0
+            && !r.fromLog
+            && !r.txns?.length
+        }
+
+        function syncBudgetSection(
+          existing: BudgetRow[],
+          byName: Map<string, number>,
+          deletedNames: string[],
+          defaultNames: string[],
+        ): BudgetRow[] {
+          const deletedSet = new Set(deletedNames)
+          // Legacy placeholder names count as their canonical twin, so a month
+          // saved with the old vocabulary is filled rather than duplicated.
+          const defaultSet = new Set([...defaultNames, ...Object.keys(LEGACY_DEFAULT_ALIASES)])
+          const canonical = (n: string) => LEGACY_DEFAULT_ALIASES[n] ?? n
+          const result: BudgetRow[] = []
+          // Names already spoken for. Each existing row claims BOTH the name it
+          // carries and the canonical name it stands for, so a plan line matches
+          // whether it is written the old way or the new one. Mixing the two
+          // namespaces here is what lets a duplicate through.
+          const taken = new Set<string>()
+          for (const r of existing) { taken.add(r.name); taken.add(canonical(r.name)) }
+          // Who on screen already stands for each canonical category? More than
+          // one placeholder can mean the same thing (מסעדות and פנאי ובילויים are
+          // both אוכל בחוץ ובילויים), so pick exactly one to carry the plan — and
+          // pick none at all if a row the client has already filled is standing
+          // for that category under any of its names.
+          const spokenFor = new Set<string>()
+          const renameTarget = new Map<string, string>()
+          for (const r of existing) {
+            const c = canonical(r.name)
+            if (isPlaceholder(r, defaultSet)) {
+              if (!renameTarget.has(c)) renameTarget.set(c, r.id)
+            } else {
+              spokenFor.add(c)
+            }
+          }
+          for (const r of existing) {
+            if (r.fromMapping) { result.push(r); continue }   // mapping wins
+            const amount = byName.get(r.name)
+            if (r.fromAnnual) {
+              if (amount !== undefined) { result.push({ ...r, plan: amount }); continue }
+              // Dropped out of the plan. A row still holding ביצוע — or one of
+              // the month's own default lines — stays, emptied of its plan.
+              // Anything else was opened by this sync and leaves with it.
+              if (r.actual === 0 && !defaultSet.has(r.name)) continue
+              const released = { ...r, plan: 0 }
+              delete released.fromAnnual
+              result.push(released)
+              continue
+            }
+            if (amount !== undefined && isPlaceholder(r, defaultSet) && !deletedSet.has(r.name)) {
+              result.push({ ...r, plan: amount, fromAnnual: true })
+              continue
+            }
+            // A legacy placeholder whose canonical twin is what the plan names:
+            // take the row over under the new name instead of leaving an empty
+            // duplicate of it on screen. Only ever one row per canonical name,
+            // and only while the row is still an untouched blank.
+            const target = LEGACY_DEFAULT_ALIASES[r.name]
+            if (target !== undefined
+                && byName.get(target) !== undefined
+                && renameTarget.get(target) === r.id
+                && !spokenFor.has(target)
+                && !deletedSet.has(target)) {
+              result.push({ ...r, name: target, plan: byName.get(target)!, fromAnnual: true })
+              continue
+            }
+            result.push(r)
+          }
+          for (const [name, amount] of byName) {
+            if (taken.has(name)) continue
+            if (deletedSet.has(name)) continue
+            result.push({ id: uid(), name, plan: amount, actual: 0, fromAnnual: true })
+          }
+          return result
+        }
+
+        const newMonths = { ...s.months }
+        targets.forEach(mid => {
+          const m = newMonths[mid]
+          if (!m) return
+          // Planning a different year must not rewrite this one's months. A month
+          // with no year recorded (older snapshot) is treated as the plan's year,
+          // so the sync still reaches it.
+          if (m.year && m.year !== plan.year) return
+
+          const del = deletedAnnualOf(m)
+          const income   = syncBudgetSection(m.income,   incomeByName, del.income,   MONTH_DEFAULT_ROWS.income)
+          const fixed    = syncBudgetSection(m.fixed,    fixedByName,  del.fixed,    MONTH_DEFAULT_ROWS.fixed)
+          const variable = syncBudgetSection(m.variable, varByName,    del.variable, MONTH_DEFAULT_ROWS.variable)
+          const sub      = syncBudgetSection(m.sub,      subByName,    del.sub,      MONTH_DEFAULT_ROWS.sub)
+          const ins      = syncBudgetSection(m.ins,      insByName,    del.ins,      MONTH_DEFAULT_ROWS.ins)
+
+          // SAVINGS — the annual figure is the monthly contribution.
+          const savByName = toMap(plan.savings)
+          const savExisting = new Set(m.savings.map(r => r.name))
+          const savDeleted  = new Set(del.savings)
+          const savings: SavingRow[] = []
+          for (const r of m.savings) {
+            if (r.fromMapping) { savings.push(r); continue }
+            const amount = savByName.get(r.name)
+            if (r.fromAnnual) {
+              if (amount !== undefined) { savings.push({ ...r, monthly: amount }); continue }
+              if (r.accumulated === 0) continue      // nothing of the client's in it
+              const released = { ...r, monthly: 0 }
+              delete released.fromAnnual
+              savings.push(released)
+              continue
+            }
+            // No adoption here: a month ships with NO savings rows, so every
+            // untagged one was put there by the client. Matching the name is
+            // enough to keep the plan from opening a duplicate.
+            savings.push(r)
+          }
+          for (const [name, amount] of savByName) {
+            if (savExisting.has(name)) continue
+            if (savDeleted.has(name)) continue
+            savings.push({ id: uid(), name, monthly: amount, accumulated: 0, fromAnnual: true })
+          }
+
+          // DEBTS — annual payment ÷ 12, with the plan's closing balance.
+          // `months` is never written: the annual tab does not carry a term, and
+          // deriving one from balance ÷ payment would ignore interest and put a
+          // number the client never gave in front of them.
+          const debtByName = new Map<string, { monthly: number; balance: number }>()
+          for (const r of plan.debt) {
+            const name = r.name.trim()
+            if (!name) continue
+            const monthly = Math.round(r.annual / 12)
+            if (monthly <= 0 && r.balance <= 0) continue
+            const prev = debtByName.get(name)
+            debtByName.set(name, {
+              monthly: (prev?.monthly ?? 0) + monthly,
+              balance: (prev?.balance ?? 0) + (r.balance || 0),
+            })
+          }
+          const debtExisting = new Set(m.debts.map(r => r.name))
+          const debtDeleted  = new Set(del.debts)
+          const debts: DebtRow[] = []
+          for (const r of m.debts) {
+            if (r.fromMapping) { debts.push(r); continue }
+            const src = debtByName.get(r.name)
+            if (r.fromAnnual) {
+              if (src) {
+                // A zero balance in the plan means "not filled in", not "paid
+                // off" — keep whatever the month already shows.
+                debts.push({ ...r, monthly: src.monthly, remaining: src.balance > 0 ? src.balance : r.remaining })
+                continue
+              }
+              if (r.remaining === 0) continue
+              const released = { ...r, monthly: 0 }
+              delete released.fromAnnual
+              debts.push(released)
+              continue
+            }
+            // No adoption — same reason as savings. Writing into a client's debt
+            // row would replace a balance they typed with the plan's figure.
+            debts.push(r)
+          }
+          for (const [name, src] of debtByName) {
+            if (debtExisting.has(name)) continue
+            if (debtDeleted.has(name)) continue
+            debts.push({ id: uid(), name, remaining: src.balance, monthly: src.monthly, months: 0, fromAnnual: true })
+          }
+
+          newMonths[mid] = { ...m, income, fixed, variable, sub, ins, savings, debts }
         })
 
         return { months: newMonths }

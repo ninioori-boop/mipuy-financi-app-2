@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useAnnualStore, type AnnualSection } from '@/stores/annualStore'
 import { useMonthlyStore } from '@/stores/monthlyStore'
-import { MONTHS_LIST } from '@/lib/constants'
+import { MONTHS_LIST, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, SUB_CATEGORIES, INSURANCE_CATEGORIES } from '@/lib/constants'
 import { toast } from 'sonner'
 
 const MONTH_IDS = MONTHS_LIST.map(m => m.id)
@@ -15,6 +15,17 @@ function fmt(n: number) {
 
 type ViewMode = 'plan' | 'actual' | 'both'
 
+// Category suggestions per section, straight from the canonical lists the
+// mapping tab and the imported reports use. Offered, not enforced: the field
+// stays free text, but a client who picks from the list gets a name the month
+// already knows, so the plan lands on the existing line instead of opening a
+// second one for the same expense.
+const SUGGEST: Partial<Record<AnnualSection, string[]>> = {
+  fixed:    [...FIXED_CATEGORIES].sort((a, b) => a.localeCompare(b, 'he')),
+  variable: [...VAR_CATEGORIES, ...ANNUAL_CATEGORIES].sort((a, b) => a.localeCompare(b, 'he')),
+  sub:      [...SUB_CATEGORIES, ...INSURANCE_CATEGORIES].sort((a, b) => a.localeCompare(b, 'he')),
+}
+
 // ── Extracted to module level to prevent remount on every keystroke ──
 function PlanSection({ section, title, icon, isIncome = false }: {
   section: AnnualSection; title: string; icon: string; isIncome?: boolean
@@ -22,8 +33,15 @@ function PlanSection({ section, title, icon, isIncome = false }: {
   const store = useAnnualStore()
   const rows  = store[section]
   const total = rows.reduce((s, r) => s + r.annual, 0)
+  const suggest = SUGGEST[section]
+  const listId  = suggest ? `annual-cats-${section}` : undefined
   return (
     <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
+      {suggest && (
+        <datalist id={listId}>
+          {suggest.map(c => <option key={c} value={c} />)}
+        </datalist>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-txt">{icon} {title}</h2>
         <span className={`text-sm font-bold ${isIncome ? 'text-green-400' : 'text-gold'}`}>
@@ -43,6 +61,7 @@ function PlanSection({ section, title, icon, isIncome = false }: {
             {/* Desktop row */}
             <div className="hidden sm:grid grid-cols-[1fr_7rem_6rem_1.5rem] gap-2 items-center">
               <input value={row.name} onChange={e => store.updateRow(section, row.id, 'name', e.target.value)} placeholder="פריט"
+                list={listId}
                 className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
               <input type="number" value={row.annual || ''} onChange={e => store.updateRow(section, row.id, 'annual', parseFloat(e.target.value) || 0)}
                 placeholder="₪" min={0} style={{ direction: 'ltr' }}
@@ -57,6 +76,7 @@ function PlanSection({ section, title, icon, isIncome = false }: {
             <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
               <div className="flex items-center gap-2">
                 <input value={row.name} onChange={e => store.updateRow(section, row.id, 'name', e.target.value)} placeholder="פריט"
+                  list={listId}
                   className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
                 <button onClick={() => store.deleteRow(section, row.id)} className="shrink-0 text-muted-txt hover:text-expense text-sm">×</button>
               </div>
@@ -168,8 +188,13 @@ export default function AnnualPage() {
     const fixed    = d.fixed.reduce((s, r) => s + r.actual, 0)
     const variable = d.variable.reduce((s, r) => s + r.actual, 0)
     const sub      = d.sub.reduce((s, r) => s + r.actual, 0) + d.ins.reduce((s, r) => s + r.actual, 0)
-    const debt     = d.debts.reduce((s, r) => s + r.monthly, 0) + d.installments.reduce((s, r) => s + r.monthly, 0)
-    const savings  = d.savings.reduce((s, r) => s + r.monthly, 0)
+    // Debt and savings rows hold ONE number, with no plan/actual split. A row
+    // this very plan pushed into the month (fromAnnual) is therefore the plan
+    // itself — counting it as ביצוע would report a loan as fully repaid in
+    // January, purely because it was typed into the plan.
+    const debt     = d.debts.filter(r => !r.fromAnnual).reduce((s, r) => s + r.monthly, 0)
+                   + d.installments.reduce((s, r) => s + r.monthly, 0)
+    const savings  = d.savings.filter(r => !r.fromAnnual).reduce((s, r) => s + r.monthly, 0)
     return { income, fixed, variable, sub, debt, savings, hasData: income > 0 || fixed > 0 || variable > 0 }
   })
 
@@ -192,6 +217,14 @@ export default function AnnualPage() {
   const aCF       = aIncome - aExp
   const activeMonths = moActuals.filter(m => m.hasData).length
   const pace = Math.round((activeMonths / 12) * 100)
+
+  // The plan only flows into months of its own year. When the two disagree the
+  // sync does nothing at all, which from the client's side looks exactly like a
+  // broken feature — so say it out loud rather than let them wonder.
+  const monthYears = Array.from(new Set(
+    MONTH_IDS.map(mid => months[mid]?.year).filter((y): y is number => typeof y === 'number' && y > 0)
+  ))
+  const yearMismatch = monthYears.length > 0 && !monthYears.includes(store.year)
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -226,6 +259,14 @@ export default function AnnualPage() {
           </select>
         </div>
       </div>
+
+      {yearMismatch && (
+        <div className="rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm text-txt">
+          <span className="font-semibold text-gold">שים לב:</span> התכנון הזה הוא לשנת {store.year},
+          והחודשים בטאב החודשי רשומים כשנת {monthYears.join(', ')}.
+          כל עוד השנים לא זהות, הסכומים כאן לא נכנסים לתקציב החודשי.
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

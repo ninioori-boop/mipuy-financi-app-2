@@ -19,11 +19,19 @@ export interface AnnualDebtRow {
 
 export type AnnualSection = 'income' | 'fixed' | 'variable' | 'sub' | 'savings'
 
+// The expense rows carry the CANONICAL category names (src/lib/constants.ts),
+// the same vocabulary the mapping tab and the imported reports speak. They used
+// to carry a private set of labels ("פנאי ובילויים" where everything else says
+// "אוכל בחוץ ובילויים"), which was harmless while this tab talked to nobody, but
+// now that the plan flows into the month it would put two lines in front of the
+// client for one real expense. Income and savings stay free text: they are not
+// categories, nothing classifies into them.
+// Existing clients keep whatever they typed — this only seeds an empty tab.
 const DEFAULTS: Record<AnnualSection, string[]> = {
   income:   ['שכר עבודה (נטו)', 'הכנסה נוספת'],
-  fixed:    ['שכירות / משכנתא', 'ארנונה', 'ועד בית', 'חשמל', 'מים וגז'],
-  variable: ['מזון וסופר', 'דלק ורכב', 'בריאות', 'ילדים וחינוך', 'פנאי ובילויים', 'ביגוד ושונות'],
-  sub:      ['טלפון', 'אינטרנט', 'סטרימינג', 'ביטוח חיים', 'ביטוח בריאות', 'ביטוח רכב'],
+  fixed:    ['שכר דירה', 'משכנתא', 'ארנונה', 'ועד בית', 'חשמל', 'מים', 'גז'],
+  variable: ['מזון לבית', 'אוכל בחוץ ובילויים', 'דלק וחניה', 'בריאות', 'חינוך וקייטנות', 'ביגוד והנעלה'],
+  sub:      ['מנויים', 'חדר כושר', 'ביטוח חיים', 'ביטוח בריאות', 'ביטוח רכב'],
   savings:  ['קרן חירום', 'פנסיה / השקעות'],
 }
 

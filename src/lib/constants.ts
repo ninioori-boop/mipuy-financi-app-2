@@ -17,12 +17,42 @@ export const MONTHS_LIST: MonthMeta[] = [
 
 export const MONTH_IDS: MonthId[] = MONTHS_LIST.map(m => m.id)
 
+// ⚠️ These names must NOT be the canonical category names. The mapping sync
+// skips any category whose name already exists in the month, so a default row
+// called "מזון לבית" would silently swallow the mapping plan for מזון לבית and
+// the client's mapped budget would never reach their month. Tried on
+// 2026-08-13; four existing tests caught it. The vocabulary gap is bridged by
+// LEGACY_DEFAULT_ALIASES below instead.
 export const MONTH_DEFAULT_ROWS: Record<MonthSection, string[]> = {
   income:   ['שכר עבודה (נטו)', 'קצבת ילדים', 'הכנסה נוספת'],
   fixed:    ['שכירות / משכנתא', 'ארנונה', 'ועד בית', 'חשמל', 'מים וגז'],
   variable: ['מזון וסופר', 'דלק ורכב', 'בריאות', 'ילדים וחינוך', 'פנאי ובילויים', 'הלבשה', 'מסעדות'],
   sub:      ['טלפון', 'אינטרנט', 'סטרימינג'],
   ins:      ['ביטוח חיים', 'ביטוח בריאות', 'ביטוח רכב'],
+}
+
+// The month's placeholder lines speak an older, human vocabulary; the annual
+// plan, the mapping tab and the imported reports speak the canonical categories.
+// Without a bridge, a plan for "מזון לבית" lands beside the empty "מזון וסופר"
+// placeholder and the client sees two lines for one expense. The annual sync
+// RENAMES such a placeholder into its canonical twin instead — only while the
+// row is genuinely untouched and empty (see syncFromAnnual). The mapping sync is
+// deliberately left out of this: it treats default rows as the client's own setup
+// and adds its own line, which is long-standing, tested behaviour.
+// Deliberately absent: 'שכירות / משכנתא' and 'מים וגז', each of which covers two
+// canonical categories. There is no way to tell which one the client meant, and
+// guessing would put a number on the wrong line.
+export const LEGACY_DEFAULT_ALIASES: Record<string, string> = {
+  'מזון וסופר':    'מזון לבית',
+  'פנאי ובילויים': 'אוכל בחוץ ובילויים',
+  'מסעדות':        'אוכל בחוץ ובילויים',
+  'דלק ורכב':      'דלק וחניה',
+  'ילדים וחינוך':  'חינוך וקייטנות',
+  'הלבשה':         'ביגוד והנעלה',
+  'ביגוד ושונות':  'ביגוד והנעלה',
+  'טלפון':         'מנויים',
+  'אינטרנט':       'מנויים',
+  'סטרימינג':      'מנויים',
 }
 
 export const ALL_CATEGORIES: string[] = [

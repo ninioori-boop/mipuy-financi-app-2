@@ -54,6 +54,9 @@ function populateAllStores() {
           fixed: ['old-fixed-row'], variable: [], sub: [], ins: [],
           installments: ['stale-installment'], debts: [], savings: [],
         },
+        deletedFromAnnual: {
+          income: [], fixed: [], variable: ['dropped-from-plan'], sub: [], ins: [], debts: [], savings: [],
+        },
       },
     },
   })

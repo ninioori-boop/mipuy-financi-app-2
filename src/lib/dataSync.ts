@@ -419,6 +419,10 @@ export function applySnapshot(raw: unknown): void {
     for (const [id, m] of Object.entries(raw.monthly.months as Record<string, unknown>)) {
       if (!isObject(m)) continue
       const dm = (m.deletedFromMapping ?? {}) as Record<string, unknown>
+      // Same treatment for the annual-plan deletion tracker, which every month
+      // saved before 2026-08-13 predates. Without this the annual sync would
+      // read `undefined.fixed` on the first month a returning client opens.
+      const da = (m.deletedFromAnnual ?? {}) as Record<string, unknown>
       // osh (checking-account snapshots) was added later — months saved before it
       // existed need the field injected so the monthly tab can rely on it.
       const osh = (m.osh ?? {}) as Record<string, unknown>
@@ -442,6 +446,15 @@ export function applySnapshot(raw: unknown): void {
           installments: Array.isArray(dm.installments) ? dm.installments : [],
           debts:        Array.isArray(dm.debts)        ? dm.debts        : [],
           savings:      Array.isArray(dm.savings)      ? dm.savings      : [],
+        },
+        deletedFromAnnual: {
+          income:   Array.isArray(da.income)   ? da.income   : [],
+          fixed:    Array.isArray(da.fixed)    ? da.fixed    : [],
+          variable: Array.isArray(da.variable) ? da.variable : [],
+          sub:      Array.isArray(da.sub)      ? da.sub      : [],
+          ins:      Array.isArray(da.ins)      ? da.ins      : [],
+          debts:    Array.isArray(da.debts)    ? da.debts    : [],
+          savings:  Array.isArray(da.savings)  ? da.savings  : [],
         },
       }
 

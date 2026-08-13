@@ -1397,6 +1397,34 @@ export function DataSync({ children }: { children: React.ReactNode }) {
     }
   }, [user, hydrated])
 
+  // ── 3b. Same, for the annual plan (annual ÷ 12 → every month of that year) ──
+  // A separate subscription rather than a branch inside the one above: the two
+  // stores change independently, and each sync only owns the rows it created.
+  // Ordering does not matter — where both cover a category, mapping wins by
+  // rule, not by whoever ran last (see syncFromAnnual).
+  useEffect(() => {
+    if (!user || !hydrated) return
+
+    let annualTimer: ReturnType<typeof setTimeout> | null = null
+    const triggerSync = () => {
+      if (annualTimer) clearTimeout(annualTimer)
+      annualTimer = setTimeout(() => {
+        const a = useAnnualStore.getState()
+        useMonthlyStore.getState().syncFromAnnual({
+          year: a.year,
+          income: a.income, fixed: a.fixed, variable: a.variable,
+          sub: a.sub, savings: a.savings, debt: a.debt,
+        })
+      }, 500)
+    }
+    triggerSync()
+    const unsub = useAnnualStore.subscribe(triggerSync)
+    return () => {
+      unsub()
+      if (annualTimer) clearTimeout(annualTimer)
+    }
+  }, [user, hydrated])
+
   // ── 4. Online/offline awareness ──
   useEffect(() => {
     const onOffline = () => useSyncStore.getState().setStatus('offline')

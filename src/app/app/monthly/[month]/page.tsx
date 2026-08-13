@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useMonthlyStore, OSH_POINTS, sectionOfCategory } from '@/stores/monthlyStore'
 import { useMappingStore } from '@/stores/mappingStore'
+import { useAnnualStore } from '@/stores/annualStore'
 import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import { BudgetSection } from '@/components/monthly/BudgetSection'
@@ -17,7 +18,7 @@ export default function MonthlyPage() {
   const { month: monthId } = useParams<{ month: string }>()
   const monthName = MONTHS_LIST.find(m => m.id === monthId)?.name ?? monthId
 
-  const { months, initMonth, syncFromMapping, setYear, addRow, updateRow, deleteRow,
+  const { months, initMonth, syncFromMapping, syncFromAnnual, setYear, addRow, updateRow, deleteRow,
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
           addSavingRow, updateSavingRow, deleteSavingRow, updateOsh } = useMonthlyStore()
@@ -27,6 +28,9 @@ export default function MonthlyPage() {
   // + installments/debts/savings). The sync uses fromMapping:true so subsequent
   // user edits in this month are preserved (the edit clears the flag and future
   // syncs leave that row alone).
+  // Then the annual plan, ÷12, into this month if it belongs to the planned
+  // year. Second on purpose: mapping outranks it, and running it after keeps
+  // that visible in the code even though the rule itself does not depend on order.
   useEffect(() => {
     initMonth(monthId)
     const mp = useMappingStore.getState()
@@ -36,7 +40,13 @@ export default function MonthlyPage() {
       mp.varMonths,
       monthId,
     )
-  }, [monthId, initMonth, syncFromMapping])
+    const a = useAnnualStore.getState()
+    syncFromAnnual({
+      year: a.year,
+      income: a.income, fixed: a.fixed, variable: a.variable,
+      sub: a.sub, savings: a.savings, debt: a.debt,
+    }, monthId)
+  }, [monthId, initMonth, syncFromMapping, syncFromAnnual])
 
   const data = months[monthId]
   if (!data) return null
