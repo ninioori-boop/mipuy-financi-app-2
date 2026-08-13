@@ -153,10 +153,15 @@ export default function ExpensesPage() {
   // will never show and gets added on top of it, while a charge captured from
   // the phone is the very charge the report restates.
   const catSplit = useMemo(() => {
-    const map = new Map<string, { manual: number; auto: number }>()
+    const map = new Map<string, { manual: number; auto: number; bit: number }>()
     for (const e of monthEntries) {
-      const cur = map.get(e.category) ?? { manual: 0, auto: 0 }
-      if (isAutoCaptured(e)) cur.auto += e.amount; else cur.manual += e.amount
+      const cur = map.get(e.category) ?? { manual: 0, auto: 0, bit: 0 }
+      // Bit first: a transfer IS machine-captured, but the report files it under
+      // its own rail line rather than under this category, so it behaves like
+      // neither half and the month reconciles it separately.
+      if (e.rail === 'bit') cur.bit += e.amount
+      else if (isAutoCaptured(e)) cur.auto += e.amount
+      else cur.manual += e.amount
       map.set(e.category, cur)
     }
     return [...map.entries()].map(([name, v]) => ({ name, ...v }))

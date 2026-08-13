@@ -117,6 +117,7 @@ export function useTransactionInbox() {
           const d  = change.doc.data() as {
             merchant?: unknown; amount?: unknown; date?: unknown; category?: unknown; ref?: unknown
             foreignAmount?: unknown; foreignCurrency?: unknown; fxRate?: unknown
+            rail?: unknown
           }
 
           const merchant = typeof d.merchant === 'string' ? d.merchant.trim() : ''
@@ -149,7 +150,12 @@ export function useTransactionInbox() {
 
           const chargeDate = typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : today()
           const category   = typeof d.category === 'string' && d.category ? d.category : 'שונות'
-          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note, src: id, ...foreign })
+          // The rail this charge travelled on, when the server recorded one. It
+          // has to survive the client re-filing the category, which is exactly
+          // when it stops being derivable from anything else. Older inbox items
+          // simply have none, and behave the way they always did.
+          const rail = d.rail === 'bit' ? { rail: 'bit' as const } : {}
+          useExpenseLogStore.getState().add({ date: chargeDate, amount, category, note, src: id, ...foreign, ...rail })
           dropAfterSave.push(id)
           newCharges.push({ merchant, amount, category, date: chargeDate, foreignAmount, foreignCurrency })
         }

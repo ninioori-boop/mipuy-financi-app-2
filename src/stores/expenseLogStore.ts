@@ -29,6 +29,17 @@ export interface ExpenseEntry {
   // inbox deleteDoc re-drained the same item next session and the charge
   // appeared twice in the log. Absent on manually-added entries.
   src?: string
+  // The payment rail the charge travelled on, recorded at capture. Only 'bit'
+  // today (Bit/Paybox transfers, which the phone captures).
+  //
+  // Why it must be stored rather than derived: a transfer is captured under
+  // "ביט ללא מעקב", and the expenses tab then invites the client to re-file it
+  // under the category it really belongs to. After that edit nothing in the
+  // entry says it came through Bit — while the credit report still reports the
+  // very same shekels as one opaque "ביט" line. The month reconciles the two by
+  // this field, so the client's own categorisation survives AND the money is
+  // counted once. Absent on everything captured before this existed.
+  rail?: 'bit'
 }
 
 /**
@@ -69,6 +80,7 @@ type NewEntry = {
   date: string; amount: number; category: string; note: string
   foreignAmount?: number; foreignCurrency?: string; fxRate?: number
   src?: string
+  rail?: 'bit'
 }
 
 interface ExpenseLogState {
@@ -96,6 +108,7 @@ export const useExpenseLogStore = create<ExpenseLogState>((set) => ({
         if (typeof e.fxRate === 'number') entry.fxRate = e.fxRate
       }
       if (e.src) entry.src = e.src
+      if (e.rail === 'bit') entry.rail = 'bit'
       return { entries: [entry, ...s.entries] }
     }),
 

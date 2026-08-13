@@ -421,6 +421,14 @@ export async function POST(req: NextRequest) {
     // original to match on. Omitted entirely for shekel charges, so the common
     // case writes exactly the same document it always has.
     ...(foreignCurrency ? { foreignAmount, foreignCurrency, fxRate } : {}),
+    // Which rail carried the money. `isTransfer` is already decided above (it
+    // picks the category); this only REMEMBERS it. The month needs it later,
+    // because a Bit transfer reaches the credit report as one opaque "ביט" line
+    // while the client is encouraged to re-file the capture under the real
+    // category it belongs to — and once the category is changed, nothing else in
+    // the data still says this money travelled through Bit. Same conditional
+    // spread as the foreign fields above: never an explicit undefined.
+    ...(isTransfer ? { rail: 'bit' } : {}),
   })
   // Fingerprint for the duplicate-fire guard above (best-effort).
   await inboxRef

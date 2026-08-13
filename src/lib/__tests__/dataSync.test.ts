@@ -250,6 +250,29 @@ describe('DataSync — snapshot round-trip', () => {
     expect(after).toEqual(before)
   })
 
+  it('the Bit reconciliation survives a save and load', () => {
+    // logRailBit (month level) and railOffset (on the rail row) are what let the
+    // report's opaque "ביט" line stay reconciled against the journal. If either
+    // is dropped by the snapshot, the next import silently un-reconciles and the
+    // client's Bit spending doubles.
+    const RAIL = 'ביט ללא מעקב'
+    const store = useMonthlyStore.getState()
+    store.initMonth('jan')
+    store.applyExpenseLog('jan', [{ name: 'מזון לבית', manual: 0, auto: 0, bit: 300 }])
+    store.applyImport('jan', { [RAIL]: 500 }, [], [], [], [], [], [], [], 1)
+
+    const railBefore = useMonthlyStore.getState().months['jan'].variable
+      .filter(r => r.name === RAIL).reduce((t, r) => t + r.actual, 0)
+    expect(railBefore).toBe(200)
+
+    applySnapshot(JSON.parse(JSON.stringify(collectSnapshot())))
+
+    const jan = useMonthlyStore.getState().months['jan']
+    expect(jan.logRailBit).toBe(300)
+    expect(jan.variable.find(r => r.name === RAIL)?.railOffset).toBe(300)
+    expect(jan.variable.filter(r => r.name === RAIL).reduce((t, r) => t + r.actual, 0)).toBe(200)
+  })
+
   it('a month still holding the retired `logged` list is carried over to real rows', () => {
     // Months saved before the expense-log summary counted in ביצוע kept it in a
     // display-only `logged` array. Loading such a portfolio must rebuild it as

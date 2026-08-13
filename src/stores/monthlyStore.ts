@@ -41,6 +41,11 @@ export interface BudgetRow {
   // existed). Only that kind may be removed when the journal stops covering the
   // category — deleting a planned line would take the client's plan with it.
   fromLog?: boolean
+  // Only ever on the RAIL_CATEGORY row: how much of the report's opaque "ביט"
+  // line has already been counted under real categories, and was therefore
+  // subtracted here. Stored so the reconciliation can reverse itself and be
+  // recomputed from scratch instead of subtracting twice. See settleRail.
+  railOffset?: number
   // Set by applyImport when the actual came from an imported report — lets the
   // month show WHICH charges built the number. Optional: rows created before
   // this existed, and hand-typed actuals, simply have none.
@@ -113,6 +118,11 @@ export interface MonthData {
   debts: DebtRow[]
   savings: SavingRow[]
   osh: OshBalances
+  // Bit money the last expense-log transfer accounted for, anywhere in this
+  // month. Kept at month level so the reconciliation of the report's rail line
+  // works no matter which of the two transfers happened first. Absent when the
+  // journal has no Bit money here.
+  logRailBit?: number
   // LEGACY. The expense-log summary used to live here as a display-only list.
   // It is now materialised as fromLog rows inside the budget sections (see
   // applyLogRows) so it counts in ביצוע; dataSync converts any month still
@@ -149,8 +159,21 @@ export type SimpleSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins'
 /** The four sections an expense-log category can land in. */
 export type ExpenseSection = 'fixed' | 'variable' | 'sub' | 'ins'
 
-/** One category's journal total for a month, split by who produced the entries. */
-export type LogItem = { name: string; manual: number; auto: number }
+/**
+ * One category's journal total for a month, split by who produced the entries.
+ *
+ * `bit` is a subset of the captured money, kept apart because it behaves like
+ * neither half. A Bit transfer is captured under the recipient's name and the
+ * client is invited to re-file it under the category it really belongs to, but
+ * the credit report only ever sees one opaque "ביט" line. So Bit money is ADDED
+ * to whatever category it now sits in — the report's lines for those categories
+ * do not contain it — while the report's own rail line is reduced by the same
+ * amount, so the shekels are counted exactly once. See RAIL_CATEGORY.
+ */
+export type LogItem = { name: string; manual: number; auto: number; bit?: number }
+
+/** Where a credit report puts money that only travelled through Bit/Paybox. */
+export const RAIL_CATEGORY = 'ביט ללא מעקב'
 
 /**
  * Which monthly section a category belongs to — the SAME routing applyImport
@@ -198,21 +221,27 @@ export function applyLogRows(m: MonthData, items: LogItem[]): MonthData {
   for (const item of items) {
     const section = sectionOfCategory(item.name)
     if (!section) continue
+    const bit    = Math.max(0, Math.round(item.bit ?? 0))
     const manual = Math.max(0, Math.round(item.manual))
-    const auto   = Math.max(0, Math.round(item.auto))
-    if (manual + auto <= 0) continue
+    // Bit rides with the hand-typed half: the report's line for THIS category
+    // does not contain it (the report filed it under its rail line instead), so
+    // adding it here is not a second count. The rail line is reduced by the same
+    // amount further down.
+    const additive = manual + bit
+    const auto     = Math.max(0, Math.round(item.auto))
+    if (additive + auto <= 0) continue
 
     const rows = out[section]
     const existing = rows.find(r => r.name === item.name)
     // `existing.actual` at this point is purely someone else's figure — the
     // journal's own share was stripped above. A report (or a hand-typed number)
     // sitting there means the card side is already accounted for, so only the
-    // hand-typed half is added on top; the captured half would be a duplicate.
+    // additive half goes on top; the captured card half would be a duplicate.
     const covered = Boolean(existing && existing.actual > 0)
-    const add = covered ? manual : manual + auto
+    const add = covered ? additive : additive + auto
     if (add <= 0) continue
 
-    const share = { logManual: manual, ...(covered ? {} : { logAuto: auto }) }
+    const share = { logManual: additive, ...(covered ? {} : { logAuto: auto }) }
     if (existing) {
       out[section] = rows.map(r => r === existing
         ? { ...r, actual: r.actual + add, ...share }
@@ -221,7 +250,49 @@ export function applyLogRows(m: MonthData, items: LogItem[]): MonthData {
       out[section] = [...rows, { id: uid(), name: item.name, plan: 0, actual: add, fromLog: true, ...share }]
     }
   }
-  return out
+
+  // Everything the journal knows travelled through Bit this month, wherever it
+  // ended up sitting. The report's rail line is worth this much less.
+  const railBit = items.reduce((t, i) => t + Math.max(0, Math.round(i.bit ?? 0)), 0)
+  return settleRail(railBit > 0 ? { ...out, logRailBit: railBit } : stripRail(out))
+}
+
+function stripRail(m: MonthData): MonthData {
+  if (m.logRailBit === undefined) return m
+  const next = { ...m }
+  delete next.logRailBit
+  return next
+}
+
+/**
+ * Reconcile the report's opaque "ביט" line against the Bit money the journal has
+ * already placed in real categories, so the same shekels are never counted in
+ * both. Whatever the journal could not explain stays on the rail line, which is
+ * what that category is supposed to mean in the first place.
+ *
+ * Written as a recomputation rather than a subtraction: it reverses the offset
+ * it applied last time before applying the new one, so running it after a
+ * transfer and again after an import lands on the same figure either way round.
+ */
+export function settleRail(m: MonthData): MonthData {
+  const railBit = Math.max(0, m.logRailBit ?? 0)
+  const section: ExpenseSection = sectionOfCategory(RAIL_CATEGORY) ?? 'variable'
+  let touched = false
+  const rows = m[section].map(r => {
+    if (r.name !== RAIL_CATEGORY) return r
+    const journalPart = (r.logManual ?? 0) + (r.logAuto ?? 0)
+    // Undo the previous offset to recover what the report actually reported.
+    const reportPart  = Math.max(0, r.actual - journalPart + (r.railOffset ?? 0))
+    const applied     = Math.min(railBit, reportPart)
+    const actual      = journalPart + reportPart - applied
+    if (actual === r.actual && (r.railOffset ?? 0) === applied) return r
+    touched = true
+    const next = { ...r, actual }
+    if (applied > 0) next.railOffset = applied
+    else delete next.railOffset
+    return next
+  })
+  return touched ? { ...m, [section]: rows } : m
 }
 
 /**
@@ -438,6 +509,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           delete next.fromLog
           delete next.logManual
           delete next.logAuto
+          // The rail offset describes a figure the client has just replaced, so
+          // it stops meaning anything. Dropping it also stops the next settle
+          // from reversing an offset against a number nobody derived it from.
+          delete next.railOffset
           return next
         }),
       })),
@@ -620,13 +695,19 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           return rows.map(r => {
             if (!covered(r.name)) return r
             const share = (r.logManual ?? 0) + (r.logAuto ?? 0)
-            if (share === 0) return r
+            if (share === 0 && r.railOffset === undefined) return r
             if (r.logManual) manualHeld[r.name] = (manualHeld[r.name] ?? 0) + r.logManual
             // Stripped back to the non-journal figure so the fill passes below
             // write the report's number into it like into any other row.
             const next = { ...r, actual: Math.max(0, r.actual - share) }
             delete next.logManual
             delete next.logAuto
+            // A recorded rail offset describes the figure this row is holding
+            // RIGHT NOW. The fill pass is about to replace that figure, which
+            // would leave the offset describing a number that no longer exists
+            // and make settleRail read the report's share as larger than it is.
+            // Dropped here; settleRail recomputes it from the fresh figure.
+            delete next.railOffset
             return next
           })
         }
@@ -812,7 +893,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           }))
         const savings = [...m.savings, ...newSavings]
 
-        return { ...m, fixed, variable, sub, ins, installments, debts, savings }
+        // The report has just written its own rail figure. Reconcile it against
+        // the Bit money the journal already placed in real categories, so the
+        // result is the same whether the report or the journal arrived first.
+        return settleRail({ ...m, fixed, variable, sub, ins, installments, debts, savings })
       })
     },
 
