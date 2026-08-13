@@ -19,8 +19,7 @@ export default function MonthlyPage() {
   const { months, initMonth, syncFromMapping, setYear, addRow, updateRow, deleteRow,
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
-          addSavingRow, updateSavingRow, deleteSavingRow, updateOsh,
-          updateLoggedRow, deleteLoggedRow } = useMonthlyStore()
+          addSavingRow, updateSavingRow, deleteSavingRow, updateOsh } = useMonthlyStore()
 
   // Initialize the month and immediately mirror mapping (all 4 budget sections
   // + installments/debts/savings). The sync uses fromMapping:true so subsequent
@@ -103,6 +102,11 @@ export default function MonthlyPage() {
   // Non-zero balances in day order; delta = last filled − first filled.
   const oshFilled = OSH_POINTS.map(p => data.osh?.[p.key] ?? 0).filter(v => v !== 0)
   const oshDelta  = oshFilled.length >= 2 ? oshFilled[oshFilled.length - 1] - oshFilled[0] : null
+
+  // How much of this month's ביצוע came from the expense-log rather than an
+  // imported report. Derived from the rows themselves — never stored separately.
+  const loggedTotal = (['fixed', 'variable', 'sub', 'ins'] as const)
+    .reduce((s, sec) => s + data[sec].filter(r => r.fromLog).reduce((t, r) => t + r.actual, 0), 0)
 
 
   return (
@@ -338,69 +342,13 @@ export default function MonthlyPage() {
         </div>
       </div>
 
-      {/* תיעוד הוצאות (מהיומן) — סעיף עצמאי, מנותק לגמרי מהייבוא ומהתכנון‑מול‑ביצוע */}
-      {(data.logged?.length ?? 0) > 0 && (
-        <div className="rounded-xl border border-line bg-surface2 p-3 sm:p-5 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-1">
-            <h2 className="font-semibold text-txt">🧾 תיעוד הוצאות (מהיומן)</h2>
-            <span className="text-sm font-bold text-expense tabular-nums">
-              {fmt(data.logged.reduce((s, r) => s + r.amount, 0))}
-            </span>
-          </div>
-          <p className="hidden sm:block text-[11px] text-muted-txt -mt-1">
-            סיכום מהטאב &quot;תיעוד הוצאות&quot;. מוצג בנפרד ואינו משפיע על התכנון/ביצוע או על נתוני הייבוא.
-            אפשר לערוך ולמחוק כאן, בלי שזה ישנה את היומן עצמו. העברה חדשה מהיומן תחליף את הרשימה הזו.
-          </p>
-          {/* Rows are rendered in stored order (already descending when transferred)
-              and never re-sorted, so a row doesn't jump away while it's being typed in. */}
-          <div className="space-y-1">
-            {data.logged.map((r, i) => (
-              <div key={i} className="group">
-                <div className="hidden sm:grid grid-cols-[1fr_8rem_1.5rem] gap-2 items-center">
-                  <input
-                    value={r.name}
-                    onChange={e => updateLoggedRow(monthId, i, 'name', e.target.value)}
-                    placeholder="קטגוריה"
-                    className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
-                  />
-                  <input
-                    type="number" inputMode="decimal" min={0}
-                    value={r.amount || ''}
-                    onChange={e => updateLoggedRow(monthId, i, 'amount', parseFloat(e.target.value) || 0)}
-                    placeholder="₪"
-                    style={{ direction: 'ltr' }}
-                    className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
-                  />
-                  <button
-                    onClick={() => deleteLoggedRow(monthId, i)}
-                    aria-label={`מחק ${r.name}`}
-                    className="text-muted-txt hover:text-expense transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none"
-                  >×</button>
-                </div>
-                <div className="sm:hidden flex items-center gap-2 bg-surface/40 rounded-lg p-2">
-                  <input
-                    value={r.name}
-                    onChange={e => updateLoggedRow(monthId, i, 'name', e.target.value)}
-                    placeholder="קטגוריה"
-                    className="flex-1 min-w-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60"
-                  />
-                  <input
-                    type="number" inputMode="decimal" min={0}
-                    value={r.amount || ''}
-                    onChange={e => updateLoggedRow(monthId, i, 'amount', parseFloat(e.target.value) || 0)}
-                    placeholder="₪"
-                    style={{ direction: 'ltr' }}
-                    className="w-24 shrink-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums"
-                  />
-                  <button
-                    onClick={() => deleteLoggedRow(monthId, i)}
-                    aria-label={`מחק ${r.name}`}
-                    className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm"
-                  >×</button>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* מהיומן — a read-only glance at what the expense-log contributed this month.
+          The money itself lives in the sections above as fromLog rows; this only
+          re-adds them up, so there is no second copy that can drift. */}
+      {loggedTotal > 0 && (
+        <div className="rounded-xl border border-line bg-surface2 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm text-txt">🧾 מתוך הביצוע, הגיע מתיעוד ההוצאות</span>
+          <span className="text-sm font-bold text-expense tabular-nums">{fmt(loggedTotal)}</span>
         </div>
       )}
 

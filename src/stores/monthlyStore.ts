@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES } from '@/lib/constants'
+import { MONTH_DEFAULT_ROWS, FIXED_CATEGORIES, VAR_CATEGORIES, ANNUAL_CATEGORIES, INSURANCE_CATEGORIES, SUB_CATEGORIES, SKIP_CATEGORIES } from '@/lib/constants'
 import { normalizeForLookup } from '@/lib/normalizeForLookup'
 
 function uid() { return Math.random().toString(36).slice(2) }
@@ -21,6 +21,12 @@ export interface BudgetRow {
   plan: number
   actual: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
+  // true → this row's actual came from the standalone expense-log (תיעוד הוצאות),
+  // not from an imported report. It carries real spending, so it counts in ביצוע
+  // like any other row, but the import must never write to it and it must never
+  // hide an imported row of the same category — otherwise the two sources would
+  // silently overwrite each other. A hand edit clears the flag (see updateRow).
+  fromLog?: boolean
   // Set by applyImport when the actual came from an imported report — lets the
   // month show WHICH charges built the number. Optional: rows created before
   // this existed, and hand-typed actuals, simply have none.
@@ -87,9 +93,10 @@ export interface MonthData {
   debts: DebtRow[]
   savings: SavingRow[]
   osh: OshBalances
-  // Snapshot of the standalone expense-log totals transferred into this month.
-  // Display-only and ISOLATED: applyImport / syncFromMapping never read or write
-  // it, so the expense-log and the import flow can never affect each other.
+  // LEGACY. The expense-log summary used to live here as a display-only list.
+  // It is now materialised as fromLog rows inside the budget sections (see
+  // applyLogRows) so it counts in ביצוע; dataSync converts any month still
+  // holding data here on load. Kept on the type so old snapshots still parse.
   logged: { name: string; amount: number }[]
   // Names of fromMapping rows the user deleted in this month. syncFromMapping
   // checks this so a deletion isn't undone on the next sync run. Per-section
@@ -106,6 +113,61 @@ export interface MonthData {
 }
 
 export type SimpleSection = 'income' | 'fixed' | 'variable' | 'sub' | 'ins'
+
+/** The four sections an expense-log category can land in. */
+export type ExpenseSection = 'fixed' | 'variable' | 'sub' | 'ins'
+
+/**
+ * Which monthly section a category belongs to — the SAME routing applyImport
+ * uses, so a category coming from the journal lands exactly where the same
+ * category coming from a bank report would. Annual categories (חופשה וטיול)
+ * fold into variable, matching the import. null ONLY for the skip set (income /
+ * savings / investments / transfers) — those are not spending.
+ *
+ * Anything unrecognised falls back to variable instead of returning null. A
+ * renamed or hand-typed label must still carry its money into the month; a
+ * category whose amount silently evaporates is the worse failure by far.
+ */
+export function sectionOfCategory(cat: string): ExpenseSection | null {
+  if (SKIP_CATEGORIES.has(cat)) return null
+  if (FIXED_CATEGORIES.has(cat)) return 'fixed'
+  if (SUB_CATEGORIES.has(cat)) return 'sub'
+  if (INSURANCE_CATEGORIES.has(cat)) return 'ins'
+  return 'variable'
+}
+
+/**
+ * Materialise the expense-log summary as real budget rows inside a month.
+ *
+ * Every previous fromLog row is dropped first, so transferring again REPLACES
+ * the journal's contribution instead of stacking a second copy on top of it —
+ * the operation is idempotent no matter how many times it runs.
+ *
+ * `logged` (the old display-only snapshot) is cleared on the way out. Rows are
+ * the single record of this money now; keeping both would let the two drift
+ * apart and show the same shekel twice.
+ *
+ * Exported because the one-time carry-over of legacy `logged` data runs from
+ * dataSync, and both paths must build rows identically.
+ */
+export function applyLogRows(m: MonthData, items: { name: string; amount: number }[]): MonthData {
+  const bySection: Record<ExpenseSection, BudgetRow[]> = { fixed: [], variable: [], sub: [], ins: [] }
+  for (const { name, amount } of items) {
+    const section = sectionOfCategory(name)
+    const rounded = Math.round(amount)
+    if (!section || rounded <= 0) continue
+    bySection[section].push({ id: uid(), name, plan: 0, actual: rounded, fromLog: true })
+  }
+  const keep = (rows: BudgetRow[]) => rows.filter(r => !r.fromLog)
+  return {
+    ...m,
+    fixed:    [...keep(m.fixed),    ...bySection.fixed],
+    variable: [...keep(m.variable), ...bySection.variable],
+    sub:      [...keep(m.sub),      ...bySection.sub],
+    ins:      [...keep(m.ins),      ...bySection.ins],
+    logged: [],
+  }
+}
 
 function makeDefaultMonth(): MonthData {
   function rows(names: string[]): BudgetRow[] {
@@ -136,12 +198,9 @@ interface MonthlyState {
   initMonth:  (monthId: string) => void
   setYear:    (monthId: string, year: number) => void
   updateOsh:  (monthId: string, day: OshDay, value: number) => void
-  // Replace this month's expense-log snapshot (from the תיעוד הוצאות tab).
+  // Carry the תיעוד הוצאות summary into this month as real fromLog rows, so the
+  // journal's spending counts in ביצוע. Replaces any previous transfer.
   applyExpenseLog: (monthId: string, items: { name: string; amount: number }[]) => void
-  // Hand-edit a transferred row. Rows are addressed by position: the snapshot is
-  // a short list rendered in stored order, and nothing reorders it.
-  updateLoggedRow: (monthId: string, index: number, field: 'name' | 'amount', value: string | number) => void
-  deleteLoggedRow: (monthId: string, index: number) => void
 
   addRow:    (monthId: string, section: SimpleSection, name?: string) => void
   updateRow: (monthId: string, section: SimpleSection, id: string, field: 'name' | 'plan' | 'actual', value: string | number) => void
@@ -231,34 +290,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         osh: { ...(m.osh ?? EMPTY_OSH), [day]: value },
       })),
 
-    // Standalone path: writes ONLY to `logged`. Import/sync don't touch this
-    // field, so the two transfer flows stay fully independent.
-    applyExpenseLog: (monthId, items) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        logged: items.map(i => ({ name: i.name, amount: Math.round(i.amount) })),
-      })),
-
-    // Edits stay inside the month. The expense-log itself is never written back
-    // to from here — fixing a label in the monthly summary must not rewrite the
-    // client's journal entries.
-    updateLoggedRow: (monthId, index, field, value) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        logged: (m.logged ?? []).map((r, i) =>
-          i === index
-            ? field === 'amount'
-              ? { ...r, amount: Math.round(Number(value) || 0) }
-              : { ...r, name: String(value) }
-            : r,
-        ),
-      })),
-
-    deleteLoggedRow: (monthId, index) =>
-      updateMonth(monthId, m => ({
-        ...m,
-        logged: (m.logged ?? []).filter((_, i) => i !== index),
-      })),
+    applyExpenseLog: (monthId, items) => updateMonth(monthId, m => applyLogRows(m, items)),
 
     addRow: (monthId, section, name = '') =>
       updateMonth(monthId, m => ({
@@ -269,10 +301,15 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
     updateRow: (monthId, section, id, field, value) =>
       updateMonth(monthId, m => ({
         ...m,
-        // Clear fromMapping on user edit — the row becomes "manual" for this
-        // specific month and future mapping syncs will no longer touch it.
-        // (income section never carries fromMapping, so this is a no-op there.)
-        [section]: m[section].map(r => r.id === id ? { ...r, [field]: value, fromMapping: false } : r),
+        // Clear fromMapping AND fromLog on user edit — the row becomes "manual"
+        // for this specific month, so neither a future mapping sync nor a
+        // re-transfer from the journal will overwrite what was typed by hand.
+        // fromLog is written back only when the row actually had it: every row
+        // in every month passes through here, and an unconditional `false`
+        // would add a dead field to all of them inside a 900KB-capped document.
+        [section]: m[section].map(r => r.id === id
+          ? { ...r, [field]: value, fromMapping: false, ...(r.fromLog ? { fromLog: false } : {}) }
+          : r),
       })),
 
     deleteRow: (monthId, section, id) =>
@@ -402,7 +439,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // do come in are tagged fromMapping:true so they integrate with the
         // mapping→monthly auto-sync (and stay re-deletable).
         function mergePlan(rows: BudgetRow[], src: { name: string; amount: number }[], deletedNames: string[]): BudgetRow[] {
-          const names = new Set(rows.map(r => r.name))
+          // fromLog rows are excluded from the name check: a journal row for
+          // "מזון לבית" must not stop the mapping's planned "מזון לבית" from
+          // being added, or the month would show spending with no plan beside it.
+          const names = new Set(rows.filter(r => !r.fromLog).map(r => r.name))
           const deleted = new Set(deletedNames)
           const added = src
             .filter(s => !names.has(s.name) && !deleted.has(s.name) && s.amount > 0)
@@ -424,10 +464,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // deleted budget line shows its real spending without resurrecting its
         // old mapping plan amount.
         function fillActual(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
-          const names = new Set(rows.map(r => r.name))
+          // A fromLog row holds the journal's own money. The import must neither
+          // overwrite it (its name is skipped below) nor treat it as "this
+          // category already has a row" (excluded from `names`), or the report's
+          // spending for that category would be dropped on the floor.
+          const names = new Set(rows.filter(r => !r.fromLog).map(r => r.name))
           const updated = rows.map(r => {
             const s = catSums[r.name]
-            if (s === undefined || !cats.has(r.name)) return r
+            if (s === undefined || !cats.has(r.name) || r.fromLog) return r
             // Conditional spread, never an explicit undefined — Firestore
             // rejects undefined values and would fail the whole snapshot save.
             // STALE detail is dropped first: a re-send that fills this actual
@@ -472,7 +516,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           }
           // Normalized names of this section's NAMED (non-category) rows.
           const namedKeys = new Set(
-            rows.filter(r => !cats.has(r.name)).map(r => normalizeForLookup(r.name)).filter(Boolean),
+            rows.filter(r => !cats.has(r.name) && !r.fromLog).map(r => normalizeForLookup(r.name)).filter(Boolean),
           )
           // Amount consumed by named rows, per category — subtracted from leftover.
           const consumed: Record<string, number> = {}
@@ -482,7 +526,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           // Pass 1 — fill named (per-business) rows from their matched total.
           // No match in this import → leave the row's existing actual untouched.
           let out = rows.map(r => {
-            if (cats.has(r.name)) return r
+            if (cats.has(r.name) || r.fromLog) return r
             const hit = byKey.get(normalizeForLookup(r.name))
             if (!hit) return r
             const t = capTxns(hit.txns)
@@ -494,9 +538,12 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const leftoverTxnsOf = (cat: string) =>
             capTxns(catTxns?.[cat]?.filter(t => !namedKeys.has(normalizeForLookup(t.desc))))
           // Pass 2 — fill category rows from the leftover (total − consumed).
-          const present = new Set(out.map(r => r.name))
+          // fromLog rows are invisible to both the overwrite pass and the
+          // "does this category already have a row?" check — same reasoning as
+          // fillActual: the journal and the report each keep their own row.
+          const present = new Set(out.filter(r => !r.fromLog).map(r => r.name))
           out = out.map(r => {
-            if (!cats.has(r.name)) return r
+            if (!cats.has(r.name) || r.fromLog) return r
             const total = catSums[r.name]
             if (total === undefined) return r
             const t = leftoverTxnsOf(r.name)
@@ -604,7 +651,11 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // Generic merge for the 4 budget sections (BudgetRow shape).
         // deletedNames blocks re-adding rows the user explicitly deleted.
         function syncBudgetSection(existing: BudgetRow[], byName: Map<string, number>, deletedNames: string[]): BudgetRow[] {
-          const existingNames = new Set(existing.map(r => r.name))
+          // fromLog rows carry spending, never a plan, so they must not stand in
+          // for a mapping row of the same name — otherwise the planned amount
+          // would never reach the month. (They fall through the loop below
+          // untouched, like any other non-fromMapping row.)
+          const existingNames = new Set(existing.filter(r => !r.fromLog).map(r => r.name))
           const deletedSet = new Set(deletedNames)
           const result: BudgetRow[] = []
           for (const r of existing) {

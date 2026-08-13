@@ -16,7 +16,8 @@
  * belong to whoever is at the screen (see storeCoverage.test.ts).
  */
 
-import { useMonthlyStore } from '@/stores/monthlyStore'
+import { useMonthlyStore, applyLogRows } from '@/stores/monthlyStore'
+type MonthDataShape = Parameters<typeof applyLogRows>[0]
 import { useAnnualStore }  from '@/stores/annualStore'
 import { useMappingStore } from '@/stores/mappingStore'
 import { useGoalsStore }   from '@/stores/goalsStore'
@@ -431,7 +432,7 @@ export function applySnapshot(raw: unknown): void {
           d20: num(osh.d20),
           d30: num(osh.d30),
         },
-        // expense-log snapshot transferred into the month (added later)
+        // Legacy field — carried over to real rows a few lines below, then emptied.
         logged: Array.isArray(m.logged) ? m.logged : [],
         deletedFromMapping: {
           fixed:        Array.isArray(dm.fixed)        ? dm.fixed        : [],
@@ -443,6 +444,15 @@ export function applySnapshot(raw: unknown): void {
           savings:      Array.isArray(dm.savings)      ? dm.savings      : [],
         },
       }
+
+      // One-time carry-over: months saved while the expense-log summary was a
+      // display-only list get it rebuilt as real fromLog rows, so the journal's
+      // spending lands in ביצוע like it does for every new transfer. Skipping
+      // this would blank the summary out of those months entirely.
+      // Idempotent — applyLogRows drops existing fromLog rows first and empties
+      // `logged`, so a second pass over the same data changes nothing.
+      const legacy = migrated[id] as MonthDataShape
+      if (legacy.logged.length > 0) migrated[id] = applyLogRows(legacy, legacy.logged)
     }
     useMonthlyStore.setState({ months: migrated as ReturnType<typeof useMonthlyStore.getState>['months'] })
   }

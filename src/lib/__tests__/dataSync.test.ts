@@ -39,14 +39,17 @@ function populateAllStores() {
         year: 2026,
         income:       [{ id: 'i1', name: 'salary',  plan: 10000, actual: 9500 }],
         fixed:        [{ id: 'f1', name: 'rent',    plan: 3000,  actual: 3000 }],
-        variable:     [{ id: 'v1', name: 'food',    plan: 1500,  actual: 1612 }],
+        // fromLog = spending carried in from the expense-log journal. It rides
+        // the snapshot like any other row; `logged` is the retired form of it.
+        variable:     [{ id: 'v1', name: 'food',    plan: 1500,  actual: 1612 },
+                       { id: 'v2', name: 'מזון לבית', plan: 0,   actual: 320, fromLog: true }],
         sub:          [{ id: 's1', name: 'netflix', plan: 30,    actual: 30 }],
         ins:          [{ id: 'n1', name: 'car-ins', plan: 200,   actual: 200 }],
         installments: [{ id: 'inst1', name: 'TV',   total: 6000, monthly: 500, current: 1, totalPay: 12 }],
         debts:        [{ id: 'd1',   name: 'loan',  remaining: 5000, monthly: 250, months: 20 }],
         savings:      [{ id: 'sv1',  name: 'emergency', monthly: 500, accumulated: 6000 }],
         osh:          { d2: 1200, d10: 800, d15: 1500, d20: 600, d30: 2000 },
-        logged:       [{ name: 'מזון לבית', amount: 320 }, { name: 'דלק וחניה', amount: 210 }],
+        logged:       [],
         deletedFromMapping: {
           fixed: ['old-fixed-row'], variable: [], sub: [], ins: [],
           installments: ['stale-installment'], debts: [], savings: [],
@@ -242,6 +245,38 @@ describe('DataSync — snapshot round-trip', () => {
     const after = collectSnapshot()
 
     expect(after).toEqual(before)
+  })
+
+  it('a month still holding the retired `logged` list is carried over to real rows', () => {
+    // Months saved before the expense-log summary counted in ביצוע kept it in a
+    // display-only `logged` array. Loading such a portfolio must rebuild it as
+    // fromLog rows — dropping it would blank that money out of the month.
+    applySnapshot({
+      monthly: {
+        months: {
+          jan: {
+            year: 2026,
+            income: [], fixed: [], variable: [], sub: [], ins: [],
+            installments: [], debts: [], savings: [],
+            logged: [{ name: 'מזון לבית', amount: 320 }, { name: 'חשמל', amount: 210 }],
+          },
+        },
+      },
+    })
+
+    const jan = useMonthlyStore.getState().months['jan']
+    expect(jan.variable.find(r => r.name === 'מזון לבית')?.actual).toBe(320)
+    expect(jan.variable.find(r => r.name === 'מזון לבית')?.fromLog).toBe(true)
+    expect(jan.fixed.find(r => r.name === 'חשמל')?.actual).toBe(210)
+    // Emptied on the way out, so the conversion cannot run a second time and
+    // double the money on the next load.
+    expect(jan.logged).toEqual([])
+
+    const roundTripped = JSON.parse(JSON.stringify(collectSnapshot()))
+    applySnapshot(roundTripped)
+    const again = useMonthlyStore.getState().months['jan']
+    expect(again.variable.filter(r => r.fromLog)).toHaveLength(1)
+    expect(again.fixed.filter(r => r.fromLog)).toHaveLength(1)
   })
 
   it('a fully populated portfolio is a legal Firestore document', () => {

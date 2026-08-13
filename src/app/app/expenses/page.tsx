@@ -262,13 +262,19 @@ export default function ExpensesPage() {
   function transferToMonthly() {
     if (monthEntries.length === 0) { toast.error('אין רישומים להעברה בחודש זה'); return }
     if (!targetMonth) { toast.error('חודש לא תקין'); return }
-    // The transferred summary is editable in the monthly tab, so a re-transfer
-    // can throw away hand corrections made there. Ask before replacing it.
-    if ((months[targetMonth.id]?.logged?.length ?? 0) > 0 &&
-        !confirm(`כבר קיים סיכום תיעוד ב${targetMonth.name}. העברה חדשה תחליף אותו, כולל עריכות שנעשו שם. להמשיך?`)) return
+    // A previous transfer already sits in the month as fromLog rows. Replacing
+    // them is the point of re-transferring, but say so first: a row that was
+    // edited by hand there has become a manual row and will now be duplicated,
+    // and one that is still untouched is about to be overwritten.
+    const prev = months[targetMonth.id]
+    const hasPrev = prev
+      ? (['fixed', 'variable', 'sub', 'ins'] as const).some(sec => prev[sec]?.some(r => r.fromLog))
+      : false
+    if (hasPrev &&
+        !confirm(`כבר הועבר סיכום ל${targetMonth.name}. העברה חדשה תחליף את השורות שסומנו 🧾 שם. להמשיך?`)) return
     initMonth(targetMonth.id)
     applyExpenseLog(targetMonth.id, catTotals.map(([name, amount]) => ({ name, amount })))
-    toast.success(`✅ הסיכום הועבר ל${targetMonth.name} בטאב החודשי (${fmt(monthTotal)})`, {
+    toast.success(`✅ ${fmt(monthTotal)} נכנסו לביצוע של ${targetMonth.name}`, {
       action: { label: 'פתח חודשי', onClick: () => router.push(`/app/monthly/${targetMonth.id}`) },
     })
   }

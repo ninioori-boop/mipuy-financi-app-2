@@ -70,8 +70,13 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
           <div key={row.id} className="group">
             {/* Desktop row */}
             <div className="hidden sm:grid grid-cols-[1fr_6rem_6rem_1.5rem] gap-2 items-center">
-              <input value={row.name} onChange={e => onUpdate(row.id, 'name', e.target.value)} placeholder="פריט"
-                className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+              <div className="relative">
+                {row.fromLog && (
+                  <span title="הגיע מתיעוד ההוצאות" className="absolute inset-y-0 start-2 flex items-center text-xs pointer-events-none">🧾</span>
+                )}
+                <input value={row.name} onChange={e => onUpdate(row.id, 'name', e.target.value)} placeholder="פריט"
+                  className={`w-full rounded-lg border border-line bg-surface py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 ${row.fromLog ? 'ps-7 pe-3' : 'px-3'}`} />
+              </div>
               <input type="number" inputMode="decimal" value={row.plan || ''} onChange={e => onUpdate(row.id, 'plan', parseFloat(e.target.value) || 0)}
                 placeholder="₪" min={0} style={{ direction: 'ltr' }}
                 className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60 text-left tabular-nums" />
@@ -84,8 +89,9 @@ export function BudgetSection({ title, icon, rows, isIncome = false, onAdd, onUp
             {/* Mobile card */}
             <div className="sm:hidden bg-surface/40 rounded-lg p-2 space-y-1.5">
               <div className="flex items-center gap-2">
+                {row.fromLog && <span title="הגיע מתיעוד ההוצאות" className="shrink-0 text-xs">🧾</span>}
                 <input value={row.name} onChange={e => onUpdate(row.id, 'name', e.target.value)} placeholder="פריט"
-                  className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
+                  className="flex-1 min-w-0 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-txt placeholder:text-muted-txt focus:outline-none focus:border-gold/60" />
                 <button onClick={() => onDelete(row.id)} className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-muted-txt hover:text-expense text-sm">×</button>
               </div>
               <div className="grid grid-cols-2 gap-2">
