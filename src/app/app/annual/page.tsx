@@ -89,6 +89,33 @@ function PlanSection({ section, title, icon, isIncome = false }: {
   )
 }
 
+// ── עמודת "אחוז ביצוע" שבקצה הטבלה ──
+// pace = איזה אחוז מהשנה כבר מכוסה בנתוני ביצוע. בלעדיו 25% בסוף מרץ נראה
+// כמו פיגור, כשבפועל זה בדיוק לפי הקצב.
+function pctOf(actual: number, plan: number): number | null {
+  if (!(plan > 0)) return null
+  return Math.round((actual / plan) * 100)
+}
+
+function PctCell({ pct, higherIsBetter, pace }: {
+  pct: number | null; higherIsBetter: boolean; pace: number
+}) {
+  if (pct === null) return <td className="py-2 px-2 text-center text-muted-txt">—</td>
+  const onTrack = higherIsBetter ? pct >= pace * 0.95 : pct <= pace * 1.05
+  const tone = pace <= 0 ? 'text-muted-txt' : onTrack ? 'text-green-400' : higherIsBetter ? 'text-gold' : 'text-expense'
+  const bar  = pace <= 0 ? 'bg-muted-txt/40' : onTrack ? 'bg-green-400' : higherIsBetter ? 'bg-gold' : 'bg-expense'
+  return (
+    <td className="py-2 px-2 text-center">
+      <div className="flex flex-col items-center gap-1">
+        <span className={`font-bold tabular-nums ${tone}`}>{pct}%</span>
+        <div className="w-12 h-1 rounded-full bg-surface overflow-hidden">
+          <div className={`h-full ${bar}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+        </div>
+      </div>
+    </td>
+  )
+}
+
 export default function AnnualPage() {
   const store = useAnnualStore()
   const { months } = useMonthlyStore()
@@ -164,6 +191,7 @@ export default function AnnualPage() {
   const aExp      = aFixed + aVariable + aSub + aDebt + aSavings
   const aCF       = aIncome - aExp
   const activeMonths = moActuals.filter(m => m.hasData).length
+  const pace = Math.round((activeMonths / 12) * 100)
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -289,7 +317,7 @@ export default function AnnualPage() {
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs" style={{ minWidth: '900px' }}>
+          <table className="w-full text-xs" style={{ minWidth: '980px' }}>
             <thead>
               <tr className="border-b border-line">
                 <th className="text-right py-2 px-2 text-muted-txt font-medium w-32">קטגוריה</th>
@@ -297,17 +325,22 @@ export default function AnnualPage() {
                   <th key={m} className="text-center py-2 px-1 text-muted-txt font-medium">{m}</th>
                 ))}
                 <th className="text-center py-2 px-2 text-gold font-medium">שנתי</th>
+                <th className="text-center py-2 px-2 text-txt font-medium whitespace-nowrap w-20"
+                    title="הביצוע שנצבר עד כה, מתוך התכנון לשנה מלאה">
+                  אחוז ביצוע
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/40">
               {[
-                { label: '💰 הכנסות',       plan: pIncome / 12,   key: 'income'   as const, total: pIncome,   totalAct: aIncome },
-                { label: '📌 קבועות',        plan: pFixed / 12,    key: 'fixed'    as const, total: pFixed,    totalAct: aFixed },
-                { label: '🛒 משתנות',        plan: pVariable / 12, key: 'variable' as const, total: pVariable, totalAct: aVariable },
-                { label: '🔄 מנויים+ביטוח', plan: pSub / 12,      key: 'sub'      as const, total: pSub,      totalAct: aSub },
-                { label: '💳 הלוואות',       plan: pDebt / 12,     key: 'debt'     as const, total: pDebt,     totalAct: aDebt },
-                { label: '🏦 חיסכון',        plan: pSavings / 12,  key: 'savings'  as const, total: pSavings,  totalAct: aSavings },
-              ].map(({ label, plan, key, total, totalAct }) => (
+                // higherIsBetter: הכנסה וחיסכון גבוהים מהתכנון = טוב. הוצאה גבוהה מהתכנון = חריגה.
+                { label: '💰 הכנסות',       plan: pIncome / 12,   key: 'income'   as const, total: pIncome,   totalAct: aIncome,   higherIsBetter: true  },
+                { label: '📌 קבועות',        plan: pFixed / 12,    key: 'fixed'    as const, total: pFixed,    totalAct: aFixed,    higherIsBetter: false },
+                { label: '🛒 משתנות',        plan: pVariable / 12, key: 'variable' as const, total: pVariable, totalAct: aVariable, higherIsBetter: false },
+                { label: '🔄 מנויים+ביטוח', plan: pSub / 12,      key: 'sub'      as const, total: pSub,      totalAct: aSub,      higherIsBetter: false },
+                { label: '💳 הלוואות',       plan: pDebt / 12,     key: 'debt'     as const, total: pDebt,     totalAct: aDebt,     higherIsBetter: false },
+                { label: '🏦 חיסכון',        plan: pSavings / 12,  key: 'savings'  as const, total: pSavings,  totalAct: aSavings,  higherIsBetter: true  },
+              ].map(({ label, plan, key, total, totalAct, higherIsBetter }) => (
                 <tr key={label} className="hover:bg-surface/30">
                   <td className="py-2 px-2 text-txt font-medium">{label}</td>
                   {moActuals.map((m, i) => {
@@ -326,6 +359,7 @@ export default function AnnualPage() {
                       ? <span className={totalAct > 0 ? 'text-green-400' : 'text-muted-txt'}>{totalAct > 0 ? fmt(totalAct) : '—'}</span>
                       : <span className="text-gold">{fmt(total)}</span>}
                   </td>
+                  <PctCell pct={pctOf(totalAct, total)} higherIsBetter={higherIsBetter} pace={pace} />
                 </tr>
               ))}
               <tr className="border-t-2 border-line">
@@ -346,10 +380,20 @@ export default function AnnualPage() {
                 <td className={`py-2 px-2 text-center font-black tabular-nums ${(view === 'actual' ? aCF : pCF) >= 0 ? 'text-green-400' : 'text-expense'}`}>
                   {(() => { const v = view === 'actual' ? aCF : pCF; return (v >= 0 ? '+' : '') + fmt(v) })()}
                 </td>
+                {/* תזרים מתוכנן שלילי או אפס: אחוז ביצוע מולו חסר משמעות */}
+                <PctCell pct={pctOf(aCF, pCF)} higherIsBetter pace={pace} />
               </tr>
             </tbody>
           </table>
         </div>
+        {activeMonths > 0 ? (
+          <p className="text-[11px] text-muted-txt leading-relaxed">
+            אחוז ביצוע: מה שנצבר בפועל מול התכנון לשנה מלאה. יש נתונים ל{activeMonths} חודשים,
+            כלומר קצב תקין הוא סביב {pace}%. ירוק: בקצב. אדום: חריגה בהוצאות. זהב: פיגור בהכנסה או בחיסכון.
+          </p>
+        ) : (
+          <p className="text-[11px] text-muted-txt">אחוז הביצוע יופיע ברגע שיהיו נתוני ביצוע בטאב החודשי.</p>
+        )}
       </div>
 
     </div>
