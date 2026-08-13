@@ -262,16 +262,16 @@ export default function ExpensesPage() {
   function transferToMonthly() {
     if (monthEntries.length === 0) { toast.error('אין רישומים להעברה בחודש זה'); return }
     if (!targetMonth) { toast.error('חודש לא תקין'); return }
-    // A previous transfer already sits in the month as fromLog rows. Replacing
-    // them is the point of re-transferring, but say so first: a row that was
-    // edited by hand there has become a manual row and will now be duplicated,
-    // and one that is still untouched is about to be overwritten.
+    // A previous transfer already sits in the month. Recomputing it is the point
+    // of transferring again, but say so first, because a row that was edited by
+    // hand there has become manual and will now be left behind as it is.
     const prev = months[targetMonth.id]
     const hasPrev = prev
-      ? (['fixed', 'variable', 'sub', 'ins'] as const).some(sec => prev[sec]?.some(r => r.fromLog))
+      ? (['fixed', 'variable', 'sub', 'ins'] as const)
+          .some(sec => prev[sec]?.some(r => r.fromLog || r.logFilled))
       : false
     if (hasPrev &&
-        !confirm(`כבר הועבר סיכום ל${targetMonth.name}. העברה חדשה תחליף את השורות שסומנו 🧾 שם. להמשיך?`)) return
+        !confirm(`כבר הועבר סיכום ל${targetMonth.name}. העברה חדשה תחשב אותו מחדש. להמשיך?`)) return
     initMonth(targetMonth.id)
     applyExpenseLog(targetMonth.id, catTotals.map(([name, amount]) => ({ name, amount })))
     toast.success(`✅ ${fmt(monthTotal)} נכנסו לביצוע של ${targetMonth.name}`, {

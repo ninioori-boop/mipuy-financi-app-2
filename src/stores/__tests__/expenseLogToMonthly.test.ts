@@ -1,194 +1,255 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useMonthlyStore, applyLogRows } from '@/stores/monthlyStore'
 
-// The expense-log (תיעוד הוצאות) is a standalone journal. Transferring a month
-// of it into the monthly tab used to produce a display-only list that counted
-// for nothing. It now produces real rows tagged fromLog, so the money shows up
-// in ביצוע everywhere a total is computed — the month summary, the annual view,
-// trends and both exports all read row.actual and need no separate wiring.
+// The expense-log (תיעוד הוצאות) journal now feeds ביצוע in the monthly tab.
+// The rule the whole feature rests on:
 //
-// The whole risk of that design is the journal and an imported bank report
-// fighting over the same category. These tests pin down that they cannot.
+//   ONE category holds ONE number. An imported report always wins. The journal
+//   fills only what the report left empty.
+//
+// That rule is not a preference — the phone app auto-captures Apple/Google Pay
+// charges into the journal, and those same charges arrive again in the credit
+// statement. Summing the two sources would count real purchases twice, every
+// month, without anyone doing anything wrong.
 
-const JOURNAL = [
-  { name: 'אוכל בחוץ ובילויים', amount: 525 },   // variable
-  { name: 'חופשה וטיול',        amount: 296 },   // annual → variable
-  { name: 'חשמל',               amount: 340 },   // fixed
-  { name: 'מנויים',             amount: 60 },    // sub
-  { name: 'ביטוח רכב',          amount: 210 },   // ins
-]
-
+const CAT = 'אוכל בחוץ ובילויים'   // variable
 const SECTIONS = ['fixed', 'variable', 'sub', 'ins'] as const
+const s = () => useMonthlyStore.getState()
 
-function logRowsOf(monthId: string) {
-  const m = useMonthlyStore.getState().months[monthId]
-  return SECTIONS.flatMap(sec => m[sec].filter(r => r.fromLog))
+/** Every row of one category, across the section it belongs to. */
+function rowsFor(monthId: string, name: string, section: typeof SECTIONS[number] = 'variable') {
+  return s().months[monthId][section].filter(r => r.name === name)
+}
+function actualFor(monthId: string, name: string, section: typeof SECTIONS[number] = 'variable') {
+  return rowsFor(monthId, name, section).reduce((t, r) => t + r.actual, 0)
+}
+function journalRows(monthId: string) {
+  const m = s().months[monthId]
+  return SECTIONS.flatMap(sec => m[sec].filter(r => r.fromLog || r.logFilled))
 }
 
-describe('applyExpenseLog — the journal lands in ביצוע as real rows', () => {
+describe('one category, one number', () => {
   beforeEach(() => useMonthlyStore.setState({ months: {} }))
 
-  function seed(monthId = 'log') {
-    useMonthlyStore.getState().initMonth(monthId)
-    useMonthlyStore.getState().applyExpenseLog(monthId, JOURNAL)
-    return useMonthlyStore.getState().months[monthId]
-  }
+  it('the journal fills an empty planned row instead of opening a second one', () => {
+    s().initMonth('m')
+    s().syncFromMapping([], [{ name: CAT, amount: 328 }], [], [], [], [], [], 1, 'm')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
 
-  it('each category lands in the same section the import would put it in', () => {
-    const m = seed()
-    const at = (sec: typeof SECTIONS[number], name: string) =>
-      m[sec].find(r => r.name === name && r.fromLog)
-    expect(at('variable', 'אוכל בחוץ ובילויים')?.actual).toBe(525)
-    expect(at('variable', 'חופשה וטיול')?.actual).toBe(296)
-    expect(at('fixed',    'חשמל')?.actual).toBe(340)
-    expect(at('sub',      'מנויים')?.actual).toBe(60)
-    expect(at('ins',      'ביטוח רכב')?.actual).toBe(210)
-  })
-
-  it('journal rows carry spending only, so they never inflate the plan', () => {
-    seed()
-    const rows = logRowsOf('log')
-    expect(rows).toHaveLength(5)
-    expect(rows.every(r => r.plan === 0)).toBe(true)
-  })
-
-  it('the whole journal total reaches the month, nothing is silently dropped', () => {
-    const m = seed()
-    const actual = SECTIONS.reduce((s, sec) => s + m[sec].reduce((t, r) => t + r.actual, 0), 0)
-    expect(actual).toBe(JOURNAL.reduce((s, i) => s + i.amount, 0))
-  })
-
-  it('transferring again replaces the previous transfer instead of stacking on it', () => {
-    seed()
-    useMonthlyStore.getState().applyExpenseLog('log', [{ name: 'אוכל בחוץ ובילויים', amount: 700 }])
-    // A second copy of the same money on every re-transfer would be the single
-    // most damaging bug this feature could ship.
-    const rows = logRowsOf('log')
+    const rows = rowsFor('m', CAT)
     expect(rows).toHaveLength(1)
-    expect(rows[0].actual).toBe(700)
+    expect(rows[0].plan).toBe(328)
+    expect(rows[0].actual).toBe(525)
+    expect(rows[0].logFilled).toBe(true)
+  })
+
+  it('a category with no row at all gets one created for it', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'ציוד עסקי/משרדי', amount: 324 }])
+    const rows = rowsFor('m', 'ציוד עסקי/משרדי')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ plan: 0, actual: 324, fromLog: true })
+  })
+
+  it('the report wins, whichever way round the two transfers happen', () => {
+    const both = (order: 'import-first' | 'journal-first') => {
+      useMonthlyStore.setState({ months: {} })
+      s().initMonth('m')
+      s().syncFromMapping([], [{ name: CAT, amount: 328 }], [], [], [], [], [], 1, 'm')
+      const imp = () => s().applyImport('m', { [CAT]: 500 }, [], [], [], [], [], [], [], 1)
+      const log = () => s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+      if (order === 'import-first') { imp(); log() } else { log(); imp() }
+      return rowsFor('m', CAT).map(r => ({ plan: r.plan, actual: r.actual, journal: !!(r.fromLog || r.logFilled) }))
+    }
+    // 500, not 1025. One row, holding the report's figure.
+    const expected = [{ plan: 328, actual: 500, journal: false }]
+    expect(both('import-first')).toEqual(expected)
+    expect(both('journal-first')).toEqual(expected)
+  })
+
+  it('a category the report never mentions keeps its journal number', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }, { name: 'ביט ללא מעקב', amount: 386 }])
+    // The report covers only one of the two categories.
+    s().applyImport('m', { [CAT]: 500 }, [], [], [], [], [], [], [], 1)
+
+    expect(actualFor('m', CAT)).toBe(500)
+    expect(actualFor('m', 'ביט ללא מעקב')).toBe(386)   // cash/Bit survives untouched
+  })
+
+  it('a report that reports ZERO for a category does not blank the journal', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+    s().applyImport('m', { [CAT]: 0 }, [], [], [], [], [], [], [], 1)
+    expect(actualFor('m', CAT)).toBe(525)
+  })
+
+  it('an advisor figure typed by hand is not overwritten by the journal', () => {
+    s().initMonth('m')
+    s().syncFromMapping([], [{ name: CAT, amount: 328 }], [], [], [], [], [], 1, 'm')
+    const row = rowsFor('m', CAT)[0]
+    s().updateRow('m', 'variable', row.id, 'actual', 900)
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+
+    expect(rowsFor('m', CAT)).toHaveLength(1)
+    expect(actualFor('m', CAT)).toBe(900)
+  })
+})
+
+describe('transferring again recomputes, never accumulates', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  it('a created row is replaced, not stacked', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+    s().applyExpenseLog('m', [{ name: CAT, amount: 700 }])
+    expect(rowsFor('m', CAT)).toHaveLength(1)
+    expect(actualFor('m', CAT)).toBe(700)
+  })
+
+  it('a filled planned row is re-filled, and keeps its plan', () => {
+    s().initMonth('m')
+    s().syncFromMapping([], [{ name: CAT, amount: 328 }], [], [], [], [], [], 1, 'm')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+    s().applyExpenseLog('m', [{ name: CAT, amount: 700 }])
+    expect(rowsFor('m', CAT)).toEqual([expect.objectContaining({ plan: 328, actual: 700 })])
+  })
+
+  it('a planned row the journal no longer covers is emptied, never deleted', () => {
+    s().initMonth('m')
+    s().syncFromMapping([], [{ name: CAT, amount: 328 }], [], [], [], [], [], 1, 'm')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+    // Next month's transfer has nothing in this category.
+    s().applyExpenseLog('m', [{ name: 'פארם', amount: 60 }])
+
+    const rows = rowsFor('m', CAT)
+    expect(rows).toHaveLength(1)          // the client's planned line survives
+    expect(rows[0].plan).toBe(328)        // with its plan intact
+    expect(rows[0].actual).toBe(0)        // and no stale journal money left on it
+    expect(rows[0].logFilled).toBeUndefined()
+  })
+
+  it('a hand edit makes the row manual, so the next transfer leaves it alone', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: CAT, amount: 525 }])
+    const row = rowsFor('m', CAT)[0]
+    s().updateRow('m', 'variable', row.id, 'actual', 480)
+    expect(rowsFor('m', CAT)[0].fromLog).toBeUndefined()
+
+    s().applyExpenseLog('m', [{ name: CAT, amount: 700 }])
+    expect(rowsFor('m', CAT)).toHaveLength(1)
+    expect(actualFor('m', CAT)).toBe(480)
+  })
+})
+
+describe('routing and totals', () => {
+  beforeEach(() => useMonthlyStore.setState({ months: {} }))
+
+  const JOURNAL = [
+    { name: CAT,             amount: 525 },   // variable
+    { name: 'חופשה וטיול',   amount: 296 },   // annual → variable
+    { name: 'גז',            amount: 340 },   // fixed
+    { name: 'מנויים',        amount: 60 },    // sub
+    { name: 'ביטוח רכב',     amount: 210 },   // ins
+  ]
+
+  it('each category lands in the section the import would have used', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', JOURNAL)
+    expect(actualFor('m', CAT, 'variable')).toBe(525)
+    expect(actualFor('m', 'חופשה וטיול', 'variable')).toBe(296)
+    expect(actualFor('m', 'גז', 'fixed')).toBe(340)
+    expect(actualFor('m', 'מנויים', 'sub')).toBe(60)
+    expect(actualFor('m', 'ביטוח רכב', 'ins')).toBe(210)
+  })
+
+  it('the whole journal total reaches the month when nothing else claims it', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', JOURNAL)
+    expect(journalRows('m').reduce((t, r) => t + r.actual, 0))
+      .toBe(JOURNAL.reduce((t, i) => t + i.amount, 0))
   })
 
   it('income, savings and transfers are not spending and never become expense rows', () => {
-    useMonthlyStore.getState().initMonth('skip')
-    useMonthlyStore.getState().applyExpenseLog('skip', [
+    s().initMonth('m')
+    s().applyExpenseLog('m', [
       { name: 'הכנסות',        amount: 9000 },
       { name: 'חסכונות',       amount: 500 },
       { name: 'העברות ואשראי', amount: 300 },
       { name: 'מזון לבית',     amount: 100 },
     ])
-    expect(logRowsOf('skip').map(r => r.name)).toEqual(['מזון לבית'])
+    expect(journalRows('m').map(r => r.name)).toEqual(['מזון לבית'])
   })
 
   it('an unrecognised label still carries its money in, as a variable expense', () => {
-    useMonthlyStore.getState().initMonth('unknown')
-    useMonthlyStore.getState().applyExpenseLog('unknown', [{ name: 'קטגוריה שהומצאה', amount: 77 }])
-    expect(useMonthlyStore.getState().months['unknown'].variable
-      .find(r => r.name === 'קטגוריה שהומצאה')?.actual).toBe(77)
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'קטגוריה שהומצאה', amount: 77 }])
+    expect(actualFor('m', 'קטגוריה שהומצאה')).toBe(77)
   })
 
   it('zero and negative amounts produce no row', () => {
-    useMonthlyStore.getState().initMonth('zero')
-    useMonthlyStore.getState().applyExpenseLog('zero', [
-      { name: 'מזון לבית', amount: 0 },
-      { name: 'פארם',      amount: -50 },
-    ])
-    expect(logRowsOf('zero')).toHaveLength(0)
-  })
-
-  it('editing a journal row makes it manual, so the next transfer cannot wipe the fix', () => {
-    seed()
-    const row = useMonthlyStore.getState().months['log'].variable
-      .find(r => r.name === 'אוכל בחוץ ובילויים')!
-    useMonthlyStore.getState().updateRow('log', 'variable', row.id, 'actual', 480)
-    expect(useMonthlyStore.getState().months['log'].variable
-      .find(r => r.id === row.id)?.fromLog).toBe(false)
-
-    useMonthlyStore.getState().applyExpenseLog('log', [{ name: 'מזון לבית', amount: 100 }])
-    expect(useMonthlyStore.getState().months['log'].variable
-      .find(r => r.id === row.id)?.actual).toBe(480)
-  })
-
-  it('deleting a journal row removes it like any other row', () => {
-    seed()
-    const row = useMonthlyStore.getState().months['log'].fixed.find(r => r.fromLog)!
-    useMonthlyStore.getState().deleteRow('log', 'fixed', row.id)
-    expect(useMonthlyStore.getState().months['log'].fixed.some(r => r.id === row.id)).toBe(false)
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'מזון לבית', amount: 0 }, { name: 'פארם', amount: -50 }])
+    expect(journalRows('m')).toHaveLength(0)
   })
 })
 
-describe('journal rows and imported reports never overwrite each other', () => {
+describe('mapping still reaches a category the journal is holding', () => {
   beforeEach(() => useMonthlyStore.setState({ months: {} }))
 
-  it('an import leaves a journal row alone and still records its own spending', () => {
-    useMonthlyStore.getState().initMonth('both')
-    useMonthlyStore.getState().applyExpenseLog('both', [{ name: 'מזון לבית', amount: 400 }])
-    useMonthlyStore.getState().applyImport('both', { 'מזון לבית': 1200 }, [], [], [], [], [], [], [], 1)
-
-    const rows = useMonthlyStore.getState().months['both'].variable.filter(r => r.name === 'מזון לבית')
-    const fromLog  = rows.filter(r => r.fromLog)
-    const imported = rows.filter(r => !r.fromLog)
-    expect(fromLog).toHaveLength(1)
-    expect(fromLog[0].actual).toBe(400)
-    // The report's own spending must still be recorded, not swallowed by the
-    // mere presence of a journal row carrying the same category name.
-    expect(imported.reduce((s, r) => s + r.actual, 0)).toBe(1200)
-  })
-
-  it('a mapping plan row is still added when a journal row shares its name', () => {
-    useMonthlyStore.getState().initMonth('plan')
-    useMonthlyStore.getState().applyExpenseLog('plan', [{ name: 'מזון לבית', amount: 400 }])
-    useMonthlyStore.getState().applyImport('plan', {}, [], [{ name: 'מזון לבית', amount: 2000 }], [], [], [], [], [], 1)
-
-    const rows = useMonthlyStore.getState().months['plan'].variable.filter(r => r.name === 'מזון לבית')
-    expect(rows.find(r => r.fromLog)?.actual).toBe(400)
-    expect(rows.find(r => r.fromMapping)?.plan).toBe(2000)
-  })
-
-  // 'גז' is a fixed category that is NOT one of the default month rows, so the
-  // only rows carrying that name are the ones this test creates.
-  it('syncFromMapping leaves journal rows alone, mirrors the plan, and does not clone on a rerun', () => {
-    useMonthlyStore.getState().initMonth('sync')
-    useMonthlyStore.getState().applyExpenseLog('sync', [{ name: 'גז', amount: 340 }])
-    const sync = () => useMonthlyStore.getState().syncFromMapping(
-      [{ name: 'גז', amount: 300 }], [], [], [], [], [], [], 1, 'sync',
+  it('syncFromMapping puts the plan into the journal row rather than beside it', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'גז', amount: 340 }])
+    const sync = () => s().syncFromMapping(
+      [{ name: 'גז', amount: 300 }], [], [], [], [], [], [], 1, 'm',
     )
-    const gasRows = () => useMonthlyStore.getState().months['sync'].fixed.filter(r => r.name === 'גז')
     sync()
-    expect(gasRows().find(r => r.fromLog)?.actual).toBe(340)
-    expect(gasRows().find(r => r.fromMapping)?.plan).toBe(300)
-    sync()
-    expect(gasRows()).toHaveLength(2)
+    expect(rowsFor('m', 'גז', 'fixed')).toEqual([
+      expect.objectContaining({ plan: 300, actual: 340, fromLog: true }),
+    ])
+    sync()   // rerunning the sync must not clone the row
+    expect(rowsFor('m', 'גז', 'fixed')).toHaveLength(1)
   })
 
-  it('a per-business import still fills its named row when a journal row sits in the section', () => {
-    useMonthlyStore.getState().initMonth('named')
-    useMonthlyStore.getState().applyExpenseLog('named', [{ name: 'ביטוח רכב', amount: 210 }])
-    useMonthlyStore.getState().applyImport(
-      'named', { 'ביטוח רכב': 800 }, [], [], [], [{ name: 'הראל', amount: 800 }], [], [], [], 1,
-      [{ name: 'הראל', amount: 800, category: 'ביטוח רכב' }],
+  it('an import carrying a mapping plan does the same', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'ציוד עסקי/משרדי', amount: 324 }])
+    s().applyImport('m', {}, [], [{ name: 'ציוד עסקי/משרדי', amount: 400 }], [], [], [], [], [], 1)
+    expect(rowsFor('m', 'ציוד עסקי/משרדי')).toEqual([
+      expect.objectContaining({ plan: 400, actual: 324 }),
+    ])
+  })
+
+  it('a per-business import still fills its named row beside an untouched journal row', () => {
+    s().initMonth('m')
+    s().applyExpenseLog('m', [{ name: 'ביטוח רכב', amount: 210 }])
+    s().applyImport(
+      'm', { 'ביטוח חיים': 800 }, [], [], [], [{ name: 'הראל', amount: 800 }], [], [], [], 1,
+      [{ name: 'הראל', amount: 800, category: 'ביטוח חיים' }],
     )
-    const ins = useMonthlyStore.getState().months['named'].ins
+    const ins = s().months['m'].ins
     expect(ins.find(r => r.name === 'הראל')?.actual).toBe(800)
-    expect(ins.find(r => r.fromLog)?.actual).toBe(210)
+    // A different category — the report said nothing about car insurance.
+    expect(actualFor('m', 'ביטוח רכב', 'ins')).toBe(210)
   })
 })
 
 describe('applyLogRows — the legacy carry-over is safe to run more than once', () => {
   it('re-converting the same legacy month never doubles the money', () => {
     useMonthlyStore.setState({ months: {} })
-    useMonthlyStore.getState().initMonth('legacy')
+    s().initMonth('legacy')
     const legacy = {
-      ...useMonthlyStore.getState().months['legacy'],
+      ...s().months['legacy'],
       logged: [{ name: 'מזון לבית', amount: 250 }],
     }
 
     const once = applyLogRows(legacy, legacy.logged)
-    expect(once.variable.filter(r => r.fromLog).map(r => r.actual)).toEqual([250])
+    expect(once.variable.filter(r => r.fromLog || r.logFilled).map(r => r.actual)).toEqual([250])
     expect(once.logged).toEqual([])
 
-    // The path a stale remote doc takes: it still carries the old `logged`
-    // list, so the conversion runs again over an already-converted month.
+    // The path a stale remote doc takes: it still carries the old `logged` list,
+    // so the conversion runs again over an already-converted month.
     const again = applyLogRows(once, legacy.logged)
-    expect(again.variable.filter(r => r.fromLog).map(r => r.actual)).toEqual([250])
+    expect(again.variable.filter(r => r.fromLog || r.logFilled).map(r => r.actual)).toEqual([250])
   })
 })

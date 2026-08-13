@@ -21,12 +21,14 @@ export interface BudgetRow {
   plan: number
   actual: number
   fromMapping?: boolean   // true → managed by mapping→monthly auto-sync (fixed/variable/sub/ins only)
-  // true → this row's actual came from the standalone expense-log (תיעוד הוצאות),
-  // not from an imported report. It carries real spending, so it counts in ביצוע
-  // like any other row, but the import must never write to it and it must never
-  // hide an imported row of the same category — otherwise the two sources would
-  // silently overwrite each other. A hand edit clears the flag (see updateRow).
-  fromLog?: boolean
+  // The journal (תיעוד הוצאות) put the actual here. One category holds ONE
+  // number: an imported report always wins, and the journal only fills what the
+  // report left empty. The two flags differ solely in how a re-transfer undoes
+  // them — fromLog rows are removed, logFilled rows are emptied and kept,
+  // because those are the client's own planned lines. A hand edit clears both,
+  // which makes the row manual and immune to the next transfer (see updateRow).
+  fromLog?: boolean     // the transfer CREATED this row
+  logFilled?: boolean   // the transfer filled an existing, empty row
   // Set by applyImport when the actual came from an imported report — lets the
   // month show WHICH charges built the number. Optional: rows created before
   // this existed, and hand-typed actuals, simply have none.
@@ -151,22 +153,54 @@ export function sectionOfCategory(cat: string): ExpenseSection | null {
  * dataSync, and both paths must build rows identically.
  */
 export function applyLogRows(m: MonthData, items: { name: string; amount: number }[]): MonthData {
-  const bySection: Record<ExpenseSection, BudgetRow[]> = { fixed: [], variable: [], sub: [], ins: [] }
+  const out: MonthData = {
+    ...m,
+    fixed:    clearLogContribution(m.fixed),
+    variable: clearLogContribution(m.variable),
+    sub:      clearLogContribution(m.sub),
+    ins:      clearLogContribution(m.ins),
+    logged: [],
+  }
+
   for (const { name, amount } of items) {
     const section = sectionOfCategory(name)
     const rounded = Math.round(amount)
     if (!section || rounded <= 0) continue
-    bySection[section].push({ id: uid(), name, plan: 0, actual: rounded, fromLog: true })
+
+    const rows = out[section]
+    const existing = rows.find(r => r.name === name)
+    // Someone already put a number here: an imported report, or the advisor by
+    // hand. That number wins and the journal's amount is set aside — the month
+    // screen names it and its amount so the money is never lost quietly.
+    if (existing && existing.actual > 0) continue
+
+    if (existing) {
+      // An empty row is waiting (usually a planned line). Fill it instead of
+      // opening a second row beside it, so the category stays one line with
+      // its plan next to its actual.
+      out[section] = rows.map(r => r === existing ? { ...r, actual: rounded, logFilled: true } : r)
+    } else {
+      out[section] = [...rows, { id: uid(), name, plan: 0, actual: rounded, fromLog: true }]
+    }
   }
-  const keep = (rows: BudgetRow[]) => rows.filter(r => !r.fromLog)
-  return {
-    ...m,
-    fixed:    [...keep(m.fixed),    ...bySection.fixed],
-    variable: [...keep(m.variable), ...bySection.variable],
-    sub:      [...keep(m.sub),      ...bySection.sub],
-    ins:      [...keep(m.ins),      ...bySection.ins],
-    logged: [],
-  }
+  return out
+}
+
+/**
+ * Undo whatever the journal last put into a section, so a transfer can always
+ * be recomputed from scratch. Rows the journal CREATED are removed; rows it
+ * merely filled are handed back empty, because they were the client's own
+ * planned lines and deleting them would take the plan with them.
+ */
+function clearLogContribution(rows: BudgetRow[]): BudgetRow[] {
+  return rows
+    .filter(r => !r.fromLog)
+    .map(r => {
+      if (!r.logFilled) return r
+      const next = { ...r, actual: 0 }
+      delete next.logFilled
+      return next
+    })
 }
 
 function makeDefaultMonth(): MonthData {
@@ -307,9 +341,13 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // fromLog is written back only when the row actually had it: every row
         // in every month passes through here, and an unconditional `false`
         // would add a dead field to all of them inside a 900KB-capped document.
-        [section]: m[section].map(r => r.id === id
-          ? { ...r, [field]: value, fromMapping: false, ...(r.fromLog ? { fromLog: false } : {}) }
-          : r),
+        [section]: m[section].map(r => {
+          if (r.id !== id) return r
+          const next = { ...r, [field]: value, fromMapping: false }
+          delete next.fromLog
+          delete next.logFilled
+          return next
+        }),
       })),
 
     deleteRow: (monthId, section, id) =>
@@ -439,21 +477,47 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // do come in are tagged fromMapping:true so they integrate with the
         // mapping→monthly auto-sync (and stay re-deletable).
         function mergePlan(rows: BudgetRow[], src: { name: string; amount: number }[], deletedNames: string[]): BudgetRow[] {
-          // fromLog rows are excluded from the name check: a journal row for
-          // "מזון לבית" must not stop the mapping's planned "מזון לבית" from
-          // being added, or the month would show spending with no plan beside it.
-          const names = new Set(rows.filter(r => !r.fromLog).map(r => r.name))
+          const planOf = new Map(src.map(s => [s.name, s.amount] as const))
+          // A journal-created row is that category's only line. When mapping has
+          // a plan for the same category, put it INTO that row instead of
+          // opening a second one, so the category keeps showing a single line
+          // with its plan beside its actual.
+          const filled = rows.map(r =>
+            r.fromLog && r.plan === 0 && (planOf.get(r.name) ?? 0) > 0
+              ? { ...r, plan: Math.round(planOf.get(r.name)!) }
+              : r)
+          const names = new Set(filled.map(r => r.name))
           const deleted = new Set(deletedNames)
           const added = src
             .filter(s => !names.has(s.name) && !deleted.has(s.name) && s.amount > 0)
             .map(s => ({ id: uid(), name: s.name, plan: s.amount, actual: 0, fromMapping: true }))
-          return [...rows, ...added]
+          return [...filled, ...added]
+        }
+        // Step 1b: the report takes back every category it actually reports on.
+        // A category holds ONE number, and when both sources have something to
+        // say the report is the one that counts — the journal auto-captures
+        // Apple/Google Pay charges, which are the very charges the statement
+        // reports, so adding the two would count the same purchase twice.
+        // Categories the report is silent about (cash, Bit) keep their journal
+        // number untouched.
+        function releaseCovered(rows: BudgetRow[]): BudgetRow[] {
+          const covered = (name: string) => (catSums[name] ?? 0) > 0
+          return rows
+            .filter(r => !(r.fromLog && covered(r.name)))
+            .map(r => {
+              if (!r.logFilled || !covered(r.name)) return r
+              // Emptied and unflagged, so the fill pass below writes the
+              // report's figure into it like into any other planned row.
+              const next = { ...r, actual: 0 }
+              delete next.logFilled
+              return next
+            })
         }
         const varMonthly = mappingVariable.map(s => ({ name: s.name, amount: Math.round(s.amount / Math.max(1, varMonths)) }))
-        let fixed    = mergePlan(m.fixed,    mappingFixed, del.fixed)
-        let variable = mergePlan(m.variable, varMonthly,   del.variable)
-        let sub      = mergePlan(m.sub,      mappingSub,   del.sub)
-        let ins      = mergePlan(m.ins,      mappingIns,   del.ins)
+        let fixed    = releaseCovered(mergePlan(m.fixed,    mappingFixed, del.fixed))
+        let variable = releaseCovered(mergePlan(m.variable, varMonthly,   del.variable))
+        let sub      = releaseCovered(mergePlan(m.sub,      mappingSub,   del.sub))
+        let ins      = releaseCovered(mergePlan(m.ins,      mappingIns,   del.ins))
 
         // Step 2: fill actual from catSums. ACTUAL is real spending from the
         // imported report and is NEVER suppressed — not even for a category the
@@ -464,14 +528,13 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // deleted budget line shows its real spending without resurrecting its
         // old mapping plan amount.
         function fillActual(rows: BudgetRow[], cats: Set<string>): BudgetRow[] {
-          // A fromLog row holds the journal's own money. The import must neither
-          // overwrite it (its name is skipped below) nor treat it as "this
-          // category already has a row" (excluded from `names`), or the report's
-          // spending for that category would be dropped on the floor.
-          const names = new Set(rows.filter(r => !r.fromLog).map(r => r.name))
+          const names = new Set(rows.map(r => r.name))
           const updated = rows.map(r => {
             const s = catSums[r.name]
-            if (s === undefined || !cats.has(r.name) || r.fromLog) return r
+            // Any journal row still carrying its flag here belongs to a category
+            // the report is silent about (releaseCovered took the rest). A zero
+            // entry in catSums must not be allowed to blank it out.
+            if (s === undefined || !cats.has(r.name) || r.fromLog || r.logFilled) return r
             // Conditional spread, never an explicit undefined — Firestore
             // rejects undefined values and would fail the whole snapshot save.
             // STALE detail is dropped first: a re-send that fills this actual
@@ -526,7 +589,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           // Pass 1 — fill named (per-business) rows from their matched total.
           // No match in this import → leave the row's existing actual untouched.
           let out = rows.map(r => {
-            if (cats.has(r.name) || r.fromLog) return r
+            if (cats.has(r.name) || r.fromLog || r.logFilled) return r
             const hit = byKey.get(normalizeForLookup(r.name))
             if (!hit) return r
             const t = capTxns(hit.txns)
@@ -538,12 +601,11 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const leftoverTxnsOf = (cat: string) =>
             capTxns(catTxns?.[cat]?.filter(t => !namedKeys.has(normalizeForLookup(t.desc))))
           // Pass 2 — fill category rows from the leftover (total − consumed).
-          // fromLog rows are invisible to both the overwrite pass and the
-          // "does this category already have a row?" check — same reasoning as
-          // fillActual: the journal and the report each keep their own row.
-          const present = new Set(out.filter(r => !r.fromLog).map(r => r.name))
+          const present = new Set(out.map(r => r.name))
           out = out.map(r => {
-            if (!cats.has(r.name) || r.fromLog) return r
+            // Same guard as fillActual: what is still flagged here is journal
+            // money for a category the report never mentioned.
+            if (!cats.has(r.name) || r.fromLog || r.logFilled) return r
             const total = catSums[r.name]
             if (total === undefined) return r
             const t = leftoverTxnsOf(r.name)
@@ -651,14 +713,16 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         // Generic merge for the 4 budget sections (BudgetRow shape).
         // deletedNames blocks re-adding rows the user explicitly deleted.
         function syncBudgetSection(existing: BudgetRow[], byName: Map<string, number>, deletedNames: string[]): BudgetRow[] {
-          // fromLog rows carry spending, never a plan, so they must not stand in
-          // for a mapping row of the same name — otherwise the planned amount
-          // would never reach the month. (They fall through the loop below
-          // untouched, like any other non-fromMapping row.)
-          const existingNames = new Set(existing.filter(r => !r.fromLog).map(r => r.name))
+          const existingNames = new Set(existing.map(r => r.name))
           const deletedSet = new Set(deletedNames)
           const result: BudgetRow[] = []
           for (const r of existing) {
+            // A journal-created row with no plan takes the mapping's plan into
+            // itself, keeping the category on one line (same rule as mergePlan).
+            if (r.fromLog && r.plan === 0 && (byName.get(r.name) ?? 0) > 0) {
+              result.push({ ...r, plan: Math.round(byName.get(r.name)!) })
+              continue
+            }
             if (!r.fromMapping) { result.push(r); continue }  // manual — leave untouched
             const newPlan = byName.get(r.name)
             if (newPlan === undefined) continue                // mapping removed → drop

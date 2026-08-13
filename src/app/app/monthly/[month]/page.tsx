@@ -3,8 +3,9 @@
 import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { useMonthlyStore, OSH_POINTS } from '@/stores/monthlyStore'
+import { useMonthlyStore, OSH_POINTS, sectionOfCategory } from '@/stores/monthlyStore'
 import { useMappingStore } from '@/stores/mappingStore'
+import { useExpenseLogStore } from '@/stores/expenseLogStore'
 import { MONTHS_LIST } from '@/lib/constants'
 import { BudgetSection } from '@/components/monthly/BudgetSection'
 
@@ -20,6 +21,7 @@ export default function MonthlyPage() {
           addInstRow, updateInstRow, deleteInstRow,
           addDebtRow, updateDebtRow, deleteDebtRow,
           addSavingRow, updateSavingRow, deleteSavingRow, updateOsh } = useMonthlyStore()
+  const logEntries = useExpenseLogStore(s => s.entries)
 
   // Initialize the month and immediately mirror mapping (all 4 budget sections
   // + installments/debts/savings). The sync uses fromMapping:true so subsequent
@@ -105,8 +107,29 @@ export default function MonthlyPage() {
 
   // How much of this month's ביצוע came from the expense-log rather than an
   // imported report. Derived from the rows themselves — never stored separately.
-  const loggedTotal = (['fixed', 'variable', 'sub', 'ins'] as const)
-    .reduce((s, sec) => s + data[sec].filter(r => r.fromLog).reduce((t, r) => t + r.actual, 0), 0)
+  const EXP_SECTIONS = ['fixed', 'variable', 'sub', 'ins'] as const
+  const loggedTotal = EXP_SECTIONS
+    .reduce((s, sec) => s + data[sec].filter(r => r.fromLog || r.logFilled).reduce((t, r) => t + r.actual, 0), 0)
+
+  // Journal money this month that did NOT make it into a row, because an
+  // imported report (or a hand-typed figure) already held that category. Read
+  // straight from the journal so it stays true no matter what order the client
+  // transferred things in. Money that is not counted must still be visible.
+  const setAside = (() => {
+    const ym = `${data.year}-${String(MONTHS_LIST.findIndex(x => x.id === monthId) + 1).padStart(2, '0')}`
+    const byCat = new Map<string, number>()
+    for (const e of logEntries) {
+      if (e.date.slice(0, 7) !== ym) continue
+      byCat.set(e.category, (byCat.get(e.category) ?? 0) + e.amount)
+    }
+    const counted = new Set(
+      EXP_SECTIONS.flatMap(sec => data[sec].filter(r => r.fromLog || r.logFilled).map(r => r.name)),
+    )
+    return [...byCat.entries()]
+      .filter(([cat, amount]) => amount > 0 && !counted.has(cat) && sectionOfCategory(cat) !== null)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount)
+  })()
 
 
   return (
@@ -342,13 +365,31 @@ export default function MonthlyPage() {
         </div>
       </div>
 
-      {/* מהיומן — a read-only glance at what the expense-log contributed this month.
-          The money itself lives in the sections above as fromLog rows; this only
-          re-adds them up, so there is no second copy that can drift. */}
-      {loggedTotal > 0 && (
-        <div className="rounded-xl border border-line bg-surface2 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
-          <span className="text-sm text-txt">🧾 מתוך הביצוע, הגיע מתיעוד ההוצאות</span>
-          <span className="text-sm font-bold text-expense tabular-nums">{fmt(loggedTotal)}</span>
+      {/* מהיומן — read-only. Both numbers are derived on the spot: what the
+          journal contributed is re-added from the flagged rows, and what it did
+          NOT contribute is the journal's own totals for any category already
+          carrying a number. Nothing here is stored, so nothing can drift. */}
+      {(loggedTotal > 0 || setAside.length > 0) && (
+        <div className="rounded-xl border border-line bg-surface2 px-4 py-3 space-y-2">
+          {loggedTotal > 0 && (
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm text-txt">🧾 מתוך הביצוע, הגיע מתיעוד ההוצאות</span>
+              <span className="text-sm font-bold text-expense tabular-nums">{fmt(loggedTotal)}</span>
+            </div>
+          )}
+          {setAside.length > 0 && (
+            <div className="text-xs text-muted-txt space-y-1 border-t border-line pt-2">
+              <div className="text-txt">
+                {fmt(setAside.reduce((s, r) => s + r.amount, 0))} מהיומן לא נספרו, כי כבר יש מספר בקטגוריות האלה:
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {setAside.map(r => (
+                  <span key={r.name} className="tabular-nums">{r.name} {fmt(r.amount)}</span>
+                ))}
+              </div>
+              <div>אם חלק מזה היה מזומן שהדוח לא ראה, הוסף אותו ידנית לשורה.</div>
+            </div>
+          )}
         </div>
       )}
 
