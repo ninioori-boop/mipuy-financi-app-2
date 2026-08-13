@@ -1034,7 +1034,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           for (const r of rows) {
             const name = r.name.trim()
             if (!name) continue
-            const amount = Math.round(r.annual / 12)
+            // An annual row with no usable number (a missing field on an older
+            // saved plan, a restored snapshot of a different shape) yields NaN
+            // here, and `NaN <= 0` is FALSE — so the guard below waved it
+            // through and the month showed ₪NaN on its plan and its תזרים נטו.
+            // Shipped 2026-08-13, live for minutes, spotted by Ori on screen.
+            const annual = Number(r.annual)
+            if (!Number.isFinite(annual)) continue
+            const amount = Math.round(annual / 12)
             if (amount <= 0) continue
             // Two annual lines sharing a name describe one category between
             // them; summing beats letting the last one silently win.
@@ -1081,11 +1088,21 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
         }
 
         function syncBudgetSection(
-          existing: BudgetRow[],
+          rawRows: BudgetRow[],
           byName: Map<string, number>,
           deletedNames: string[],
           defaultNames: string[],
         ): BudgetRow[] {
+          // A NaN that already reached a saved row is corruption, never a number
+          // the client chose. Rows written during the minutes this bug was live
+          // carry one, and nothing else in the app would ever clear it, so repair
+          // it here on the way past.
+          const existing = rawRows.map(r =>
+            Number.isFinite(r.plan) && Number.isFinite(r.actual) ? r : {
+              ...r,
+              plan:   Number.isFinite(r.plan)   ? r.plan   : 0,
+              actual: Number.isFinite(r.actual) ? r.actual : 0,
+            })
           const deletedSet = new Set(deletedNames)
           // Legacy placeholder names count as their canonical twin, so a month
           // saved with the old vocabulary is filled rather than duplicated.
@@ -1175,7 +1192,8 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           const savExisting = new Set(m.savings.map(r => r.name))
           const savDeleted  = new Set(del.savings)
           const savings: SavingRow[] = []
-          for (const r of m.savings) {
+          for (const rawSav of m.savings) {
+            const r = Number.isFinite(rawSav.monthly) ? rawSav : { ...rawSav, monthly: 0 }   // see syncBudgetSection
             if (r.fromMapping) { savings.push(r); continue }
             const amount = savByName.get(r.name)
             if (r.fromAnnual) {
@@ -1205,18 +1223,27 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => {
           for (const r of plan.debt) {
             const name = r.name.trim()
             if (!name) continue
-            const monthly = Math.round(r.annual / 12)
-            if (monthly <= 0 && r.balance <= 0) continue
+            const annual  = Number(r.annual)
+            const balance = Number(r.balance)
+            if (!Number.isFinite(annual)) continue          // see toMap
+            const monthly = Math.round(annual / 12)
+            const safeBalance = Number.isFinite(balance) ? balance : 0
+            if (monthly <= 0 && safeBalance <= 0) continue
             const prev = debtByName.get(name)
             debtByName.set(name, {
               monthly: (prev?.monthly ?? 0) + monthly,
-              balance: (prev?.balance ?? 0) + (r.balance || 0),
+              balance: (prev?.balance ?? 0) + safeBalance,
             })
           }
           const debtExisting = new Set(m.debts.map(r => r.name))
           const debtDeleted  = new Set(del.debts)
           const debts: DebtRow[] = []
-          for (const r of m.debts) {
+          for (const rawDebt of m.debts) {
+            const r = Number.isFinite(rawDebt.monthly) && Number.isFinite(rawDebt.remaining) ? rawDebt : {
+              ...rawDebt,
+              monthly:   Number.isFinite(rawDebt.monthly)   ? rawDebt.monthly   : 0,
+              remaining: Number.isFinite(rawDebt.remaining) ? rawDebt.remaining : 0,
+            }   // see syncBudgetSection
             if (r.fromMapping) { debts.push(r); continue }
             const src = debtByName.get(r.name)
             if (r.fromAnnual) {

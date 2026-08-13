@@ -355,6 +355,45 @@ describe('rows the sync must not reach (grill findings, 2026-08-13)', () => {
     expect(m2.debts).toHaveLength(0)
   })
 
+  it('an annual row with no usable number never becomes ₪NaN in the month', () => {
+    // `NaN <= 0` is false, so an unguarded amount sailed past the skip and put
+    // ₪NaN on the plan and on תזרים נטו. Reached production on 2026-08-13.
+    emptyMonth('jan')
+    syncAnnual({ variable: [
+      { name: 'מזון לבית', annual: undefined as unknown as number },
+      { name: 'בריאות',    annual: 'לא מספר' as unknown as number },
+      { name: 'תחביבים',   annual: 12000 },
+    ] })
+
+    expect(row('jan', 'מזון לבית')).toBeUndefined()
+    expect(row('jan', 'בריאות')).toBeUndefined()
+    expect(row('jan', 'תחביבים')?.plan).toBe(1000)   // the healthy row still lands
+    for (const r of useMonthlyStore.getState().months.jan.variable) {
+      expect(Number.isFinite(r.plan), `${r.name} has a non-numeric plan`).toBe(true)
+    }
+  })
+
+  it('repairs a ₪NaN already sitting in a saved month', () => {
+    emptyMonth('jan')
+    useMonthlyStore.setState(s => ({
+      months: { ...s.months, jan: {
+        ...s.months.jan,
+        variable: [{ id: 'broken', name: 'מזון לבית', plan: NaN, actual: 7000, fromAnnual: true }],
+        savings:  [{ id: 'bs', name: 'קרן', monthly: NaN, accumulated: 0 }],
+        debts:    [{ id: 'bd', name: 'הלוואה', remaining: NaN, monthly: NaN, months: 0 }],
+      } },
+    }))
+
+    syncAnnual()   // an empty plan, exactly what a client who never filled the tab has
+
+    const m = useMonthlyStore.getState().months.jan
+    expect(m.variable[0].plan).toBe(0)
+    expect(m.variable[0].actual).toBe(7000)   // the spending is not collateral
+    expect(m.savings[0].monthly).toBe(0)
+    expect(m.debts[0].monthly).toBe(0)
+    expect(m.debts[0].remaining).toBe(0)
+  })
+
   it('an annual figure too small to reach a shekel a month opens no row at all', () => {
     emptyMonth('jan')
     syncAnnual({ variable: [{ name: 'תרומות', annual: 5 }] })   // 5/12 rounds to 0
