@@ -107,6 +107,21 @@ export default function ConnectPage() {
     if (fromQuery || sessionStorage.getItem('connectNative') === '1') setIsNativeApp(true)
   }, [])
 
+  // The native iOS app now opens this page in a Safari sheet that dismisses
+  // itself the instant the page navigates to the custom scheme. So hand the
+  // token back on our own instead of leaving a "open the app" button for the
+  // client to notice — on the first real install the browser just sat there
+  // afterwards and the client had to work out that they were done.
+  // The button below stays as the fallback for Android and for anyone whose
+  // navigation is blocked; a second navigation to the same scheme is harmless.
+  useEffect(() => {
+    if (phase !== 'ready' || !isNativeApp || !token) return
+    const t = setTimeout(() => {
+      window.location.href = SCHEME + encodeURIComponent(token)
+    }, 600)
+    return () => clearTimeout(t)
+  }, [phase, isNativeApp, token])
+
   async function signInEmail(e: FormEvent) {
     e.preventDefault()
     setError('')
@@ -269,7 +284,9 @@ export default function ConnectPage() {
             <IosWizard token={token} copied={copied} onCopy={copyToken} iosMajor={iosMajor} />
           ) : (
             <>
-              <p className="text-muted-txt text-sm mb-6">לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.</p>
+              <p className="text-muted-txt text-sm mb-6">
+                {isNativeApp ? 'חוזר לאפליקציה…' : 'לחץ למטה כדי לחזור לאפליקציה — הטוקן יישמר אוטומטית.'}
+              </p>
               <a
                 href={SCHEME + encodeURIComponent(token)}
                 className="block bg-gold text-surface font-bold rounded-xl px-8 py-3 hover:bg-gold-light transition-colors"
