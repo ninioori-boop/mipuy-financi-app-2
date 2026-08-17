@@ -114,6 +114,63 @@ function helpText(brand) {
   );
 }
 
+// Message types that stay silent on purpose. A client reacting 👍 to the bot's
+// own reply is not asking for anything, and answering it would be noise. A 👍
+// *sticker* is the identical social act, so it belongs here for the same reason
+// — replying "nothing was recorded" to someone congratulating the bot on a
+// successful "נרשם ✅" is an unsolicited correction. Meta's `system` notices are
+// not from a person at all.
+const SILENT_MSG_TYPES = new Set(["reaction", "system", "sticker"]);
+
+// The linking steps, written once. They appear both in the greeting an unlinked
+// phone gets and in the reply to an unreadable message from an unlinked phone;
+// two copies of client-facing instructions drift apart the first time one of
+// them is edited.
+const LINK_INSTRUCTIONS =
+  'פתח/י את האפליקציה, היכנס/י למסך "וואטסאפ", ושלח/י לי את הקוד שמופיע שם.';
+
+/**
+ * Reply for a message we cannot read (voice note, photo, document…).
+ *
+ * Until this existed the webhook returned 200 and said NOTHING for anything
+ * that was not text — and a voice note is the single most common thing a client
+ * sends on WhatsApp here. Silence is indistinguishable from a dead bot, so the
+ * client concludes the service is broken rather than that they used the wrong
+ * input. Naming the actual type is the point: "I can't hear recordings" tells
+ * them what to do instead, "something went wrong" doesn't.
+ *
+ * It states outright that nothing was recorded. The one thing worse than not
+ * reading the message would be leaving the client believing the expense landed.
+ *
+ * `linked` decides the second half, and getting it wrong was a real defect the
+ * pre-deploy review caught: an UNLINKED phone cannot log an expense by text at
+ * all, so telling it to "write it as text instead" sends the client straight
+ * into the link-code prompt and two contradictory instructions in a row. The
+ * likeliest instance is also the most costly one — a new client screenshots the
+ * pairing code off the app's WhatsApp screen and sends the *image*, which is
+ * exactly the moment they are least likely to be linked.
+ */
+function unreadableText(type, brand, linked) {
+  const cannot = {
+    // No "עוד" here, unlike the types below: transcription needs a speech
+    // vendor Claude cannot replace, and Ori deprioritized it on 17/08/2026. So
+    // this reply is the permanent answer for voice notes, not a placeholder, and
+    // it must not imply a capability that is coming. Same reasoning for the
+    // types we will never read, and for the generic fallback.
+    audio: "הקלטות קוליות אני לא יודע לשמוע",
+    image: "תמונות אני עוד לא יודע לקרוא",
+    document: "קבצים אני עוד לא יודע לקרוא",
+    video: "סרטונים אני לא יודע לפתוח",
+    location: "מיקומים אני לא יודע לקרוא",
+    contacts: "כרטיסי איש קשר אני לא יודע לקרוא",
+  }[type] || "את סוג ההודעה הזה אני לא יודע לקרוא";
+  const next = linked
+    ? 'אפשר לכתוב לי אותה בטקסט, למשל "קניתי ב-50 בסופר",\n' +
+      `או לתעד ישירות באפליקציה: ${brand.url}`
+    : `כדי שאוכל לעזור צריך קודם לחבר את החשבון: ${LINK_INSTRUCTIONS}\n${brand.url}`;
+  return `${cannot}, וההודעה הזאת לא נרשמה.\n${next}`;
+}
+
 // ── Firestore (lazy — admin app initialized in index.js) ─────────────────────
 function db() {
   return getFirestore();
@@ -255,6 +312,12 @@ async function resolveTenancy(uid) {
 }
 
 // ── WhatsApp Cloud API senders (product-bot number) ──────────────────────────
+// Node's fetch has no timeout of its own, so every outbound call in this handler
+// needs an explicit one for the same reason the model call does: the ack is sent
+// only after processing finishes, so anything that can hang can outlive the
+// instance and cost the client both the reply and the record. Sending a WhatsApp
+// message should take under a second; ten is already an outage.
+const WA_TIMEOUT_MS = 10_000;
 async function waPost(body) {
   const res = await fetch(
     `https://graph.facebook.com/${GRAPH_VERSION}/${CLIENT_WHATSAPP_PHONE_ID.value()}/messages`,
@@ -265,6 +328,7 @@ async function waPost(body) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ messaging_product: "whatsapp", ...body }),
+      signal: AbortSignal.timeout(WA_TIMEOUT_MS),
     },
   );
   if (!res.ok) {
@@ -327,6 +391,9 @@ async function tryConsumeCode(phone, text) {
 }
 
 // ── Expense capture — reuse /api/transaction (categorize + inbox + budget) ────
+// Longer than the WhatsApp send: this endpoint categorizes, writes the inbox item
+// and touches the budget, so it legitimately does more work than a message send.
+const API_TIMEOUT_MS = 15_000;
 async function logExpense(deviceToken, expense, msgId) {
   if (!deviceToken) return "החיבור לא הושלם. פתח/י מחדש את החיבור לוואטסאפ באפליקציה.";
   const payload = {
@@ -336,14 +403,30 @@ async function logExpense(deviceToken, expense, msgId) {
     ref: "wa:" + msgId, // idempotency on the app's inbox drain
     source: "whatsapp",
   };
-  if (expense.date) payload.date = expense.date;
+  // Always send an explicit date, never leave it to the endpoint's default.
+  // /api/transaction falls back to `new Date().toISOString()`, which is UTC,
+  // while this bot and the client's whole calendar live in Asia/Jerusalem. The
+  // two disagree between midnight and 03:00 Israel time, so a dateless capture
+  // was filed a DAY EARLY — and on the 1st of a month it landed in the previous
+  // month, quietly skewing that month's budget and ביצוע. Verified:
+  // 2026-09-01T00:30+03:00 gives 2026-08-31 in UTC and 2026-09-01 here.
+  // ⚠️ This fixes the bot's paths only. The same UTC default still misdates the
+  // iOS and Android captures that post here without a date.
+  payload.date = expense.date || todayKey();
 
   let res, json;
   try {
+    // Bounded for the same reason as the other two outbound calls. A timeout
+    // here is genuinely ambiguous — the write may have landed server-side while
+    // we stopped waiting — so the client is told honestly that it did not record
+    // rather than optimistically that it did. If they resend, the endpoint's own
+    // 180s same-merchant-and-amount guard is what stops a double entry, since a
+    // resend arrives as a new message id and so carries a different `ref`.
     res = await fetch(`${APP_URL}/api/transaction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     json = await res.json().catch(() => ({}));
   } catch (e) {
@@ -360,7 +443,58 @@ async function logExpense(deviceToken, expense, msgId) {
   if (res.status === 401) return "החיבור פג. פתח/י מחדש את החיבור לוואטסאפ באפליקציה.";
   if (res.status === 503) return "השירות בהרצה, נסה/י שוב עוד רגע.";
   console.error("logExpense rejected", res.status, JSON.stringify(json).slice(0, 200));
+  // A 200 whose body we could not read is genuinely ambiguous — the abort signal
+  // covers the body read, not just the headers, so a slow response can arrive
+  // with 200 and still land here via `res.json().catch(() => ({}))`. The endpoint
+  // accepted the write, so "it didn't record" would be a lie in the likelier
+  // direction, and inviting a blind resend risks a second entry once past the
+  // endpoint's 180s duplicate window. Name the uncertainty instead of guessing.
+  if (res.ok) {
+    console.error("logExpense: 200 with unreadable body", JSON.stringify(json).slice(0, 200));
+    return "שלחתי את ההוצאה לרישום אבל לא קיבלתי אישור חזרה. כדאי להציץ באפליקציה ולוודא לפני שרושמים שוב.";
+  }
   return "לא הצלחתי לרשום את ההוצאה כרגע.";
+}
+
+/**
+ * Anthropic client with the model call bounded well inside the function's own
+ * HTTP budget. Both AI call sites go through here so the two cannot drift.
+ *
+ * 🔴 What this fixes (found by the pre-deploy review on 17/08/2026): the SDK
+ * defaults to a 10-MINUTE timeout with 2 retries, while this function's HTTP
+ * timeout is 120s. A stalled model call therefore outlived the function itself:
+ * the instance was killed before it could reply, Meta saw no 2xx and retried,
+ * the `_seen_` dedup written earlier swallowed the retry, and the client's
+ * expense was NEVER recorded and NEVER answered. Silent financial data loss,
+ * with nothing in any log tying the two halves together.
+ *
+ * Bounded, a stall degrades instead of vanishing: understand() falls through to
+ * heuristic(), answerQuestion() returns its "couldn't calculate this" reply.
+ * Both still answer the client.
+ *
+ * ⚠️ `maxRetries: 0` is load-bearing, and the reason is not obvious. `timeout`
+ * bounds each ATTEMPT, never the call: the SDK's retry path reads `retry-after`
+ * off the failed response and honors it verbatim as a plain sleep, gated only by
+ * `timeoutMillis < 60 * 1000` (@anthropic-ai/sdk/client.js retryRequest). That
+ * sleep is completely outside the per-attempt timeout, so a 429 answering in
+ * 200ms with `retry-after: 55` costs 15 + 55 + 15 = 85s for ONE call — and the
+ * ask_question path chains understand() then answerQuestion(), i.e. ~170s, past
+ * any sane function ceiling. This key is shared with every web AI route, so an
+ * org-wide 429 is an ordinary event, not an exotic one.
+ *
+ * With no retries the bound is real: 15s per call, 30s for the chained pair. A
+ * WhatsApp reply must not sit in a 55-second rate-limit sleep — the degraded
+ * paths serve the client better than a wait they will read as a dead bot, and
+ * they exist precisely for this: heuristic() for the router, the "couldn't
+ * calculate this" reply for QA.
+ */
+const AI_TIMEOUT_MS = 15_000;
+function anthropicClient() {
+  return new Anthropic({
+    apiKey: ANTHROPIC_API_KEY.value(),
+    timeout: AI_TIMEOUT_MS,
+    maxRetries: 0,
+  });
 }
 
 // ── Intent parsing (Claude structured output + heuristic fallback) ───────────
@@ -393,7 +527,7 @@ const INTENT_SYSTEM = `אתה מנתב של בוט פיננסי בוואטסאפ
 reply = משמש רק ל-help/other: הודעה קצרה ומועילה בעברית, **בשם הזהות שתינתן לך בהודעת המשתמש** (לעולם לא בשם קבוע אחר). אחרת reply="".`;
 
 async function understand(message, brand) {
-  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+  const client = anthropicClient();
   const b = brand || { nameHe: DEFAULT_BOT_NAME, url: APP_URL };
   // Router runs on EVERY message and must extract amount + merchant from free
   // Hebrew accurately (a misparse logs a wrong expense — data-quality stake), so
@@ -409,7 +543,18 @@ async function understand(message, brand) {
   const res = await client.messages.create({
     model: "claude-sonnet-5",
     max_tokens: 1024,
-    output_config: { format: { type: "json_schema", schema: INTENT_SCHEMA } },
+    output_config: {
+      format: { type: "json_schema", schema: INTENT_SCHEMA },
+      // `effort` defaults to "high" when unset, and on Sonnet 5 an omitted
+      // `thinking` field ALSO means adaptive thinking is on — so every
+      // "קניתי ב-50 בסופר" was being classified at full depth, on the hot path
+      // of every single message. "medium" is the deliberate floor rather than
+      // "low": a misparse writes a WRONG number into a person's expense record,
+      // and the docs flag some risk of under-thinking at "low" on messier
+      // inputs. Sonnet 5 at medium is about Sonnet 4.6 at high, i.e. roughly
+      // what this bot was parsing with before the model moved.
+      effort: "medium",
+    },
     system: INTENT_SYSTEM,
     messages: [{
       role: "user",
@@ -426,14 +571,69 @@ async function understand(message, brand) {
  * failed, i.e. the worst moment to answer a white-label client under the
  * PLATFORM's name instead of their own firm's.
  */
+/**
+ * The three relative dates worth resolving without a model, and the reason this
+ * exists at all.
+ *
+ * This parser only runs when the model call just failed, so bounding that call
+ * (see anthropicClient) made it reachable where previously the instance simply
+ * died. That turned a loud failure into a quiet wrong one: "שילמתי 1200 שכר דירה
+ * אתמול" produced `date: ""` **and left the word in the merchant** — literally
+ * `merchant: "שכר דירה אתמול"` — so the expense was filed on the wrong day under
+ * a polluted name. Both halves do damage. The date lands in the wrong month's
+ * ביצוע; the merchant string persists in the client's journal, and because a
+ * time-suffixed name rarely matches a category it invites an AI categorization
+ * whose suggestion is logged toward the shared learned pool, which is the
+ * pollution class the payment-rail guard already exists to prevent.
+ *
+ * The client never sees any of it: the success confirmation is
+ * "נרשם: {merchant} · ₪{amount}" with no date at all.
+ *
+ * Resolving these deterministically is better than confessing an assumption —
+ * the fallback becomes right rather than apologetic. Anything less common is
+ * left to the model, where an unresolved word now at least leaves the merchant
+ * clean and the date explicitly today.
+ */
+// ⚠️ NOT `\b`. JavaScript defines `\b` against `[A-Za-z0-9_]`, so a Hebrew letter
+// is always a non-word character and `/\bאתמול\b/` matches NOTHING — the first
+// version of this code was silently inert and only a run against real strings
+// caught it. These lookarounds assert "no Hebrew letter adjacent" instead, which
+// is the actual intent and also keeps "אתמול" from matching inside a longer word.
+const HEB = "א-ת";
+const RELATIVE_DAYS = [
+  [new RegExp(`(?<![${HEB}])שלשום(?![${HEB}])`), 2],
+  [new RegExp(`(?<![${HEB}])אתמול(?![${HEB}])`), 1],
+  [new RegExp(`(?<![${HEB}])היום(?![${HEB}])`), 0],
+];
+function resolveRelativeDay(text) {
+  for (const [re, back] of RELATIVE_DAYS) {
+    if (re.test(text)) {
+      const d = new Date(Date.now() - back * 86_400_000);
+      return {
+        date: new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d),
+        re,
+      };
+    }
+  }
+  return null;
+}
+
 function heuristic(message, brand) {
   const m = String(message || "");
   const numMatch = m.match(/(\d[\d,]*(?:\.\d+)?)/); // handles "1,234.56"
   const looksExpense = /(קניתי|שילמתי|שילמת|הוצאתי|₪|שקל|ש"?ח|\bב-?\d)/.test(m) && numMatch;
   if (looksExpense) {
     const amount = Number(numMatch[1].replace(/,/g, "")); // strip thousands separators
-    const merchant = m.replace(numMatch[0], " ").replace(/(קניתי|שילמתי|הוצאתי|₪|שקל|ש"?ח|ב-)/g, " ").replace(/\s+/g, " ").trim();
-    return { intent: "log_expense", merchant: merchant || "הוצאה", amount, date: "", question: "", reply: "" };
+    const rel = resolveRelativeDay(m);
+    // Strip the temporal word too, not just the money words — leaving it in is
+    // what produced merchant names like "חשמל שלשום".
+    const merchant = m
+      .replace(numMatch[0], " ")
+      .replace(/(קניתי|שילמתי|הוצאתי|₪|שקל|ש"?ח|ב-)/g, " ")
+      .replace(rel ? rel.re : /(?!)/, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { intent: "log_expense", merchant: merchant || "הוצאה", amount, date: rel ? rel.date : "", question: "", reply: "" };
   }
   if (/(כמה|נשאר|מצב|תקציב|יתרה|הוצאתי|יעד)/.test(m)) {
     return { intent: "ask_question", merchant: "", amount: 0, date: "", question: m, reply: "" };
@@ -460,7 +660,7 @@ async function answerQuestion(uid, question, brand) {
   if (!data) return "עדיין אין נתונים בחשבון שלך. אפשר להתחיל לתעד הוצאות כאן 🙂";
   const summary = summaryText(data);
   try {
-    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const client = anthropicClient();
     const res = await client.messages.create({
       model: "claude-opus-4-8",
       max_tokens: 400,
@@ -477,7 +677,19 @@ async function answerQuestion(uid, question, brand) {
 }
 
 // ── Webhook ──────────────────────────────────────────────────────────────────
-exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) => {
+// timeoutSeconds is raised from the 60s default purely as headroom, NOT as the
+// fix for the stall described on anthropicClient() — a longer ceiling only
+// postpones the same death. Bounding the model call is the fix; this removes the
+// cliff behind it, and costs nothing, since billing follows actual runtime and
+// not the ceiling. The dedup guard means a Meta retry that arrives while a slow
+// first attempt is still running exits immediately instead of double-processing.
+//
+// 300 rather than 120 because the bounded calls are not the whole story: the
+// Firestore reads and transactions in this handler are still unbounded, and the
+// client library's own per-RPC deadline is 300s (600s across its retries). Until
+// those are bounded too, a generous ceiling is what keeps a slow-but-alive
+// instance finishing its reply instead of dying with the dedup already written.
+exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS, timeoutSeconds: 300 }, async (req, res) => {
   // Meta subscription verification handshake.
   if (req.method === "GET") {
     const mode = req.query["hub.mode"];
@@ -496,7 +708,13 @@ exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) 
     return res.sendStatus(403);
   }
 
-  // Always ack fast so Meta doesn't retry; process best-effort.
+  // Every exit path below returns 200, the error catch included, so a bug on our
+  // side never turns into a Meta retry storm.
+  //
+  // ⚠️ The ack is NOT early, despite what this comment used to claim: the 200 is
+  // sent only after the whole message has been processed. That is exactly why
+  // the model call has to be bounded (see anthropicClient()) — with the ack at
+  // the end, anything that outlives the instance means no ack at all.
   try {
     const change = req.body?.entry?.[0]?.changes?.[0];
     const value = change?.value;
@@ -504,14 +722,68 @@ exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) 
     // Future per-firm routing key (white-label). Logged now, mapped in Phase 5.
     const phoneNumberId = value?.metadata?.phone_number_id;
 
-    if (!msg || msg.type !== "text") return res.sendStatus(200);
+    if (!msg) return res.sendStatus(200);
+    // No id means nothing to dedup on. Interpolating `undefined` below would
+    // write `_seen_undefined` once and then swallow every later id-less message
+    // as a duplicate, forever. Every type Meta documents carries an id, so this
+    // is a guard against a shape we have not seen, not a known path.
+    if (!msg.id) return res.sendStatus(200);
     const phone = normalizePhone(msg.from);
     const body = (msg.text?.body || "").trim();
 
-    // Dedup: Meta retries the same message id.
+    // Silent types exit BEFORE the dedup write. They produce no reply, so there
+    // is nothing to deduplicate, and a `_seen_` doc carries no expiry — writing
+    // one per 👍 would grow a collection that nothing prunes (Firestore TTL is
+    // still off, see the known-debts ledger).
+    if (SILENT_MSG_TYPES.has(msg.type)) return res.sendStatus(200);
+
+    // Dedup: Meta retries the same message id. This now runs BEFORE the message
+    // type is checked, because a non-text message gets an answer — with the
+    // check first, a retried voice note would be answered twice.
     const seenRef = db().collection("clientBot").doc(`_seen_${msg.id}`);
     if ((await seenRef.get()).exists) return res.sendStatus(200);
     await seenRef.set({ at: FieldValue.serverTimestamp() });
+
+    // Anything we cannot read gets a reply naming what it was. No AI call and
+    // no AI quota is consumed here: this path burns no model tokens, so charging
+    // it against the firm's AI ceiling would let a client with a chatty
+    // microphone lock everyone else out of the real feature.
+    if (msg.type !== "text") {
+      // Brand and link state are best-effort on purpose. resolveLink() is the
+      // one helper here that throws on a failed read, and letting it take the
+      // reply down with it would reinstate the exact silence this branch exists
+      // to remove. Default branding beats hearing nothing.
+      let link = null;
+      let brand = { nameHe: DEFAULT_BOT_NAME, url: APP_URL };
+      try {
+        link = await resolveLink(phone);
+        if (link) brand = brandFromDoc(await loadPracticeDoc((await resolveTenancy(link.uid)).practiceId));
+      } catch (e) {
+        console.error("unreadable reply: link/brand lookup failed", e && e.message ? e.message : e);
+      }
+
+      // Flood brake, deliberately NOT the AI quota — no model call happens here,
+      // so this is a plain per-phone counter. One WhatsApp album of 8 photos
+      // arrives as 8 separate messages with 8 distinct ids, which dedup cannot
+      // merge, so without this the client gets 8 identical Hebrew replies (and
+      // the number's quality rating eats a burst of automated sends it does not
+      // need). Keyed on `phone`, not uid: an unlinked sender has no uid.
+      // consumeBotQuota fails OPEN, so a counter outage cannot silence the reply.
+      if (await consumeBotQuota(`wa-unreadable:${phone}`, 3, 10 * 60_000)) {
+        // `request_welcome` carries no user content at all — Meta emits it when a
+        // client opens the chat from a click-to-chat link, meaning "send your
+        // greeting". Apologising for an unreadable message they never sent would
+        // be the bot's first words to a brand-new client. It is gated on a Meta
+        // setting that may be off today; this is correct the day it is enabled.
+        const reply = msg.type === "request_welcome"
+          ? (link
+            ? helpText(brand)
+            : `היי 👋 כדי להתחבר לחשבון שלך: ${LINK_INSTRUCTIONS}\n${brand.url}`)
+          : unreadableText(msg.type, brand, Boolean(link));
+        await sendText(msg.from, reply);
+      }
+      return res.sendStatus(200);
+    }
 
     // A valid link code re-binds the phone on ANY message — even an already-linked
     // one — so a client whose token died can reconnect. (Otherwise the bot bricks:
@@ -533,7 +805,7 @@ exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) 
     if (!link) {
       // No uid yet — there is no firm to brand this as. Generic by necessity.
       await sendText(msg.from,
-        `היי 👋 כדי להתחבר לחשבון שלך: פתח/י את האפליקציה, היכנס/י למסך "וואטסאפ", ושלח/י לי את הקוד שמופיע שם.\n${APP_URL}`);
+        `היי 👋 כדי להתחבר לחשבון שלך: ${LINK_INSTRUCTIONS}\n${APP_URL}`);
       return res.sendStatus(200);
     }
 
@@ -590,6 +862,16 @@ exports.clientBotWebhook = onRequest({ secrets: ALL_SECRETS }, async (req, res) 
     } catch (e) {
       console.error("clientBot understand failed, using heuristic", e && e.message ? e.message : e);
       parsed = heuristic(body, brand);
+    }
+
+    // A structured output truncated by the token budget, and a model refusal,
+    // both parse to `{}` — a 200 either way, so nothing throws and nothing above
+    // catches it. `intent` is then undefined and the final `else` turns the
+    // client's expense into a help message. Log it, because otherwise it is
+    // indistinguishable from a genuine "other" and the client just sees the bot
+    // ignore what they asked for.
+    if (!["log_expense", "ask_question", "help", "other"].includes(parsed.intent)) {
+      console.error("clientBot: unrecognized intent, falling back to help", JSON.stringify(parsed).slice(0, 200));
     }
 
     let reply;
