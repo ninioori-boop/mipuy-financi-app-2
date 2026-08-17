@@ -2,6 +2,7 @@ import { isAccountDeleted, DELETED_ACCOUNT_RESPONSE } from '@/lib/deletionTombst
 import { NextRequest, NextResponse } from 'next/server'
 import { FieldValue } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/lib/firebaseAdmin'
+import { invitedStatus } from '@/lib/requireInvited'
 import { verifyFirebaseToken } from '@/lib/verifyFirebaseToken'
 
 // firebase-admin needs the Node runtime.
@@ -56,9 +57,11 @@ export async function POST(req: NextRequest) {
   }
 
   let uid: string
+  let email: string | undefined
   try {
     const v = await verifyFirebaseToken(token)
     uid = v.uid
+    email = v.email
   } catch {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
@@ -69,6 +72,33 @@ export async function POST(req: NextRequest) {
   // orphan nobody can reach.
   if (await isAccountDeleted(uid)) {
     return NextResponse.json(DELETED_ACCOUNT_RESPONSE.body, { status: DELETED_ACCOUNT_RESPONSE.status })
+  }
+
+  // Account creation is NOT gated: `gateSignup` is a beforeUserCreated blocking
+  // function, those need Identity Platform, and this project runs plain Firebase
+  // Auth — so it has never run once. firestore.rules re-check the allowlist on
+  // every client-facing path, which is why an uninvited account sees nothing.
+  // This route was the gap in that story: the one admin-SDK write (rules do not
+  // apply) that asked only whether the account was DELETED, never whether it was
+  // ever INVITED. A stranger who signed up could POST a portfolio-shaped
+  // document into users/{uid}, and /revoke deliberately leaves the account alive
+  // with its allowlist entry removed.
+  //
+  // ⚠️ Fails OPEN on an unverifiable answer — the deliberate opposite of
+  // /api/learn and isInvited(), which fail closed. This is the tab-close flush
+  // for every paying client's portfolio and the caller is a fire-and-forget
+  // beacon that never reads the response, so collapsing "I could not check" into
+  // "not invited" would refuse real saves with no error surfaced anywhere. Only
+  // an explicit `false` (the address resolved and is not on the allowlist)
+  // refuses. The open direction is bounded: the rules still deny an uninvited
+  // account every read, so the worst case is a document nobody can reach.
+  const invited = await invitedStatus(uid, email ?? null)
+  if (invited === false) {
+    console.warn(`[save-snapshot] uid=${uid} refused — not on the allowlist`)
+    return NextResponse.json({ error: 'not allowed' }, { status: 403 })
+  }
+  if (invited === null) {
+    console.warn(`[save-snapshot] uid=${uid} allowlist unverifiable — allowing the save`)
   }
 
   try {

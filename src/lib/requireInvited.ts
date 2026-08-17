@@ -15,9 +15,11 @@ import { getAdminDb, getAdminAuth } from '@/lib/firebaseAdmin'
  *
  * `firestore.rules` re-check the allowlist on the client-facing data paths
  * (users/**, sections, versions, intake, shared/learnedDB), which is why an
- * uninvited account sees nothing. Note the exception: `/api/save-snapshot`
- * writes through the admin SDK and checks only the deletion tombstone, so it
- * does NOT enforce the allowlist today.
+ * uninvited account sees nothing. `/api/save-snapshot` — the one admin-SDK write
+ * that rules do not cover — enforces it too since 2026-08-17, but through
+ * `invitedStatus` rather than `isInvited`: it is the tab-close flush for every
+ * client's portfolio, so it refuses only an explicit `false` and lets a `null`
+ * through. See the comment on that route for why the direction is inverted.
  *
  * Same bar `/api/learn` already applies, and the same reason: /revoke removes
  * the allowlist entry and deliberately leaves the account alive.

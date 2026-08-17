@@ -18,11 +18,11 @@ export const runtime = 'nodejs'
  * that state for 90 minutes.
  *
  * This is a COURTESY, not the control: the enforcement is firestore.rules on
- * the client-facing data paths and `isInvited()` on the paid AI routes. Anyone
- * can skip a client-side check; there is (almost) nothing behind it to reach —
- * `/api/save-snapshot` is the one admin-SDK write that does not check the
- * allowlist, so an uninvited account can still POST a portfolio it will never
- * be allowed to read back.
+ * the client-facing data paths, `isInvited()` on the paid AI routes, and
+ * `invitedStatus` on `/api/save-snapshot` (the one admin-SDK write rules do not
+ * cover — it refuses an explicit `false` only, so a tab-close flush is never
+ * lost to an unverifiable answer). Anyone can skip a client-side check; there is
+ * nothing behind this one to reach.
  */
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization') ?? ''
