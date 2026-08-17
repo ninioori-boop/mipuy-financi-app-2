@@ -158,7 +158,19 @@ export interface ProductLink {
   /** The declared product, or null when the charge matches nothing declared. */
   product:  DeclaredProduct | null
   deposit:  SavingsDeposit
+  /**
+   * Two declared products claim this charge equally well.
+   *
+   * 🔴 Reported instead of resolved. Guessing here is worse than not matching:
+   * it would move a pension contribution into a money-market fund and leave the
+   * pension reading zero, and every downstream number would still add up.
+   */
+  ambiguous: boolean
 }
+
+/** The provider as a comparable token. */
+const provKey = (p: DeclaredProduct) =>
+  normalizeForLookup(p.provider) || p.provider.toLowerCase().trim()
 
 /**
  * Which declared product each recurring purchase is feeding.
@@ -179,31 +191,55 @@ export interface ProductLink {
  * providers do. A product with no provider written simply does not match, which
  * is the honest outcome: it leaves the advisor the same decision they have today
  * rather than inventing a link.
+ *
+ * 🔴 THE LONGEST provider wins, and that is not a tie-breaker — it is the whole
+ * mechanism for a house that holds more than one product. Ori, 2026-08-17:
+ * "אלטשולר שחם גמל זה ההפקדה לפנסיה... ואלטשולר שחם בלי גמל זה קרן כספית".
+ * Both charges contain "אלטשולר שחם", so a first-match-wins lookup files a
+ * ₪506 pension contribution into a money-market fund and leaves the pension at
+ * zero — with every total still adding up perfectly.
  */
 export function linkDepositsToProducts(
   deposits: SavingsDeposit[],
   products: DeclaredProduct[],
 ): ProductLink[] {
-  const named = products.filter(p => p.provider.trim())
+  // A provider under three characters is a substring wildcard over the whole
+  // statement, the same trap short keys are in the learned pool.
+  const named = products.filter(p => provKey(p).length >= 3)
+
   return deposits.map(deposit => {
     const key = normalizeForLookup(deposit.name) || deposit.name.toLowerCase()
-    const product = named.find(p => {
-      const prov = normalizeForLookup(p.provider) || p.provider.toLowerCase().trim()
-      return prov.length >= 3 && key.includes(prov)
-    }) ?? null
-    return { product, deposit }
+    const matches = named.filter(p => key.includes(provKey(p)))
+    if (!matches.length) return { product: null, deposit, ambiguous: false }
+
+    const best = matches.reduce((a, b) => (provKey(b).length > provKey(a).length ? b : a))
+    // Equally specific and both matching means the questionnaire cannot tell
+    // them apart either. Say so rather than pick one.
+    const tied = matches.filter(p => provKey(p).length === provKey(best).length)
+    return tied.length > 1
+      ? { product: null, deposit, ambiguous: true }
+      : { product: best, deposit, ambiguous: false }
   })
 }
 
 export function formatProductLinks(links: ProductLink[]): string[] {
-  const matched = links.filter(l => l.product)
-  if (!matched.length) return []
-  const out = [
-    '🔴 ההפקדה והצבירה שלמטה הן **אותו מוצר**, כי הלקוח מסר איפה הוא מנוהל.',
-    'שורה אחת ב‑savings לכל זוג: accumulated מהשאלון, monthlyContribution מהעו"ש. אל תיצור שתי שורות.',
-  ]
-  for (const { product, deposit } of matched) {
-    out.push(`  - ${product!.name} (${product!.provider}): צבירה ${Math.round(product!.amount)}, הפקדה ${Math.round(deposit.monthly)} לחודש (מהחיוב "${deposit.name}")`)
+  const matched   = links.filter(l => l.product)
+  const ambiguous = links.filter(l => l.ambiguous)
+  if (!matched.length && !ambiguous.length) return []
+
+  const out: string[] = []
+  if (matched.length) {
+    out.push('🔴 ההפקדה והצבירה שלמטה הן **אותו מוצר**, כי הלקוח מסר איפה הוא מנוהל.')
+    out.push('שורה אחת ב‑savings לכל זוג: accumulated מהשאלון, monthlyContribution מהעו"ש. אל תיצור שתי שורות.')
+    for (const { product, deposit } of matched) {
+      out.push(`  - ${product!.name} (${product!.provider}): צבירה ${Math.round(product!.amount)}, הפקדה ${Math.round(deposit.monthly)} לחודש (מהחיוב "${deposit.name}")`)
+    }
+  }
+  if (ambiguous.length) {
+    out.push('⚠️ החיובים הבאים מתאימים ליותר ממוצר מוצהר אחד, ולכן לא שויכו. השאר אותם כשורה נפרדת ב‑savings וציין ב‑assessment שצריך לברר לאיזה מוצר הם שייכים:')
+    for (const { deposit } of ambiguous) {
+      out.push(`  - ${deposit.name}: ${Math.round(deposit.monthly)} לחודש`)
+    }
   }
   return out
 }

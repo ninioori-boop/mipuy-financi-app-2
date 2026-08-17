@@ -337,6 +337,49 @@ describe('linkDepositsToProducts', () => {
     expect(text).toContain('2773')
   })
 
+  // 🔴 Ori, 2026-08-17: "אלטשולר שחם גמל זה ההפקדה לפנסיה... ואלטשולר שחם בלי
+  // גמל זה קרן כספית". Both charges contain "אלטשולר שחם", so first-match-wins
+  // files a pension contribution into a money-market fund and leaves the
+  // pension reading zero — with every total still adding up perfectly.
+  it('tells two products at the same house apart by the longer provider', () => {
+    const products = [
+      { name: 'קרן כספית', provider: 'אלטשולר שחם',     amount: 0 },
+      { name: 'קרן פנסיה', provider: 'אלטשולר שחם גמל', amount: 56000 },
+    ]
+    const links = linkDepositsToProducts(
+      [dep('אלטשולר שחם גמל', 506), dep('קניה/אלטשולר שחם/טלפון ני', 2570)],
+      products,
+    )
+    expect(links[0].product?.name).toBe('קרן פנסיה')
+    expect(links[1].product?.name).toBe('קרן כספית')
+  })
+
+  // The order the products happen to sit in must not decide the answer.
+  it('is not sensitive to the order the products were entered', () => {
+    const reversed = [
+      { name: 'קרן פנסיה', provider: 'אלטשולר שחם גמל', amount: 56000 },
+      { name: 'קרן כספית', provider: 'אלטשולר שחם',     amount: 0 },
+    ]
+    expect(linkDepositsToProducts([dep('אלטשולר שחם גמל', 506)], reversed)[0].product?.name)
+      .toBe('קרן פנסיה')
+  })
+
+  // When the questionnaire genuinely cannot tell them apart, neither can we.
+  it('reports an ambiguous charge instead of picking a side', () => {
+    const links = linkDepositsToProducts(
+      [dep('קניה/מגדל/טלפון ני', 967)],
+      [
+        { name: 'קרן כספית',    provider: 'מגדל', amount: 0 },
+        { name: 'קרן השתלמות', provider: 'מגדל', amount: 1500 },
+      ],
+    )
+    expect(links[0].product).toBeNull()
+    expect(links[0].ambiguous).toBe(true)
+    const text = formatProductLinks(links).join('\n')
+    expect(text).toContain('מתאימים ליותר ממוצר מוצהר אחד')
+    expect(text).toContain('צריך לברר')
+  })
+
   // A two-character provider would match half the statement by substring.
   it('ignores a provider too short to identify anything', () => {
     const links = linkDepositsToProducts(
