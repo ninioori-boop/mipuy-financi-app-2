@@ -376,6 +376,14 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* guard is best-effort — never blocks a capture */ }
 
+  // ── the household's own document, read ONCE ──
+  //
+  // Read here rather than further down, because two things need it and both
+  // used to do without: the category lookup below (which knew only the shared
+  // pool) and the budget alert (which read this same document a second time).
+  // Same cost as before, one read instead of two.
+  const userData = await loadUserData(db, uid)
+
   let category: string
   let aiResolved: string | null = null   // set only when the AI actually named a merchant
   if (typeof catOverride === 'string' && ALL_CATEGORIES.includes(catOverride)) {
@@ -383,7 +391,17 @@ export async function POST(req: NextRequest) {
   } else if (isTransfer) {
     category = 'ביט ללא מעקב'
   } else {
-    const learnedDB = await loadSharedLearned(db)
+    // 🔴 The household's own corrections OUTRANK the shared pool, which is the
+    // precedence every other surface uses (mergedLearnedDB is
+    // {...shared, ...own}). This route was the single place that inverted it by
+    // never loading the personal dict at all — so a client could correct a
+    // merchant in the app, watch every screen respect it, and have the next
+    // charge captured from their phone come back with the old answer. Forever:
+    // correcting again changed nothing here, so the loop never closed.
+    //
+    // No cross-client risk by construction — this is one household's statement
+    // about its own charges.
+    const learnedDB = { ...await loadSharedLearned(db), ...ownLearned(userData) }
     category = categorize(cleanMerchant, learnedDB)
     if (category === 'שונות') {
       // This is an AI call too, on a route authenticated by a never-expiring
@@ -453,7 +471,7 @@ export async function POST(req: NextRequest) {
   // (no FCM). Best-effort — ingest already succeeded; never fails the request.
   // NOTE: `category` must stay the FIRST "category" key in the JSON — old APKs
   // extract it by scanning for the first occurrence.
-  const notify = await buildNotify(db, uid, category, amt, cleanMerchant, dateStr.slice(0, 7),
+  const notify = await buildNotify(userData, category, amt, cleanMerchant, dateStr.slice(0, 7),
     foreignCurrency ? { amount: foreignAmount!, currency: foreignCurrency } : null)
 
   // Branded Web-Push to the user's installed apps (iOS PWA / browsers) — the
@@ -478,7 +496,8 @@ export async function POST(req: NextRequest) {
  * it on the high-importance channel (heads-up) instead of the silent one.
  */
 async function buildNotify(
-  db: Firestore, uid: string, category: string, amount: number, merchant: string, ym: string,
+  userData: Record<string, unknown> | null,
+  category: string, amount: number, merchant: string, ym: string,
   foreign?: { amount: number; currency: Foreign } | null,
 ): Promise<{ title: string; body: string; text: string; warn: boolean }> {
   const nis = (n: number) => '₪' + Math.round(n).toLocaleString('he-IL')
@@ -495,8 +514,9 @@ async function buildNotify(
     : `קוטלג ל${category} ✓`
   let warn = false
   try {
-    const snap = await db.collection('users').doc(uid).get()
-    const data = snap.exists ? snap.data()?.data : null
+    // The document is now read once, before categorization, and handed in.
+    // Reading it again here was the same ~900KB fetched twice per capture.
+    const data = userData
     if (data && typeof data === 'object') {
       const d = data as { categoryBudgets?: { budgets?: Record<string, unknown> }; expenseLog?: { entries?: unknown[] } }
       const rawBudget = d.categoryBudgets?.budgets?.[category]
@@ -568,6 +588,44 @@ function merchantFromRaw(raw: string, matched: string): string {
 // mergedLearnedDB: a rail carries a different payee on every charge, so a rail
 // entry that ever slipped into the pool (the 2026-07 Bit incident) must not
 // categorize ingested charges — this was the one read path that didn't filter.
+/**
+ * The household's saved portfolio document, or null.
+ *
+ * Fails to null rather than throwing: a capture must land even when this read
+ * does not. Losing it costs the personal categorization override and the budget
+ * alert; losing the charge is not recoverable.
+ */
+async function loadUserData(db: Firestore, uid: string): Promise<Record<string, unknown> | null> {
+  try {
+    const snap = await db.collection('users').doc(uid).get()
+    const data = snap.exists ? snap.data()?.data : null
+    return data && typeof data === 'object' ? data as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * This account's own merchant→category corrections.
+ *
+ * ⚠️ Payment-rail keys are dropped here too, exactly as loadSharedLearned drops
+ * them and for the same reason. Filtering only the shared side would be worse
+ * than filtering neither: a stale personal "bit → אוכל בחוץ" (the 2026-07
+ * incident left one) is neutralized on every screen by mergedLearnedDB, and
+ * would win here — where it outranks the shared pool — on every captured Bit
+ * transfer.
+ */
+export function ownLearned(userData: Record<string, unknown> | null): Record<string, string> {
+  const credit = (userData?.credit ?? null) as { learnedDB?: unknown } | null
+  const raw = credit?.learnedDB
+  if (!raw || typeof raw !== 'object') return {}
+  const clean: Record<string, string> = {}
+  for (const [key, cat] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof cat === 'string' && cat && !isPaymentRailKey(key)) clean[key] = cat
+  }
+  return clean
+}
+
 async function loadSharedLearned(db: Firestore): Promise<Record<string, string>> {
   try {
     const snap = await db.collection('shared').doc('learnedDB').get()
