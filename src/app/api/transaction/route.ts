@@ -282,7 +282,7 @@ export async function POST(req: NextRequest) {
       amt = ext.amount
       // An explicit field still outranks whatever the free text looks like.
       if (!statedCurrency) curr = ext.currency
-      cleanMerchant = merchantFromRaw(cleanMerchant, ext.matched)
+      cleanMerchant = merchantFromRaw(cleanMerchant, ext.matched, ext.index)
     }
   }
 
@@ -571,10 +571,22 @@ function parseAmountLoose(v: unknown): number {
  *
  * `matched` is the span extractMoney() consumed — the number together with its
  * currency symbol — so "£45.00 Tesco" leaves "Tesco", not "£ Tesco".
+ *
+ * 🔴 Cut by INDEX, never by String.replace(matched). replace() removes the first
+ * textual occurrence, which is not necessarily the one extractMoney chose: for
+ * "12.345 חנות 12.34" the amount is 12.34 but replace() eats the head of the
+ * 12.345 and leaves the merchant as "5 חנות 12.34". Until 2026-08-17 the code
+ * was accidentally immune, because the amount was always the FIRST number in
+ * the string; preferring the agorot-shaped number removed that guarantee. A
+ * mangled merchant is not cosmetic — it misroutes the category, poisons the
+ * dedup fingerprint, and can reach shared/aiSuggestions, i.e. other households.
  */
-function merchantFromRaw(raw: string, matched: string): string {
-  const merchant = raw
-    .replace(matched, ' ')
+export function merchantFromRaw(raw: string, matched: string, index?: number): string {
+  const at = index ?? raw.indexOf(matched)
+  const withoutAmount = at < 0
+    ? raw
+    : raw.slice(0, at) + ' ' + raw.slice(at + matched.length)
+  const merchant = withoutAmount
     .replace(/\s+/g, ' ')
     .replace(/^[\s\-–—·,.:;]+|[\s\-–—·,.:;]+$/g, '')
     .trim()

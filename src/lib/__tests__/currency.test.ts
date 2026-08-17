@@ -113,6 +113,55 @@ describe('extractMoney', () => {
     expect('£45.00 Tesco'.replace(m.matched, '').trim()).toBe('Tesco')
   })
 
+  // 🔴 A real ₪19.00 charge landed as ₪119 (2026-08-17). Merchant "Ilans
+  // Terminal 1", shortcut sent name-then-amount, and taking the first number
+  // picked up the name's digit. Any merchant with a digit was affected.
+  describe('a digit inside the merchant name must not become the amount', () => {
+    it('prefers the figure written with agorot, wherever it sits', () => {
+      expect(extractMoney('Ilans Terminal 1 19.00')).toMatchObject({ amount: 19 })
+      expect(extractMoney('AM:PM 24 45.90')).toMatchObject({ amount: 45.9 })
+      expect(extractMoney('סניף 7 32.50')).toMatchObject({ amount: 32.5 })
+      expect(extractMoney('רמי לוי 6 שופרסל 128.40')).toMatchObject({ amount: 128.4 })
+    })
+
+    it('leaves the merchant name intact once the amount is stripped', () => {
+      const m = extractMoney('AM:PM 24 45.90')!
+      expect('AM:PM 24 45.90'.replace(m.matched, '').trim()).toBe('AM:PM 24')
+    })
+
+    it('still reads the official shortcut order, amount first', () => {
+      expect(extractMoney('19.00 Ilans Terminal 1')).toMatchObject({ amount: 19 })
+      expect(extractMoney('45.90 AM:PM 24')).toMatchObject({ amount: 45.9 })
+    })
+
+    it('cannot rescue digits that genuinely merged, and does not pretend to', () => {
+      // "Ilans Terminal 1" + "19.00" with no space between them. The 1 and the
+      // 19.00 are one token by the time we see it; the fix is the shortcut.
+      expect(extractMoney('Ilans Terminal 119.00')).toMatchObject({ amount: 119 })
+    })
+
+    it('keeps the first-number fallback when nothing carries agorot', () => {
+      expect(extractMoney('סניף 7 מכולת 32')).toMatchObject({ amount: 7 })
+    })
+
+    // 🔴 Found by review before this shipped. "17.08.26" matches as "17.08", so
+    // preferring the agorot shape would have read a date as the charge — a far
+    // worse failure than the ₪119 that started this, because ₪17.08 looks like a
+    // real amount and nobody re-checks it.
+    it('does not mistake a dotted date or time for the amount', () => {
+      expect(extractMoney('19 Ilans Terminal 1 17.08.26')).toMatchObject({ amount: 19 })
+      expect(extractMoney('50 חנות 17.08.26 בשעה 14.30.05')).toMatchObject({ amount: 50 })
+      // A genuine amount still wins over the date beside it.
+      expect(extractMoney('חנות 17.08.26 45.90')).toMatchObject({ amount: 45.9 })
+    })
+
+    // Committing to a single candidate must not turn a capture the old code
+    // recorded into a refusal.
+    it('skips an unusable candidate instead of failing the whole capture', () => {
+      expect(extractMoney('45 חנות 0.00')).toMatchObject({ amount: 45 })
+    })
+  })
+
   it('returns null when there is no number at all', () => {
     expect(extractMoney('עסקה נדחתה')).toBeNull()
     expect(extractMoney('')).toBeNull()

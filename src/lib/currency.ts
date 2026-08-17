@@ -150,29 +150,83 @@ export function mentionedCurrency(text: string): CurrencyCode | null {
  *      The card's number beats any rate we could look up, so prefer it. This
  *      also makes the change a no-op for every shekel capture that works today.
  *   2. Foreign-anchored — the server converts it (see fxRates.ts).
- *   3. Bare first number, assumed ILS. Unchanged last-resort behaviour: a
- *      Hebrew notification with no symbol at all is a shekel charge.
+ *   3. Bare number, assumed ILS — a Hebrew notification with no symbol at all is
+ *      a shekel charge. Among the bare numbers, one written with agorot wins:
+ *      see pickBareAmount.
  */
 export function extractMoney(
   raw: string,
-): { amount: number; currency: CurrencyCode; matched: string } | null {
+): { amount: number; currency: CurrencyCode; matched: string; index: number } | null {
   for (const currency of SUPPORTED_CURRENCIES) {
     for (const re of patternsFor(currency)) {
       const m = raw.match(re)
       if (!m) continue
       const amount = toNumber(m[1])
       // `matched` spans the number AND its symbol, so a caller building a
-      // merchant name from the remainder removes both.
-      if (Number.isFinite(amount) && amount > 0) return { amount, currency, matched: m[0] }
+      // merchant name from the remainder removes both. `index` says WHERE, so
+      // the caller cuts that span and not an identical-looking one earlier in
+      // the string — see merchantFromRaw.
+      if (Number.isFinite(amount) && amount > 0) {
+        return { amount, currency, matched: m[0], index: m.index ?? raw.indexOf(m[0]) }
+      }
     }
   }
-  const bare = raw.match(new RegExp(NUMBER))
+  const bare = pickBareAmount(raw)
   if (!bare) return null
-  const amount = toNumber(bare[0])
-  if (!Number.isFinite(amount) || amount <= 0) return null
   // No symbol touches the number — but the sentence may still name the
   // currency ("עסקה בסך 45.00" + "פאונד" elsewhere). See mentionedCurrency().
-  return { amount, currency: mentionedCurrency(raw) ?? 'ILS', matched: bare[0] }
+  return {
+    amount: toNumber(bare.text),
+    currency: mentionedCurrency(raw) ?? 'ILS',
+    matched: bare.text,
+    index: bare.index,
+  }
+}
+
+/**
+ * Which bare number in a raw capture is the money.
+ *
+ * 🔴 A real ₪19.00 charge was recorded as ₪119 on 2026-08-17. The merchant was
+ * "Ilans Terminal 1" and the shortcut on that phone put the name BEFORE the
+ * amount, so the text arrived as "Ilans Terminal 119.00" — the name's trailing
+ * digit fused with the amount. Taking simply the first number also turned
+ * "AM:PM 24 45.90" into 24 and "סניף 7 32.50" into 7: any merchant whose name
+ * contains a digit corrupted the amount, silently, and overstating spending is
+ * the worst direction for that to fail in.
+ *
+ * A Wallet amount always carries agorot, and a digit inside a business name
+ * almost never does. So: prefer the first number written with exactly two
+ * decimals; only if there is none fall back to the first number, which is the
+ * pre-2026-08-17 behaviour and still correct for the official shortcut (it puts
+ * the amount first).
+ *
+ * ⚠️ Two candidates are refused outright, both found by review before this
+ * shipped:
+ *   - A number that continues into another dotted group. "17.08.26" matches as
+ *     "17.08", so a capture carrying a date ("19 חנות 17.08.26") would have read
+ *     as ₪17.08 instead of ₪19. That is a WORSE failure than the ₪119 this fix
+ *     was written for: 119 looks obviously wrong, 17.08 looks like a real charge
+ *     and nobody double-checks it.
+ *   - A candidate that is not a usable amount (0, or unparseable). Without this
+ *     the function would commit to it and extractMoney would refuse the whole
+ *     capture, where the old code went on to record the next number.
+ *
+ * What this cannot fix: "Ilans Terminal 119.00", where the digits genuinely
+ * merged into one token. No parser recovers that — the shortcut has to put the
+ * amount first, which the shipped one does.
+ */
+function pickBareAmount(raw: string): { text: string; index: number } | null {
+  const all = [...raw.matchAll(new RegExp(NUMBER, 'g'))]
+    .map(m => ({ text: m[0], index: m.index ?? 0 }))
+    .filter(c => toNumber(c.text) > 0)
+  if (!all.length) return null
+
+  const isMoneyShaped = (c: { text: string; index: number }) =>
+    /\.[0-9]{2}$/.test(c.text)
+    // Not the head of a dotted date or time: "17.08" inside "17.08.26".
+    && !/^\.[0-9]/.test(raw.slice(c.index + c.text.length))
+
+  return all.find(isMoneyShaped) ?? all[0]
 }
 
 /** "£45" / "₪212" — no decimals, matching how the app renders money everywhere else. */
