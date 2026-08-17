@@ -63,6 +63,12 @@ WHAT THIS APP IS
 A personal budgeting app used by a financial coach and their clients in Israel.
 The interface is Hebrew and right-to-left.
 
+A 25-SECOND VIDEO OF THE SETUP
+https://app.orimipuy.com/ios-setup.mp4
+Silent screen recording of the whole flow on a real device: import the shortcut,
+create the Wallet automation, choose it, done. Worth watching first — it is
+faster than reading the rest of this note.
+
 THE NATIVE FEATURE, AND HOW TO TEST IT WITHOUT SPENDING MONEY
 The point of this app is that it records purchases by itself. It exposes an
 App Intent named "רישום הוצאה" (Log Expense) that the user attaches to a Wallet
@@ -102,15 +108,21 @@ Or Ninio, ninioori@gmail.com
 
 ---
 
-## Two gaps to close before submitting
+## The two gaps, both closed 2026-08-15
 
-1. **There is no privacy policy page.** External testing and the App Store both
-   require a URL. Nothing exists at `app.orimipuy.com/privacy` today. It has to
-   state what is collected (expenses, income, balances), that it is stored in
-   Firebase, that it is never sold, and how to delete an account (the app has
-   full self-service deletion already — see `project_account_deletion`).
+1. **Privacy policy.** `https://app.orimipuy.com/privacy` is live (200) and its
+   section 9 now covers the iPhone explicitly: the app reads no notifications,
+   has no Wallet access, generates its notifications on-device, and deleting the
+   Shortcuts automation stops capture. That URL goes in the Test Information
+   screen and in the App Store listing.
 
-2. **`demo@orimipuy.com` is empty.** It was created for Google Play's app-access
-   review and has no data in it. A reviewer signing in sees blank screens and
-   may read that as an incomplete app. Seed it with a month of plausible
-   expenses, income and a budget before submitting.
+2. **`demo@orimipuy.com`.** Seeded surgically (32 expense-log entries across a
+   month, 8 budgets), so a reviewer signing in lands on a populated screen
+   instead of a blank one. Everything else in the document was left untouched
+   and verified afterwards.
+
+## Which build to submit
+
+**1.0.0 (19)** — it is the first build with the floating settings gear removed;
+in (18) the gear sits on top of the web page's own menu button, which a reviewer
+would reasonably report as a layout defect.
