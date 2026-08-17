@@ -35,7 +35,10 @@ const DEPOSITS = [
 ]
 
 const empty = { deposits: [], monthlyRecurring: 0, oneOffTotal: 0 }
-const noSplit = { explained: [], unexplained: [], oneOff: [], transfers: [], unexplainedMonthly: 0 }
+const noSplit = {
+  explained: [], unexplained: [], oneOff: [], transfers: [],
+  unexplainedMonthly: 0, declaredMonthly: 0, depositsMonthly: 0, declaredCovered: false,
+}
 
 describe('FlowsPanel', () => {
   afterEach(() => cleanup())

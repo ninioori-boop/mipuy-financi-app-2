@@ -145,6 +145,69 @@ export function formatSavingsDeposits(flow: SavingsFlow, months: number): string
   return out
 }
 
+// ── linking a deposit to the product it feeds ──
+
+export interface DeclaredProduct {
+  name:     string
+  provider: string
+  /** Accumulated value, as declared. */
+  amount:   number
+}
+
+export interface ProductLink {
+  /** The declared product, or null when the charge matches nothing declared. */
+  product:  DeclaredProduct | null
+  deposit:  SavingsDeposit
+}
+
+/**
+ * Which declared product each recurring purchase is feeding.
+ *
+ * Ori asked exactly the right question (2026-08-17): "אולי אם הייתי רושם איפה
+ * נמצא כל נכס המערכת הייתה מצליחה לזהות?" — and the answer is yes, which is why
+ * the questionnaire now asks where each product is held.
+ *
+ * Without it, his run produced eleven savings rows for what is really a handful
+ * of products: five rows carrying a monthly contribution and no balance (built
+ * from the bank descriptors, which DO name the provider), and six carrying a
+ * balance and no contribution (built from the questionnaire, which did not).
+ * Nothing could connect "קניה/( קסם אקטיב/טלפון ני" to "קרן השתלמות" because
+ * the two strings share nothing.
+ *
+ * ⚠️ Matched on the PROVIDER, not the product name. A person writes
+ * "קרן השתלמות" and the bank writes "קסם אקטיב" — the names never agree and the
+ * providers do. A product with no provider written simply does not match, which
+ * is the honest outcome: it leaves the advisor the same decision they have today
+ * rather than inventing a link.
+ */
+export function linkDepositsToProducts(
+  deposits: SavingsDeposit[],
+  products: DeclaredProduct[],
+): ProductLink[] {
+  const named = products.filter(p => p.provider.trim())
+  return deposits.map(deposit => {
+    const key = normalizeForLookup(deposit.name) || deposit.name.toLowerCase()
+    const product = named.find(p => {
+      const prov = normalizeForLookup(p.provider) || p.provider.toLowerCase().trim()
+      return prov.length >= 3 && key.includes(prov)
+    }) ?? null
+    return { product, deposit }
+  })
+}
+
+export function formatProductLinks(links: ProductLink[]): string[] {
+  const matched = links.filter(l => l.product)
+  if (!matched.length) return []
+  const out = [
+    '🔴 ההפקדה והצבירה שלמטה הן **אותו מוצר**, כי הלקוח מסר איפה הוא מנוהל.',
+    'שורה אחת ב‑savings לכל זוג: accumulated מהשאלון, monthlyContribution מהעו"ש. אל תיצור שתי שורות.',
+  ]
+  for (const { product, deposit } of matched) {
+    out.push(`  - ${product!.name} (${product!.provider}): צבירה ${Math.round(product!.amount)}, הפקדה ${Math.round(deposit.monthly)} לחודש (מהחיוב "${deposit.name}")`)
+  }
+  return out
+}
+
 // ── money arriving that nobody declared ──
 
 export interface DepositLine {
@@ -176,6 +239,21 @@ export interface DepositSplit {
   transfers:   DepositLine[]
   /** Monthly total of the unexplained recurring ones. */
   unexplainedMonthly: number
+  /** What the questionnaire declared, per month. */
+  declaredMonthly: number
+  /** What actually arrived, per month. The ceiling on any income figure. */
+  depositsMonthly: number
+  /**
+   * The deposits already cover the declared figure.
+   *
+   * 🔴 The correction that matters (Ori, 2026-08-17): "מי שמצהיר על הכנסה
+   * כנראה מדווח כבר על ההכנסות שהמערכת תראה בעו״ש". A self-employed client's
+   * declared total arrives as MANY irregular client payments, so matching one
+   * deposit to one declared figure explains nothing and every payment looks
+   * like a new income source. On his run that produced ₪26,132 of monthly
+   * income against ₪23,106 of deposits — ₪3,026 a month the account never saw.
+   */
+  declaredCovered: boolean
 }
 
 /** Within this fraction of a declared figure, it is the same salary. */
@@ -250,9 +328,19 @@ export function classifyDeposits(
     else oneOff.push(c.line)
   }
 
+  const declaredMonthly = declared.reduce((s, d) => s + Math.max(0, d.monthly), 0)
+  const depositsMonthly = lines.reduce((s, l) => s + l.sum, 0) / m
+
   return {
     explained, unexplained, oneOff, transfers,
     unexplainedMonthly: unexplained.reduce((s, l) => s + l.monthly, 0),
+    declaredMonthly,
+    depositsMonthly,
+    // Deposits at or above the declared figure mean the declared money is
+    // already in this list, whatever the individual rows matched. That is the
+    // ordinary case for an employee AND for a self-employed client, and it is
+    // the case where adding anything on top invents income.
+    declaredCovered: declaredMonthly > 0 && depositsMonthly >= declaredMonthly,
   }
 }
 
@@ -289,23 +377,32 @@ function isOwnMoney(name: string): boolean {
 export function formatDepositSplit(split: DepositSplit, months: number): string[] {
   const m = Math.max(1, months)
   const out: string[] = [
-    '🔴 ההכנסה של המיפוי נמסרה בשאלון. הרשימה כאן היא ההפקדות שנצפו בפועל בעו"ש, והיא כבר מחולקת לשלוש.',
+    '🔴 **ההכנסה של המיפוי היא המספר שנמסר בשאלון, ותו לא.**',
+    `נמסר: ${Math.round(split.declaredMonthly)} לחודש. נכנס בפועל לעו"ש: ${Math.round(split.depositsMonthly)} לחודש.`,
+    `🔴 **תקרה מוחלטת: סך ה‑income במיפוי לא יעלה על ${Math.round(split.depositsMonthly)} לחודש.** כסף שלא נכנס לחשבון אינו הכנסה.`,
     `(כל הסכומים כאן הם ממוצע חודשי — סך ההפקדות חולק ב‑${m}. אל תחלק שוב.)`,
   ]
 
-  if (split.explained.length) {
-    out.push('הפקדות שתואמות את מה שנמסר בשאלון. **זה אותו כסף.** אל תוסיף אותן ל‑income ואל תסכם אותן עם המוצהר:')
-    for (const l of split.explained) out.push(`  - ${l.name}: ${Math.round(l.monthly)} לחודש (${l.count} הפקדות ב‑${l.months} חודשים)`)
+  if (split.declaredCovered) {
+    // The rule Ori stated, and the arithmetic that proves it: deposits are at
+    // least the declared figure, so the declared money is already inside this
+    // list. Adding rows from it counts the same money twice.
+    out.push('ההפקדות למטה **גדולות או שוות** למה שנמסר, כלומר הכסף שנמסר כבר נמצא ביניהן. אדם שמוסר הכנסה מוסר את הסך הכול שלו.')
+    out.push('לכן: **אל תוסיף אף שורה מהרשימה הזאת ל‑income.** מי שעצמאי מקבל את הכנסתו כהרבה תשלומים לא סדירים מלקוחות שונים, ולכן אף הפקדה בודדת לא "תתאים" למספר המוצהר, וזה לא אומר שהיא הכנסה נוספת.')
   }
 
-  if (split.unexplained.length) {
-    out.push(`🔴 הכנסה שנכנסה לחשבון ואינה מוסברת על ידי השאלון, ${Math.round(split.unexplainedMonthly)} לחודש. **הוסף כל שורה כאן ל‑income**, בנוסף למה שנמסר. זו לא כפילות: המספר שנמסר בשאלון לא כלל אותה.`)
-    for (const l of split.unexplained) out.push(`  - ${l.name}: ${Math.round(l.monthly)} לחודש (${l.count} הפקדות ב‑${l.months} מתוך ${m} חודשים)`)
-  }
-
-  if (split.oneOff.length) {
-    out.push('הפקדות שהופיעו בחודש אחד בלבד. כנראה חד־פעמיות ולא הכנסה חודשית. הזכר אותן ב‑assessment ואל תכניס אותן ל‑income בלי סיבה:')
-    for (const l of split.oneOff) out.push(`  - ${l.name}: ${Math.round(l.sum)} בסך הכל (${l.count} הפקדות)`)
+  const notable = [...split.unexplained, ...split.oneOff]
+    .filter(l => l.monthly >= 500)
+    .sort((a, b) => b.monthly - a.monthly)
+  if (notable.length) {
+    out.push('הפקדות בולטות שנצפו. **הן לרשימה ב‑assessment בלבד, לא לשורות income.** לכל אחת כתוב בהערכה אם היא חלק מההכנסה שנמסרה, מקור נוסף, או תקבול זמני:')
+    for (const l of notable) {
+      const when = l.months >= Math.ceil(m * 0.6)
+        ? `חוזרת ב‑${l.months} מתוך ${m} חודשים`
+        : `הופיעה ב‑${l.months} מתוך ${m} חודשים`
+      out.push(`  - ${l.name}: ${Math.round(l.monthly)} לחודש, ${when}`)
+    }
+    out.push('⚠️ הפקדה שחוזרת בדיוק לאורך כל החלון אינה בהכרח קבועה: מילואים, דמי לידה ודמי אבטלה נראים בדיוק כך, והם תקבול זמני שמחליף הכנסה ולא מתווסף לה. אם זה המקרה, אמור זאת ב‑assessment ואל תבנה עליו תקציב.')
   }
 
   if (split.transfers.length) {

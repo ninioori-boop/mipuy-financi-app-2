@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   detectSavingsDeposits, formatSavingsDeposits, classifyDeposits, formatDepositSplit,
+  linkDepositsToProducts, formatProductLinks,
 } from '@/lib/automapFlows'
 import { cleanDesc, hasInvisible } from '@/lib/automapText'
 
@@ -234,12 +235,114 @@ describe('classifyDeposits', () => {
     expect(s.transfers).toEqual([])
   })
 
-  it('tells the model to ADD the unexplained rather than swap it in', () => {
-    const text = formatDepositSplit(
-      classifyDeposits([salary, miluim], [{ name: 'בעל', monthly: 12000 }], 3), 3,
-    ).join('\n')
-    expect(text).toContain('אל תוסיף אותן ל‑income')     // about the explained ones
-    expect(text).toContain('**הוסף כל שורה כאן ל‑income**')
-    expect(text).toContain('בנוסף למה שנמסר')
+  // 🔴 The rule Ori corrected on 2026-08-17, and the arithmetic behind it.
+  //
+  // I had built this on the assumption that a declared income is one salary
+  // arriving as one deposit. For a SELF-EMPLOYED client the declared total
+  // arrives as many irregular client payments, so no single deposit ever
+  // "matches" — and the old instruction then told the model to add each of them
+  // as a new income source. On his real run that produced ₪26,132 of monthly
+  // income against ₪23,106 of deposits: ₪3,026 a month the account never saw.
+  //
+  // His rule: the declared figure governs, and total deposits are the ceiling.
+  it('never adds deposits on top of a declared income that they already contain', () => {
+    // A self-employed month: nothing matches 11,833 one-to-one.
+    const business = [
+      { name: 'לקוח א', sum: 18540, count: 3, months: 3 },
+      { name: 'לקוח ב', sum: 9900,  count: 2, months: 2 },
+      { name: 'ביטוח לאומי מילואים', sum: 23670, count: 4, months: 3 },
+    ]
+    const s = classifyDeposits(business, [{ name: 'עסק', monthly: 11833 }], 3)
+    expect(s.declaredCovered).toBe(true)
+    expect(Math.round(s.depositsMonthly)).toBe(17370)
+
+    const text = formatDepositSplit(s, 3).join('\n')
+    expect(text).toContain('אל תוסיף אף שורה מהרשימה הזאת ל‑income')
+    expect(text).not.toContain('הוסף כל שורה כאן ל‑income')
+    expect(text).toContain('לא לשורות income')
+  })
+
+  it('states the deposits as an absolute ceiling on the income figure', () => {
+    const s = classifyDeposits([salary], [{ name: 'בעל', monthly: 12000 }], 3)
+    const text = formatDepositSplit(s, 3).join('\n')
+    expect(text).toContain('תקרה מוחלטת')
+    expect(text).toContain('12000')                       // = 36000 / 3
+    expect(text).toContain('כסף שלא נכנס לחשבון אינו הכנסה')
+  })
+
+  // מילואים recurring across the whole window looks exactly like a permanent
+  // income and is not one. The model's own assessment said so on the real run,
+  // and it put them in income rows anyway.
+  it('warns that a deposit recurring all window may still be temporary', () => {
+    const s = classifyDeposits([salary, miluim], [{ name: 'בעל', monthly: 12000 }], 3)
+    const text = formatDepositSplit(s, 3).join('\n')
+    expect(text).toContain('מילואים')
+    expect(text).toContain('תקבול זמני')
+  })
+
+  it('does not claim coverage when the deposits fall short of what was declared', () => {
+    const s = classifyDeposits([{ name: 'משכורת', sum: 9000, count: 3, months: 3 }],
+      [{ name: 'בעל', monthly: 12000 }], 3)
+    expect(s.declaredCovered).toBe(false)
+    expect(formatDepositSplit(s, 3).join('\n')).not.toContain('אל תוסיף אף שורה')
+  })
+})
+
+// Ori, 2026-08-17: "אולי אם הייתי רושם איפה נמצא כל נכס המערכת הייתה מצליחה
+// לזהות?" — she would, and this is the code that does it. His run produced
+// ELEVEN savings rows for a handful of real products: five with a contribution
+// and no balance (built from bank descriptors, which name the provider) and six
+// with a balance and no contribution (built from the questionnaire, which did
+// not). Nothing could join them.
+describe('linkDepositsToProducts', () => {
+  const dep = (name: string, monthly: number) => ({
+    key: name, name, category: 'השקעות', monthly, total: monthly * 3,
+    months: 3, charges: 3, recurring: true,
+  })
+
+  it('joins a declared balance to the charge that feeds it, via the provider', () => {
+    const links = linkDepositsToProducts(
+      [dep('קניה/( קסם אקטיב/טלפון ני', 1832)],
+      [{ name: 'קרן השתלמות', provider: 'קסם אקטיב', amount: 14500 }],
+    )
+    expect(links[0].product?.name).toBe('קרן השתלמות')
+  })
+
+  // 🔴 The names never agree — a person writes "קרן השתלמות" and the bank writes
+  // "קסם אקטיב". Matching on the product name finds nothing, every time.
+  it('matches on the provider, never on the product name', () => {
+    const links = linkDepositsToProducts(
+      [dep('קניה/( קסם אקטיב/טלפון ני', 1832)],
+      [{ name: 'קרן השתלמות', provider: '', amount: 14500 }],
+    )
+    expect(links[0].product).toBeNull()
+  })
+
+  it('leaves a charge unmatched rather than guessing', () => {
+    const links = linkDepositsToProducts(
+      [dep('קניה/אלטשולר שחם/טלפון ני', 2570)],
+      [{ name: 'קרן פנסיה', provider: 'מגדל', amount: 56000 }],
+    )
+    expect(links[0].product).toBeNull()
+    expect(formatProductLinks(links)).toEqual([])
+  })
+
+  it('tells the model the pair is ONE row, not two', () => {
+    const text = formatProductLinks(linkDepositsToProducts(
+      [dep('העברה/אקסלנס ניה/OD', 2773)],
+      [{ name: 'תיק שוק ההון', provider: 'אקסלנס', amount: 200000 }],
+    )).join('\n')
+    expect(text).toContain('אל תיצור שתי שורות')
+    expect(text).toContain('200000')
+    expect(text).toContain('2773')
+  })
+
+  // A two-character provider would match half the statement by substring.
+  it('ignores a provider too short to identify anything', () => {
+    const links = linkDepositsToProducts(
+      [dep('קניה/( קסם אקטיב/טלפון ני', 1832)],
+      [{ name: 'משהו', provider: 'קס', amount: 100 }],
+    )
+    expect(links[0].product).toBeNull()
   })
 })

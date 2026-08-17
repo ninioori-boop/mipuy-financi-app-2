@@ -136,7 +136,15 @@ export const LAB_QUESTIONS: LabQuestion[] = [
     hint:     'שורה לכל מוצר. אין צורך להעלות דוח.',
     addLabel: 'הוסף מוצר',
     columns: [
-      { key: 'name',       label: 'שם המוצר והחברה',        placeholder: 'קרן השתלמות — מנורה' },
+      { key: 'name',       label: 'שם המוצר',               placeholder: 'קרן השתלמות' },
+      // 🔴 The field that turns a guess into a match (Ori, 2026-08-17: "אולי אם
+      // הייתי רושם איפה נמצא כל נכס המערכת הייתה מצליחה לזהות?"). She would.
+      // On his own run the bank showed five recurring purchases naming their
+      // provider — קסם אקטיב, אלטשולר שחם, מגדל, אקסלנס — while the declared
+      // products named none, so nothing could be linked: the mapping showed
+      // three funds with a balance and no contribution, alongside five
+      // contributions with no balance, for the same money.
+      { key: 'provider',   label: 'איפה הוא מנוהל?',        placeholder: 'מגדל / אלטשולר שחם / קסם' },
       { key: 'amount',     label: 'כמה צבור בו?',           kind: 'money' },
       // Two fields and not one: הר הכסף states both, the mapping has a column
       // for each, and a single blended number lands in the wrong one about half
@@ -154,10 +162,11 @@ export const LAB_QUESTIONS: LabQuestion[] = [
     hint:     'תיק השקעות בבנק, תיק מסחר עצמאי, קרן כספית, פיקדון, מטבעות דיגיטליים, נדל"ן. סכום אחד לכל נכס, לא פירוט אחזקות.',
     addLabel: 'הוסף נכס',
     columns: [
-      { key: 'name',   label: 'שם הנכס',  placeholder: 'תיק השקעות בבנק' },
-      { key: 'amount', label: 'מה השווי?', kind: 'money' },
-      { key: 'detail', label: 'פירוט',    kind: 'detail',
-        placeholder: 'מתי נרכש, באיזה מחיר, אם יש עליו משכנתה, איפה הוא מנוהל' },
+      { key: 'name',     label: 'שם הנכס',        placeholder: 'תיק השקעות בבנק' },
+      { key: 'provider', label: 'איפה הוא מנוהל?', placeholder: 'אקסלנס / קסם אקטיב / בנק הפועלים' },
+      { key: 'amount',   label: 'מה השווי?',       kind: 'money' },
+      { key: 'detail',   label: 'פירוט',          kind: 'detail',
+        placeholder: 'מתי נרכש, באיזה מחיר, אם יש עליו משכנתה' },
     ] },
 ]
 

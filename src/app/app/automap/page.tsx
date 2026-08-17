@@ -33,11 +33,12 @@ import { buildRun } from '@/lib/automapFixture'
 import {
   loadIntakeAnswers, listIntakeDocs, intakeFileUrl, routeForQuestion,
   formatIntakeAnswers, formatIntakeDocs, formatIntakeRows, declaredMonthlyIncome,
-  declaredIncomeRows,
+  declaredIncomeRows, parseTypedNumber,
   countAnswered, type IntakeDoc, type IntakeRoute,
 } from '@/lib/automapIntake'
 import {
   detectSavingsDeposits, formatSavingsDeposits, classifyDeposits, formatDepositSplit,
+  linkDepositsToProducts, formatProductLinks,
 } from '@/lib/automapFlows'
 import { useImpersonationStore } from '@/stores/impersonationStore'
 import { categorize } from '@/lib/categorize'
@@ -648,6 +649,21 @@ export default function AutoMapPage() {
     [incomeLines, intakeRows, detectedMonths, reportMonths],
   )
 
+  // Every product the client said they hold, WITH where it is held — the column
+  // that lets a bank descriptor naming a provider be matched to a declared
+  // balance. Both frames feed it: a קרן השתלמות and a trading account are the
+  // same question as far as "which charge feeds this" is concerned.
+  const declaredProducts = useMemo(() => {
+    const rows = [...(intakeRows.harHaKesefProducts ?? []), ...(intakeRows.assets ?? [])]
+    return rows
+      .map(r => ({
+        name:     (r.name ?? '').trim(),
+        provider: (r.provider ?? '').trim(),
+        amount:   parseTypedNumber(r.amount) ?? 0,
+      }))
+      .filter(p => p.name || p.amount)
+  }, [intakeRows])
+
   // Large charges that appeared exactly once. Suspicious for annual, never
   // assumed to be — a new sofa and a yearly insurance premium look identical
   // from the data alone, so this only raises the question.
@@ -993,6 +1009,10 @@ ${d.data}` })
     if (savingsFlow.deposits.length) {
       lines.push('== הפקדות לחיסכון והשקעות שיצאו מהחשבון ==')
       lines.push(...formatSavingsDeposits(savingsFlow, reportMonths))
+      // The pairing the "where is it held" column makes possible: a declared
+      // balance and an observed contribution that are the same product.
+      const linked = formatProductLinks(linkDepositsToProducts(savingsFlow.deposits, declaredProducts))
+      if (linked.length) { lines.push(''); lines.push(...linked) }
       lines.push('')
     }
     if (annualItems.length) {
