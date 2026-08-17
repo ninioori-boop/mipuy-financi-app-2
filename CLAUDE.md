@@ -58,7 +58,11 @@
 
 **גודל, כדי לכייל ציפיות:** בערך 44k שורות TypeScript, 20 סטורים, 37 מסכים,
 14 API routes (ועוד שני route handlers: `/go/[slug]` לקישורים קצרים
-ו-`/manifest.webmanifest`), 580 טסטים ב-45 קבצים.
+ו-`/manifest.webmanifest`), **928 טסטים ב-62 קבצים** (נמדד 17/08/2026).
+
+⚠️ מספר הטסטים בקובץ הזה היה 472, אחר כך 580, והאמת ביום המדידה היא 928. הוא לא
+"זז לאט" כמו שסעיף 0 מבטיח, אז אל תסמוך עליו: `npx vitest run` מדפיס את המספר
+האמיתי בשורה האחרונה של הפלט.
 
 **שלוש כתובות חיות, אל תבלבל ביניהן:**
 
@@ -80,9 +84,25 @@
 - **Firebase 12** (Auth + Firestore) + **firebase-admin 13** בצד השרת
 - **xlsx@0.18.5** ל-Excel. 🔒 **אל תשדרג**, 0.20+ דורש רישיון מסחרי
 - **Recharts 3** לגרפים, **@react-pdf/renderer** לייצוא PDF
-- **Anthropic API**, המודל בשימוש כרגע: `claude-sonnet-4-6`, מקובע ב-7 מקומות
-  (5 מסלולי ה-API, `src/lib/aiCategorize.ts`, ו-`functions/index.js`). שדרוג מודל
-  חייב לגעת בכולם, אחרת חצי מהמערכת נשארת מאחור.
+- **Anthropic API. ⚠️ אין "המודל בשימוש", יש שלושה** (נמדד 17/08/2026). מי שיחפש
+  מחרוזת אחת וישדרג אותה ישאיר שני שלישים מהמערכת מאחור, וזה בדיוק מה שקרה כאן:
+  | מודל | איפה | כמה |
+  |------|------|-----|
+  | `claude-sonnet-4-6` | 5 מסלולי ה-API (`analyze`, `automap`, `bank-statement`, `categorize`, `credit-statement`) + `src/lib/aiCategorize.ts` + `functions/index.js` | 7 |
+  | `claude-sonnet-5` | `functions/clientBot.js` — נתב הכוונות של בוט הוואטסאפ | 1 |
+  | `claude-opus-4-8` | `functions/clientBot.js` (מענה על שאלות) + `functions/goalBot.js` | 2 |
+
+  הפקודה שמייצרת את האמת, במקום לסמוך על הרשימה הזאת:
+  ```bash
+  grep -rnoE "claude-(sonnet|opus|haiku|fable)-[0-9a-z.-]*" src functions \
+    --include=*.ts --include=*.tsx --include=*.js | grep -v node_modules
+  ```
+  ⚠️ בלי `grep -v node_modules` תקבל עשרות תוצאות מתוך ה-SDK ותחשוב שהמערכת
+  מקובעת על מודלים שהיא לא נוגעת בהם.
+  🔴 **ל-`claude-sonnet-5` יש הבדל התנהגותי שאין ל-4.6:** השמטת `thinking` פירושה
+  adaptive **דלוק**, ו-`effort` מוגדר `high` כברירת מחדל. כלומר קריאה שהועברה מ-4.6
+  ל-5 בלי לגעת בשדות האלה מתחילה לחשוב על כל בקשה, וגם צורכת מתוך אותו `max_tokens`
+  של הפלט. ב-`clientBot.js` זה טופל במפורש עם `effort: "medium"`.
 - **Vercel** לפריסה, **GitHub Actions** ל-CI
 
 ---
@@ -224,7 +244,7 @@
 ```bash
 npm run dev            # פיתוח מקומי → localhost:3000
 npm run build          # אם עובר, אין שגיאות TypeScript
-npm test               # 472 טסטים
+npm test               # 928 טסטים (17/08/2026) — הפלט עצמו הוא המספר המעודכן
 npm run health         # בדיקת מצב המערכת, קריאה בלבד
 npm run report:funnel  # דוח AARRR
 npm run test:rules     # טסטי firestore.rules מול האמולטור (דורש Java)
