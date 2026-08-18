@@ -289,11 +289,18 @@ export default function ConnectPage() {
           >
             התחבר עם Google
           </button>
+          {/* The old copy here warned that Google sign-in "sometimes gets stuck"
+              on iPhone and steered clients to set a password instead. That was
+              true until 2026-08-18 — the handler lived on another origin and
+              Safari stranded the user on a blank page. It is fixed (same-origin
+              /__/auth/* + signInWithRedirect), so the warning is now both false
+              and a bad thing for an App Review reviewer to be reading on the
+              screen they were sent to. The password escape hatch stays, one line
+              up, because it is genuinely useful to anyone who wants it. */}
           {isIOS && (
             <p className="mt-2 text-xs text-muted-txt leading-relaxed">
-              נרשמת עם Google? באייפון הכניסה עם Google עובדת רק בדפדפן ספארי
-              רגיל, וגם שם לפעמים נתקעת. אם זה קורה: הקש על «שכחתי סיסמה», קבע
-              סיסמה דרך הקישור שיגיע למייל, והתחבר איתה כאן.
+              אין לך סיסמה כי נרשמת עם Google? אפשר גם להיכנס כאן עם Google, וגם
+              לקבוע סיסמה דרך «שכחתי סיסמה» ולהשתמש בה מכאן והלאה.
             </p>
           )}
         </div>
