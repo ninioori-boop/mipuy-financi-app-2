@@ -5,6 +5,8 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   getIdToken,
   sendPasswordResetEmail,
@@ -140,10 +142,39 @@ export default function ConnectPage() {
     }
   }
 
+  /**
+   * On iPhone, redirect. Everywhere else, popup — unchanged.
+   *
+   * 🔴 The popup is what got 1.0 (21) rejected. It sends Safari to Firebase's
+   * handler, and until 2026-08-18 that lived on a DIFFERENT origin
+   * (<project>.firebaseapp.com), which Safari refuses to let talk back to the
+   * opener: the tab stays blank forever. Apple's reviewer pressed this button,
+   * landed on the white page, and filed 2.1(a) "linked out to the blank page".
+   * The other half of the rejection, guideline 4, came from the workaround —
+   * opening the login page in full Safari so the popup had somewhere to live.
+   *
+   * A redirect needs no second window, so sign-in can go back to living inside
+   * an in-app browser. It only became trustworthy once /__/auth/* was proxied
+   * from our own domain (next.config.ts), because Safari's cross-site rules
+   * break a redirect across origins just as thoroughly as a popup.
+   *
+   * Desktop keeps the popup deliberately: it works today, it is the nicer
+   * experience, and this is the sign-in path of every client — the change is
+   * scoped to the platform that is actually broken.
+   */
   async function signInGoogle() {
     setError('')
+    const provider = new GoogleAuthProvider()
+    if (isIOS || isNativeApp) {
+      try {
+        await signInWithRedirect(auth, provider)
+      } catch {
+        setError('ההתחברות עם Google נכשלה. אפשר להיכנס עם מייל וסיסמה')
+      }
+      return
+    }
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
+      await signInWithPopup(auth, provider)
     } catch (e) {
       const code = (e as { code?: string }).code
       if (code !== 'auth/cancelled-popup-request' && code !== 'auth/popup-closed-by-user') {
