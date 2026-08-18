@@ -55,6 +55,24 @@ export function NotInvitedScreen({ user, onRecheck }: {
           הכתובת שאליה נשלחה ההזמנה, ואם היא נכונה, לפנות ליועץ שלכם.
         </p>
 
+        {/* English, for the one visitor who cannot read the three lines above.
+            An App Store reviewer who signs in with their OWN Google account
+            lands here — and until 2026-08-18 saw a padlock, Hebrew they could
+            not read, and two Hebrew buttons, which reads as a broken app and
+            files as guideline 2.1. It nearly happened already: the last reviewer
+            was told in writing not to use the Google button and used it anyway.
+            Harmless to clients, decisive for that one person. */}
+        <p dir="ltr" className="text-xs text-muted-txt leading-relaxed border-t border-line pt-3">
+          Access to The Home Economist is by invitation. Accounts are provisioned
+          by the financial coach who works with each client, so a personal Google
+          account will not have access.
+          <br />
+          <span className="text-txt">
+            Reviewing this app? Choose “כניסה עם חשבון אחר” below and sign in with
+            the credentials supplied in App Review Information.
+          </span>
+        </p>
+
         {stillNot && <p className="text-expense text-xs">עדיין לא מופיע ברשימה</p>}
 
         <div className="space-y-2">
